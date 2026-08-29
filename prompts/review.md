@@ -43,6 +43,9 @@ $bounce_section
    entry; justified only when the description's `Dependencies` section
    explains it.
 7. Apply the checklist below. Style that a linter can check is not your job.
+   The acceptance tests you write in this review are the tests for this
+   change: the checklist item "behaviour changes have tests" is satisfied
+   by them, so the author not adding tests is at most a `low` finding.
 8. If the description is too unclear to review fairly, put your questions in
    `questions` and set verdict `NEEDS_INFO`. Do not guess.
 9. You may read any file in the repository and run read-only git commands

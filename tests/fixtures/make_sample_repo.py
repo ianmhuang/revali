@@ -96,7 +96,7 @@ Added `mul(a, b)` to `src/calc.py`.
 The calculator only had add and sub.
 
 ## Goal
-`mul` multiplies two numbers and is covered by tests.
+`mul` multiplies two integers.
 
 ## Acceptance criteria
 - AC-1: mul(a, b) returns the product of a and b for integers

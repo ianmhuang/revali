@@ -45,7 +45,7 @@ def _print_stop(stop: Stop) -> None:
 # ---- run --------------------------------------------------------------------
 
 def cmd_run(args) -> int:
-    if args.foreground:
+    if args.foreground or args.dry_run:  # a dry run spawns nothing, not even itself
         return _run_foreground(args)
     return _run_detached(args)
 
@@ -167,6 +167,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         msg = ("dry run: would push %s, open a draft PR against %s, run reviewer %s (round %d), "
                "then stop" % (ctx.branch, ctx.base, ctx.cfg.review.model, len(state.rounds) + 1))
         log.stage("run", msg)
+        state.set_stage(rdir, "preflight", msg, EXIT_OK)
         print("DRY RUN OK: " + msg)
         return EXIT_OK
 
@@ -230,7 +231,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     if not state.test_files and ctx.doc.kind in ("feature", "fix"):
         flags.append("no runnable tests were written")
     print("READY TO MERGE: %s (PR %s)\n  review rounds: %d, fix cycles: %d, validation: %s%s\n"
-          "  tests landing: %s\n  cost: $%.2f, models: %s\n  merge with: revali merge (not implemented yet); "
+          "  tests landing: %s\n  cost: $%.2f, models: %s\n  merge with: revali merge; "
           "the PR is no longer a draft%s"
           % (ctx.doc.title, state.pr_url or "#%d" % state.pr_number, len(state.rounds), state.fixes,
              vout.result, " (%s)" % vout.skipped_reason if vout.skipped_reason else "",
