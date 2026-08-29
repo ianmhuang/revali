@@ -13,8 +13,9 @@ change on a branch and writes `.revali/<branch>/change.md`; revali then:
    diagnoser session only on failure,
 5. stops at READY TO MERGE for a human `revali merge`.
 
-Status: milestone 1 (skeleton, config, preflight, state, CLI). Steps 2-5 are
-not implemented yet; `revali run` stops after preflight.
+Status: milestones 1-3 done (preflight, review, validate). `revali merge` is
+not implemented yet: when a run ends with READY TO MERGE, merge the PR by hand
+(`gh pr merge --squash --delete-branch`) and `revali clean <branch>`.
 
 ## Requirements
 
@@ -29,6 +30,30 @@ python <path-to>/revali.py preflight        # checks only, changes nothing
 python <path-to>/revali.py run              # detached; then:
 python <path-to>/revali.py wait --timeout 9m
 python <path-to>/revali.py status | stop | reset | clean <branch> | version
+```
+
+What a run does, in order: preflight (including the existing suite in the
+sandbox as a baseline), push + draft PR, reviewer round (`claude -p` with the
+diff, change.md, and the checklist; writes tests into `test_dir`; the script
+checks AC coverage, smoke-runs the new tests, commits them), validation
+(existing suite + new tests in the sandbox; a diagnoser session only on
+failure), then READY TO MERGE. Every result lands in `.revali/<branch>/`
+(`review-<n>.md`, `tests.md`, `diagnose-<n>.json`, `logs/`) and as PR comments.
+
+After exit code 2 the author fixes or answers in
+`.revali/<branch>/response-<n>.md` (`- F1: fixed` / `- F1: wontfix: <reason>`),
+commits, and runs again; each such cycle counts against `review.max_fixes`.
+
+## Sandbox
+
+`[validate.linux] runner = "wsl"` clones the branch into the WSL distro's own
+filesystem (`~/.revali/sandbox/<repo>/<label>/`), runs `setup`, `build`,
+`test`, `new_test` there with a per-step timeout, copies the logs back, and
+deletes the clone. The distro needs git and whatever `setup` installs; on
+Ubuntu 24.04 that means `python3-venv` and `python3-pip` for a Python project.
+`runner = "local"` uses a git worktree on the host with no isolation.
+
+```
 ```
 
 Exit codes: `0` done / ready to merge, `1` pipeline error (not a verdict),

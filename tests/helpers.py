@@ -108,27 +108,6 @@ class RepoCase(unittest.TestCase):
         os.environ.update(self._env_backup)
         rmtree_force(self.tmp)
 
-
-def rmtree_force(path):
-    """rmtree that copes with read-only files (git objects on Windows)."""
-    import stat
-
-    def _onexc(func, p, exc):
-        try:
-            os.chmod(p, stat.S_IWRITE)
-            func(p)
-        except OSError:
-            pass
-
-    if not os.path.isdir(path):
-        return
-    try:
-        shutil.rmtree(path, onexc=_onexc)
-    except TypeError:  # Python < 3.12
-        shutil.rmtree(path, onerror=lambda f, p, e: _onexc(f, p, e[1]))
-    except OSError:
-        pass
-
     def scenario(self, data):
         """Merge into the gh/claude scenario file; resets the claude answer cursor."""
         self._scenario.update(data)
@@ -200,3 +179,28 @@ def run_cli(argv):
     with captured() as out:
         code = main(argv)
     return code, out.getvalue()
+
+
+def rmtree_force(path):
+    """rmtree that copes with read-only files (git objects on Windows)."""
+    import stat
+
+    def _onexc(func, p, exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+
+    import time
+    for attempt in range(4):  # a detached child may still hold the directory briefly
+        if not os.path.isdir(path):
+            return
+        try:
+            shutil.rmtree(path, onexc=_onexc)
+        except TypeError:  # Python < 3.12
+            shutil.rmtree(path, onerror=lambda f, p, e: _onexc(f, p, e[1]))
+        except OSError:
+            pass
+        if os.path.isdir(path):
+            time.sleep(0.5 * (attempt + 1))

@@ -16,13 +16,13 @@ class CliTests(RepoCase):
         self.assertEqual(code, EXIT_OK)
         self.assertIn(VERSION, out)
 
-    def test_run_foreground_stops_after_review(self):
+    def test_run_foreground_full_pipeline(self):
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_ERROR, out)
-        self.assertIn("validate stage is not implemented", out)
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("READY TO MERGE", out)
         state = State.load(self.rdir())
-        self.assertEqual(state.stage, "validate")
+        self.assertEqual(state.stage, "ready_to_merge")
         self.assertEqual(state.branch, "feature/mul")
         self.assertTrue(state.head_sha)
         self.assertIsNone(lock_owner_alive(self.rdir()))
@@ -45,7 +45,7 @@ class CliTests(RepoCase):
         run_cli(["run", "--foreground"])
         os.makedirs(os.path.join(self.repo, ".revali", "gone__branch"))
         code, out = run_cli(["status"])
-        self.assertIn("stage: validate", out)
+        self.assertIn("stage: ready_to_merge", out)
         self.assertIn("gone__branch", out)
 
     def test_reset_and_clean(self):
@@ -72,8 +72,8 @@ class CliTests(RepoCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("started revali run", out)
         code, out = run_cli(["wait", "--timeout", "90s"])
-        self.assertEqual(code, EXIT_ERROR, out)   # validate stage arrives in milestone 3
-        self.assertIn("not implemented", out)
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("validation 1 passed", out)
         self.assertIsNone(lock_owner_alive(self.rdir()))
         self.assertTrue(os.path.isfile(os.path.join(self.rdir(), "logs", "run.log")))
 

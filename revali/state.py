@@ -48,6 +48,7 @@ class State:
     head_sha: str = ""
     base_sha: str = ""
     rounds: List[dict] = field(default_factory=list)   # per round: head_sha, base_sha, verdict, model
+    validations: List[dict] = field(default_factory=list)  # per validation run: result, failed_step, cause
     test_commits: List[str] = field(default_factory=list)
     test_files: List[str] = field(default_factory=list)
     cost_usd: float = 0.0

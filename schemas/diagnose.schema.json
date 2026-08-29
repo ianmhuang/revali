@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "cause", "failures", "recommendation"],
+  "properties": {
+    "summary": {"type": "string", "description": "Two to four sentences: what failed and why."},
+    "cause": {
+      "type": "string",
+      "enum": ["code", "test", "env", "unknown"],
+      "description": "Overall: the change is wrong (code), the reviewer's test is wrong (test), the sandbox is at fault (env)."
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["test", "cause", "note"],
+        "properties": {
+          "test": {"type": "string", "description": "test id or file::name as printed by the runner"},
+          "cause": {"type": "string", "enum": ["code", "test", "env", "unknown"]},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "recommendation": {"type": "string", "description": "What the author should change, concretely."}
+  }
+}

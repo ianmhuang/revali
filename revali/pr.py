@@ -112,6 +112,16 @@ def update_body(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) ->
         log.stage("pr", "warning: could not update the PR body: %s" % res.text.strip()[:200])
 
 
+def mark_ready(ctx: Context, state: State, log: Optional[RunLog]) -> None:
+    """Draft -> ready for review, once validation passed."""
+    if ctx.dry_run or not state.pr_number:
+        return
+    res = run_retry(resolve("gh") + ["pr", "ready", str(state.pr_number)], cwd=ctx.repo_root, log=_log(log), timeout=120)
+    if log:
+        log.stage("pr", "PR #%d marked ready" % state.pr_number if res.ok
+                  else "warning: gh pr ready failed: %s" % res.text.strip()[:200])
+
+
 def post_comment(ctx: Context, state: State, rdir: str, name: str, body: str, log: Optional[RunLog]) -> bool:
     """Post a comment after a credential scan. Returns True when posted."""
     if ctx.dry_run or not state.pr_number:

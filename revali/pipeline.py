@@ -152,8 +152,11 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
 def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     from revali import pr as prstage
     from revali import review
+    from revali import validate
 
-    ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log)
+    first_pass = not state.rounds and not args.dry_run
+    baseline_hook = (lambda ctx: validate.baseline(ctx, rdir, log)) if first_pass else None
+    ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log, baseline=baseline_hook)
     _rerun_bookkeeping(ctx, state, rdir, log)
     state.branch, state.base = ctx.branch, ctx.base
     state.head_sha, state.base_sha = ctx.head_sha, ctx.base_sha
@@ -202,13 +205,37 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
                  os.path.join(rdir, "response-%d.md" % outcome.round_no), reasons))
         return EXIT_ACTION
 
-    msg = ("review approved (round %d); the validate stage is not implemented yet (milestone 3)"
-           % outcome.round_no)
-    state.set_stage(rdir, "validate", msg, EXIT_ERROR)
+    state.set_stage(rdir, "validate", "review approved in round %d; validating" % outcome.round_no)
     prstage.update_body(ctx, state, rdir, log)
-    _record_history(state, EXIT_ERROR)
-    print("ERROR: " + msg)
-    return EXIT_ERROR
+    vout = validate.run_validation(ctx, state, rdir, log)
+    prstage.post_comment(ctx, state, rdir, "validate-%d" % vout.number, vout.section_md, log)
+
+    if vout.result == validate.FAIL:
+        summary = validate.summary_for_author(vout, rdir)
+        state.set_stage(rdir, "needs_action", "validation %d failed at %s" % (vout.number, vout.failed_step), EXIT_ACTION)
+        prstage.update_body(ctx, state, rdir, log)
+        _record_history(state, EXIT_ACTION)
+        print("ACTION NEEDED: %s\nFix (or correct the test if the diagnosis says the test is wrong, and say so "
+              "in %s), commit, run again." % (summary, os.path.join(rdir, "response-%d.md" % outcome.round_no)))
+        return EXIT_ACTION
+
+    state.set_stage(rdir, "ready_to_merge", "validation %d passed" % vout.number, EXIT_OK)
+    prstage.mark_ready(ctx, state, log)
+    prstage.update_body(ctx, state, rdir, log)
+    _record_history(state, EXIT_OK)
+    flags = []
+    if state.fallback:
+        flags.append("a reviewer round ran on a fallback model")
+    if not state.test_files and ctx.doc.kind in ("feature", "fix"):
+        flags.append("no runnable tests were written")
+    print("READY TO MERGE: %s (PR %s)\n  review rounds: %d, fix cycles: %d, validation: %s%s\n"
+          "  tests landing: %s\n  cost: $%.2f, models: %s\n  merge with: revali merge (not implemented yet); "
+          "the PR is no longer a draft%s"
+          % (ctx.doc.title, state.pr_url or "#%d" % state.pr_number, len(state.rounds), state.fixes,
+             vout.result, " (%s)" % vout.skipped_reason if vout.skipped_reason else "",
+             ", ".join(state.test_files) or "none", state.cost_usd, ", ".join(state.models_used) or "-",
+             "\n  note: " + "; ".join(flags) if flags else ""))
+    return EXIT_OK
 
 
 # ---- preflight --------------------------------------------------------------

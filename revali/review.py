@@ -8,9 +8,10 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from revali import EXIT_ERROR
-from revali import gitops
+from revali import claude, gitops
+from revali.claude import model_family, pick_actual_model  # noqa: F401  (re-exported)
 from revali.preflight import Context, Stop
-from revali.procs import ExeNotFound, ProcTimeout, resolve, run
+from revali.procs import resolve, run
 from revali.runners import RunnerError, get_runner, steps_for
 from revali.state import State, RunLog, now_iso, read_text, write_json_atomic, write_text
 
@@ -26,7 +27,6 @@ MANIFEST_PATTERNS = [
     "Cargo.toml", "Cargo.lock", "go.mod", "go.sum", "CMakeLists.txt", ".gitmodules",
     "conanfile.*", "vcpkg.json", "Gemfile", "Gemfile.lock",
 ]
-HELPER_MODEL_PREFIX = "claude-haiku"
 ALLOWED_TOOLS = "Bash(git diff *) Bash(git log *) Bash(git show *)"
 LIST_FIELDS = ("questions", "findings", "previous_findings", "scope_mismatch", "dependencies_changed",
                "test_changes", "tests", "not_testable", "suggestions")
@@ -184,27 +184,6 @@ def build_prompt(ctx: Context, state: State, rdir: str, round_no: int, bounce_no
 
 # ---- reviewer session -------------------------------------------------------
 
-def model_family(model: str) -> str:
-    m = model.lower()
-    for alias in ("fable", "opus", "sonnet", "haiku"):
-        if m == alias or m.startswith("claude-" + alias):
-            return alias
-    return m
-
-
-def pick_actual_model(model_usage: dict, requested: str) -> Tuple[str, bool]:
-    """The non-helper model that did the work; fallback when it is not the requested family."""
-    candidates = {k: v for k, v in (model_usage or {}).items() if not k.startswith(HELPER_MODEL_PREFIX)}
-    if not candidates:
-        return "", False
-    wanted = model_family(requested)
-    for name in candidates:
-        if model_family(name) == wanted:
-            return name, False
-    best = max(candidates, key=lambda k: float((candidates[k] or {}).get("costUSD", 0) or 0))
-    return best, True
-
-
 def validate_shape(data) -> List[str]:
     problems = []
     if not isinstance(data, dict):
@@ -230,53 +209,22 @@ def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt:
                    log: Optional[RunLog]) -> ReviewerRun:
     cfg = ctx.cfg.review
     requested = (ctx.user_cfg.review_model if ctx.user_cfg and ctx.user_cfg.review_model else cfg.model)
-    schema_text = read_text(SCHEMA_PATH)
-    try:
-        exe = resolve("claude")
-    except ExeNotFound as exc:
-        raise Stop(EXIT_ERROR, str(exc))
-    cmd = exe + [
-        "-p", "--model", requested, "--fallback-model", cfg.fallback_model, "--effort", cfg.effort,
-        "--permission-mode", "acceptEdits", "--allowedTools", ALLOWED_TOOLS,
-        "--json-schema", schema_text, "--output-format", "json",
-        "--max-budget-usd", str(cfg.budget_usd),
-    ]
     raw_path = os.path.join(rdir, "logs", "review-r%d-%d.raw.json" % (round_no, attempt))
     if log:
         log.stage("review", "round %d attempt %d: reviewer %s (budget $%.2f, timeout %d min)"
                   % (round_no, attempt, requested, cfg.budget_usd, cfg.timeout_min))
-    try:
-        res = run(cmd, cwd=ctx.repo_root, timeout=cfg.timeout_min * 60, input_text=prompt,
-                  log=log.detail if log else None)
-    except ProcTimeout:
-        raise Stop(EXIT_ERROR, "reviewer session timed out after %d minutes" % cfg.timeout_min)
-    write_text(raw_path, res.stdout + ("\n--- stderr ---\n" + res.stderr if res.stderr.strip() else ""))
-    try:
-        payload = json.loads(res.stdout)
-    except ValueError:
-        raise Stop(EXIT_ERROR, "reviewer returned invalid JSON (exit %d); raw output saved to %s"
-                   % (res.returncode, raw_path))
-    if not isinstance(payload, dict):
-        raise Stop(EXIT_ERROR, "reviewer output is not a JSON object; saved to %s" % raw_path)
-    if payload.get("is_error") or res.returncode != 0:
-        raise Stop(EXIT_ERROR, "reviewer session failed (exit %d): %s; raw output saved to %s"
-                   % (res.returncode, str(payload.get("result", ""))[:300], raw_path))
-    data = payload.get("structured_output")
-    if data is None:
-        try:
-            data = json.loads(payload.get("result", ""))
-        except (TypeError, ValueError):
-            data = None
-    problems = validate_shape(data)
+    result = claude.invoke(
+        role="reviewer", model=requested, fallback_model=cfg.fallback_model, effort=cfg.effort,
+        schema_text=read_text(SCHEMA_PATH), budget_usd=cfg.budget_usd,
+        extra_args=["--permission-mode", "acceptEdits", "--allowedTools", ALLOWED_TOOLS],
+        prompt=prompt, cwd=ctx.repo_root, timeout_s=cfg.timeout_min * 60, raw_path=raw_path, log=log)
+    problems = validate_shape(result.data)
     if problems:
         raise Stop(EXIT_ERROR, "reviewer output does not match the schema: %s; raw saved to %s"
                    % ("; ".join(problems[:5]), raw_path))
-    actual, fallback = pick_actual_model(payload.get("modelUsage") or {}, requested)
     return ReviewerRun(
-        data=data, raw=res.stdout, model_requested=requested, model_actual=actual or requested,
-        fallback=fallback, cost=float(payload.get("total_cost_usd") or 0.0),
-        denials=list(payload.get("permission_denials") or []),
-        duration_ms=int(payload.get("duration_ms") or 0),
+        data=result.data, raw=result.raw, model_requested=requested, model_actual=result.model_actual,
+        fallback=result.fallback, cost=result.cost, denials=result.denials, duration_ms=result.duration_ms,
     )
 
 
