@@ -117,16 +117,20 @@ class StatsTests(RepoCase):
 
     def test_summarise_empty_and_mixed(self):
         self.assertEqual(summarise([]), "no runs recorded yet")
+        # branch a: rejected, fixed, passed on a fallback model, then merged; rows are cumulative
+        # branch b: passed first try, not merged yet; repo s: gave up
         rows = [
-            {"repo": "r", "stage": "needs_action", "fixes": 0, "rounds": 1, "last_verdict": "CHANGES_REQUESTED", "cost_usd": 0.5},
-            {"repo": "r", "stage": "ready_to_merge", "fixes": 1, "rounds": 2, "last_verdict": "PASS", "cost_usd": 1.0, "fallback": True},
-            {"repo": "r", "stage": "merged", "fixes": 1, "rounds": 2, "last_verdict": "PASS", "cost_usd": 1.0},
-            {"repo": "s", "stage": "needs_human", "fixes": 3, "rounds": 3, "last_verdict": "FAIL", "cost_usd": 3.0},
+            {"repo": "r", "branch": "a", "pr": 1, "stage": "needs_action", "fixes": 0, "rounds": 1, "last_verdict": "CHANGES_REQUESTED", "cost_usd": 0.5},
+            {"repo": "r", "branch": "a", "pr": 1, "stage": "ready_to_merge", "fixes": 1, "rounds": 2, "last_verdict": "PASS", "cost_usd": 1.0, "fallback": True},
+            {"repo": "r", "branch": "a", "pr": 1, "stage": "merged", "fixes": 1, "rounds": 2, "last_verdict": "PASS", "cost_usd": 1.0},
+            {"repo": "r", "branch": "b", "pr": 2, "stage": "ready_to_merge", "fixes": 0, "rounds": 1, "last_verdict": "PASS", "cost_usd": 0.7},
+            {"repo": "s", "branch": "c", "pr": 3, "stage": "needs_human", "fixes": 3, "rounds": 3, "last_verdict": "FAIL", "cost_usd": 3.0},
         ]
         text = summarise(rows)
-        self.assertIn("| r | 3 | 2 | 0/2 | 1 | 0 | 1 | 2.0 |", text)
-        self.assertIn("| s | 1 | 1 | - | 0 | 1 | 0 | 3.0 |", text)
-
+        self.assertIn("history rows: 5, pipelines: 3", text)
+        self.assertIn("| r | 2 | 2 | 1/2 | 1 | 0 | 1 | 1.5 | $1.70 |", text)
+        self.assertIn("| s | 1 | 1 | - | 0 | 1 | 0 | 3.0 | $3.00 |", text)
+        self.assertIn("last verdicts: FAIL 1, PASS 2", text)
 
 if __name__ == "__main__":
     unittest.main()
