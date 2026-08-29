@@ -49,7 +49,9 @@ $bounce_section
 8. If the description is too unclear to review fairly, put your questions in
    `questions` and set verdict `NEEDS_INFO`. Do not guess.
 9. You may read any file in the repository and run read-only git commands
-   (`git diff`, `git log`, `git show`). Do not run the tests. Do not modify
+   (`git diff`, `git log`, `git show`), one plain git command per call: no
+   `cd`, `&&`, or pipes, since anything else is denied by the allowlist.
+   Read files with the Read tool. Do not run the tests. Do not modify
    anything outside `$test_dir/`.
 
 ## Severity
