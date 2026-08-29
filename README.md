@@ -14,8 +14,9 @@ change on a branch and writes `.revali/<branch>/change.md`; revali then:
 5. stops at READY TO MERGE for a human `revali merge`.
 
 Status: v1.0 feature set complete (preflight, review, validate, merge,
-stats). Not yet exercised against real WSL or a real GitHub repository; see
-STATUS.md in the parent directory for what has been verified.
+stats). The WSL runner is verified against a real Ubuntu distro; the full
+pipeline against a real GitHub repository and real reviewer sessions is
+being exercised now.
 
 ## Requirements
 
@@ -103,3 +104,7 @@ python tests/fixtures/make_sample_repo.py "<dir>"   # throwaway sample project
 ```
 
 Tests use a fake `gh` (via `REVALI_GH_CMD`) and real `git` in temp repos.
+
+## License
+
+MIT, see `LICENSE`.
