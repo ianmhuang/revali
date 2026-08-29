@@ -74,7 +74,22 @@ def main(argv):
     if argv[:2] == ["pr", "comment"]:
         return int(sc["comment_exit"])
     if argv[:2] == ["pr", "checks"]:
-        print(json.dumps(sc["checks"]))
+        seq = sc.get("checks_sequence")
+        if seq:
+            idx_path = os.environ.get("REVALI_FAKE_SCENARIO", "") + ".checks_idx"
+            idx = 0
+            if os.path.isfile(idx_path):
+                with open(idx_path, "r", encoding="utf-8") as fh:
+                    idx = int(fh.read().strip() or 0)
+            with open(idx_path, "w", encoding="utf-8") as fh:
+                fh.write(str(idx + 1))
+            checks = seq[min(idx, len(seq) - 1)]
+        else:
+            checks = sc["checks"]
+        if not checks:
+            print("no checks reported on the '%s' branch" % "x", file=sys.stderr)
+            return 1
+        print(json.dumps(checks))
         return 0
     if argv[:2] == ["pr", "edit"]:
         return 0

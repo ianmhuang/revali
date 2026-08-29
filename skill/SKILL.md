@@ -36,7 +36,10 @@ something other than 4. Use the Bash tool's background mode if it has one.
   do what it says, commit, run again. If a question needs the user, ask them.
 - `1` (ERROR): report the message to the user and stop; do not retry blindly.
 - `3` (NEEDS A HUMAN): summarise both sides' reasons to the user and stop.
-- `0`: report "ready to merge" with the summary; the user runs `revali merge`.
+- `0`: report "ready to merge" with the summary (tests landing, rounds, cost).
+  Do not merge. The user runs `python "<revali dir>/revali.py" merge` when they
+  decide to; if they ask you to run it, run it in the foreground and relay the
+  result (it waits for CI checks, so allow up to the configured timeout).
 
 Never use `override`. Do not edit files under `test_dir` that the reviewer
 wrote unless a finding asks for it, and say so in `response-<n>.md`.

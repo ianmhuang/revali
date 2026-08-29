@@ -38,6 +38,7 @@ class State:
     version: int = STATE_VERSION
     revali_version: str = VERSION
     prompt_version: str = PROMPT_VERSION
+    repo: str = ""               # owner/name from gh
     branch: str = ""
     base: str = ""
     stage: str = "preflight"

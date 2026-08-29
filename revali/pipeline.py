@@ -115,7 +115,7 @@ def _record_history(state: State, exit_code: int) -> None:
         path = history_path(None)
     try:
         append_history(path, {
-            "branch": state.branch, "base": state.base, "stage": state.stage, "exit": exit_code,
+            "repo": state.repo, "branch": state.branch, "base": state.base, "stage": state.stage, "exit": exit_code,
             "rounds": len(state.rounds), "fixes": state.fixes, "last_verdict": state.last_verdict,
             "cost_usd": round(state.cost_usd, 4), "models": state.models_used, "fallback": state.fallback,
             "pr": state.pr_number,
@@ -159,6 +159,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log, baseline=baseline_hook)
     _rerun_bookkeeping(ctx, state, rdir, log)
     state.branch, state.base = ctx.branch, ctx.base
+    state.repo = "%s/%s" % (ctx.repo.owner, ctx.repo.name) if ctx.repo else ""
     state.head_sha, state.base_sha = ctx.head_sha, ctx.base_sha
     state.set_stage(rdir, "preflight", "preflight passed")
 
@@ -393,6 +394,43 @@ def cmd_stop(args) -> int:
         state.set_stage(rdir, "stopped", "stopped by user at stage '%s'" % state.stage, EXIT_ERROR)
     print("stopped pid %d" % pid)
     return EXIT_OK
+
+
+def cmd_merge(args) -> int:
+    from revali import merge
+    cwd = os.getcwd()
+    rdir = _rdir_for(cwd)
+    if not rdir:
+        print("ERROR: not inside a git repository")
+        return EXIT_ERROR
+    state = State.load(rdir)
+    if state is None or state.stage != "ready_to_merge":
+        print("ERROR: this branch is not ready to merge (stage: %s); run `revali run` first"
+              % (state.stage if state else "none"))
+        return EXIT_ERROR
+    if lock_owner_alive(rdir):
+        print("ERROR: a run is in progress")
+        return EXIT_ERROR
+    acquire_lock(rdir)
+    log = RunLog(rdir, verbose=args.verbose)
+    try:
+        code = merge.do_merge(cwd, rdir, state, log)
+    except Stop as stop:
+        _print_stop(stop)
+        if stop.exit_code != EXIT_ACTION:
+            state.message = stop.message
+            state.save(rdir)
+        release_lock(rdir)
+        _record_history(state, stop.exit_code)
+        return stop.exit_code
+    release_lock(rdir)
+    _record_history(state, code)
+    print(merge.merge_summary(state, state.base))
+    root = gitops.repo_root(cwd)
+    if root:
+        merge.remove_tree(review_dir(root, state.branch))
+        print("  removed .revali/%s/" % safe_branch(state.branch))
+    return code
 
 
 def cmd_version(args) -> int:

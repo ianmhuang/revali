@@ -42,9 +42,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_stop = sub.add_parser("stop", help="kill the running pipeline for the current branch")
     p_stop.set_defaults(func=pipeline.cmd_stop)
 
+    p_merge = sub.add_parser("merge", help="merge the PR of the current branch (only after READY TO MERGE)")
+    p_merge.set_defaults(func=pipeline.cmd_merge)
+
+    p_stats = sub.add_parser("stats", help="summarise ~/.revali/history.jsonl")
+    p_stats.set_defaults(func=_cmd_stats)
+
     p_ver = sub.add_parser("version", help="print the version")
     p_ver.set_defaults(func=pipeline.cmd_version)
     return parser
+
+
+def _cmd_stats(args) -> int:
+    from revali.stats import cmd_stats
+    return cmd_stats(args)
 
 
 def main(argv=None) -> int:

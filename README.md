@@ -13,9 +13,9 @@ change on a branch and writes `.revali/<branch>/change.md`; revali then:
    diagnoser session only on failure,
 5. stops at READY TO MERGE for a human `revali merge`.
 
-Status: milestones 1-3 done (preflight, review, validate). `revali merge` is
-not implemented yet: when a run ends with READY TO MERGE, merge the PR by hand
-(`gh pr merge --squash --delete-branch`) and `revali clean <branch>`.
+Status: v1.0 feature set complete (preflight, review, validate, merge,
+stats). Not yet exercised against real WSL or a real GitHub repository; see
+STATUS.md in the parent directory for what has been verified.
 
 ## Requirements
 
@@ -29,7 +29,8 @@ not implemented yet: when a run ends with READY TO MERGE, merge the PR by hand
 python <path-to>/revali.py preflight        # checks only, changes nothing
 python <path-to>/revali.py run              # detached; then:
 python <path-to>/revali.py wait --timeout 9m
-python <path-to>/revali.py status | stop | reset | clean <branch> | version
+python <path-to>/revali.py merge            # only after READY TO MERGE; waits for CI
+python <path-to>/revali.py status | stop | reset | clean <branch> | stats | version
 ```
 
 What a run does, in order: preflight (including the existing suite in the
@@ -83,9 +84,11 @@ stated.
 - commits the reviewer's test files into `test_dir`, with a
   `Co-Authored-By: Claude` trailer
 - posts review and validation results as PR comments
-- on `revali merge`: `gh pr merge --squash --delete-branch`, which also deletes
-  the local branch and checks out the base branch; then deletes
-  `.revali/<branch>/`
+- on `revali merge` (human-started, refused unless the last run ended READY
+  TO MERGE and HEAD has not moved): waits for CI checks if the PR has any,
+  then `gh pr merge --<method> --delete-branch`, which also deletes the
+  local branch and checks out the base branch; then `git pull --prune` and
+  deletion of `.revali/<branch>/`
 - on resume after `stop`, may delete untracked files matching
   `test_file_pattern` left behind by an interrupted reviewer
 
