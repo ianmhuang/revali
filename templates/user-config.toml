@@ -1,0 +1,12 @@
+# ~/.revali/config.toml (or $REVALI_HOME/config.toml). Every key is optional.
+
+# Your personal review checklist, prepended to every project's CONVENTIONS.md.
+# Relative paths resolve against ~/.revali/.
+checklist = ""
+
+# Where run records are appended (default ~/.revali/history.jsonl).
+history_path = ""
+
+# Default models when a project does not set them (reserved).
+review_model = ""
+validate_model = ""

@@ -1,0 +1,49 @@
+# revali project configuration. Copy to the repo root as revali.toml.
+# Every command runs through the platform shell from the repo root
+# (or from the sandbox clone for the [validate.*] tables).
+
+[project]
+config_version = 1
+base_branch = "main"              # empty = the repo's default branch (via gh)
+platforms = ["linux"]             # v1.0 supports linux only
+lint = ""                         # e.g. "ruff check . && black --check ."; failure blocks review
+test_dir = "tests"
+test_file_pattern = "test_review_{topic}.py"
+test_guide = ""                   # optional doc telling the reviewer how tests are added
+change_source = "manual"          # v1.0: manual only
+context_files = []                # reserved (v1.x)
+
+[review]
+engine = "prompt"                 # v1.0: prompt only
+model = "fable"
+fallback_model = "opus,sonnet"
+effort = "high"
+max_fixes = 2                     # fix cycles the author may make before a human is asked
+max_diff_lines = 800
+budget_usd = 2.0
+checklist = "CONVENTIONS.md"      # project layer; built-in layer is always prepended
+timeout_min = 20
+exclude = ["*.lock", "dist/**", "vendor/**"]
+security_paths = []               # reserved (v1.x)
+
+[validate]
+model = "opus"
+fallback_model = "sonnet"
+effort = "high"
+budget_usd = 1.0
+
+[validate.linux]
+runner = "wsl"                    # wsl | local
+distro = "Ubuntu"
+network = false                   # reserved (v1.x)
+command_timeout_min = 15
+setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"
+build = ""
+test = ".venv/bin/python -m pytest -q"            # existing suite; may be empty
+new_test = ".venv/bin/python -m pytest -q tests"  # required: how to run test_dir
+
+[merge]
+auto_merge = false                # ignored in v1.0 (always manual)
+method = "squash"
+wait_for_checks = true
+checks_timeout_min = 30
