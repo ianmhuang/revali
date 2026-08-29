@@ -100,23 +100,115 @@ def _run_foreground(args) -> int:
 
 def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     try:
-        ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log)
+        return _stages(args, cwd, rdir, state, log)
     except Stop as stop:
         _print_stop(stop)
         state.set_stage(rdir, STAGE_FOR_EXIT.get(stop.exit_code, "error"), stop.message, stop.exit_code)
+        _record_history(state, stop.exit_code)
         return stop.exit_code
 
-    state.branch = ctx.branch
-    state.base = ctx.base
-    state.head_sha = ctx.head_sha
-    state.base_sha = ctx.base_sha
-    state.set_stage(rdir, "preflight", "preflight passed", None)
 
-    # Later milestones: pr -> review -> validate -> ready_to_merge.
-    stop = Stop(EXIT_ERROR, "review stage is not implemented in this version; preflight passed")
-    _print_stop(stop)
-    state.set_stage(rdir, "error", stop.message, stop.exit_code)
-    return stop.exit_code
+def _record_history(state: State, exit_code: int) -> None:
+    try:
+        path = history_path(load_user_config())
+    except ConfigError:
+        path = history_path(None)
+    try:
+        append_history(path, {
+            "branch": state.branch, "base": state.base, "stage": state.stage, "exit": exit_code,
+            "rounds": len(state.rounds), "fixes": state.fixes, "last_verdict": state.last_verdict,
+            "cost_usd": round(state.cost_usd, 4), "models": state.models_used, "fallback": state.fallback,
+            "pr": state.pr_number,
+        })
+    except OSError:
+        pass
+
+
+def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
+    """Count fix cycles, detect rewritten history, refuse a rerun with no change."""
+    from revali.review import CHANGES_REQUESTED
+    cfg = ctx.cfg.review
+    if state.rounds:
+        missing = [c for c in state.test_commits if c and not gitops.head_contains(c, ctx.repo_root)]
+        if missing:
+            log.stage("run", "the reviewer's test commits are no longer in HEAD (rebase or reset); "
+                             "the review starts over from round 1")
+            state.rounds, state.test_commits, state.test_files = [], [], []
+            state.fixes, state.needs_info_used, state.last_verdict = 0, False, ""
+            state.force_push = True  # the remote still has the dropped commits
+        elif state.stage == "needs_action":
+            if state.last_verdict in (CHANGES_REQUESTED, "FAIL"):
+                if ctx.head_sha == state.head_sha:
+                    raise Stop(EXIT_ACTION, "nothing changed since the last review (HEAD %s); "
+                                            "fix, commit, then run again" % ctx.head_sha[:10])
+                state.fixes += 1
+                log.stage("run", "fix cycle %d of %d" % (state.fixes, cfg.max_fixes))
+    if state.fixes > cfg.max_fixes:
+        raise Stop(EXIT_HUMAN, "%d fix cycles used (limit %d); a human decides how to proceed. "
+                               "Latest review: %s" % (state.fixes, cfg.max_fixes,
+                                                       os.path.join(rdir, "review-%d.md" % len(state.rounds))))
+
+
+def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
+    from revali import pr as prstage
+    from revali import review
+
+    ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log)
+    _rerun_bookkeeping(ctx, state, rdir, log)
+    state.branch, state.base = ctx.branch, ctx.base
+    state.head_sha, state.base_sha = ctx.head_sha, ctx.base_sha
+    state.set_stage(rdir, "preflight", "preflight passed")
+
+    if args.dry_run:
+        msg = ("dry run: would push %s, open a draft PR against %s, run reviewer %s (round %d), "
+               "then stop" % (ctx.branch, ctx.base, ctx.cfg.review.model, len(state.rounds) + 1))
+        log.stage("run", msg)
+        print("DRY RUN OK: " + msg)
+        return EXIT_OK
+
+    state.set_stage(rdir, "pr", "pushing and opening the PR")
+    prstage.ensure_pr(ctx, state, rdir, log)
+    state.head_sha = ctx.head_sha
+
+    state.set_stage(rdir, "review", "reviewer round %d" % (len(state.rounds) + 1))
+    outcome = review.run_round(ctx, state, rdir, log)
+    if outcome.commit_sha:
+        state.pending_effect = "push"
+        state.save(rdir)
+        res = gitops.push_branch(ctx.branch, ctx.repo_root, log.detail)
+        state.pending_effect = ""
+        if not res.ok:
+            raise Stop(EXIT_ERROR, "git push of the test commit failed: %s" % res.text.strip())
+        state.head_sha = outcome.commit_sha
+    prstage.post_comment(ctx, state, rdir, "review-%d" % outcome.round_no, outcome.review_md, log)
+
+    if outcome.verdict == review.NEEDS_INFO:
+        questions = "\n".join("  - " + q for q in outcome.data.get("questions", []))
+        state.set_stage(rdir, "needs_action", "reviewer needs information", EXIT_ACTION)
+        prstage.update_body(ctx, state, rdir, log)
+        _record_history(state, EXIT_ACTION)
+        print("ACTION NEEDED: the reviewer has questions (round %d). Answer them in %s, adjust "
+              "change.md if the acceptance criteria were unclear, then run again.\n%s"
+              % (outcome.round_no, os.path.join(rdir, "response-%d.md" % outcome.round_no), questions))
+        return EXIT_ACTION
+    if outcome.verdict == review.CHANGES_REQUESTED:
+        reasons = "\n".join("  - " + r for r in outcome.reasons)
+        state.set_stage(rdir, "needs_action", "changes requested in round %d" % outcome.round_no, EXIT_ACTION)
+        prstage.update_body(ctx, state, rdir, log)
+        _record_history(state, EXIT_ACTION)
+        print("ACTION NEEDED: changes requested (round %d, fix cycle %d of %d). Full review: %s\n"
+              "Fix what blocks, or answer each finding in %s (fixed / wontfix: <reason>), commit, run again.\n%s"
+              % (outcome.round_no, state.fixes, ctx.cfg.review.max_fixes, outcome.review_path,
+                 os.path.join(rdir, "response-%d.md" % outcome.round_no), reasons))
+        return EXIT_ACTION
+
+    msg = ("review approved (round %d); the validate stage is not implemented yet (milestone 3)"
+           % outcome.round_no)
+    state.set_stage(rdir, "validate", msg, EXIT_ERROR)
+    prstage.update_body(ctx, state, rdir, log)
+    _record_history(state, EXIT_ERROR)
+    print("ERROR: " + msg)
+    return EXIT_ERROR
 
 
 # ---- preflight --------------------------------------------------------------

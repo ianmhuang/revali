@@ -1,0 +1,102 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "questions", "findings", "previous_findings", "scope_mismatch",
+               "dependencies_changed", "test_changes", "tests", "not_testable", "suggestions"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["APPROVE", "CHANGES_REQUESTED", "NEEDS_INFO"]},
+    "summary": {"type": "string", "description": "Three to six sentences: what the change does, whether it meets the acceptance criteria, the main risks."},
+    "questions": {
+      "type": "array",
+      "description": "Questions the author must answer before a fair review is possible. Non-empty only with verdict NEEDS_INFO.",
+      "items": {"type": "string"}
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "file", "line", "severity", "kind", "text", "suggestion"],
+        "properties": {
+          "id": {"type": "string", "description": "F1, F2, ... unique within this review"},
+          "file": {"type": "string"},
+          "line": {"type": "integer", "description": "0 when not tied to a line"},
+          "severity": {"type": "string", "enum": ["high", "medium", "low"]},
+          "kind": {"type": "string", "enum": ["correctness", "convention", "security"]},
+          "text": {"type": "string"},
+          "suggestion": {"type": "string"}
+        }
+      }
+    },
+    "previous_findings": {
+      "type": "array",
+      "description": "One entry per finding from the previous round, when there was one.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "note"],
+        "properties": {
+          "id": {"type": "string"},
+          "status": {"type": "string", "enum": ["resolved", "unresolved", "accepted"]},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "scope_mismatch": {"type": "array", "items": {"type": "string"}},
+    "dependencies_changed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "justified", "reason"],
+        "properties": {
+          "file": {"type": "string"},
+          "justified": {"type": "boolean"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "test_changes": {
+      "type": "array",
+      "description": "One entry per existing test file the diff modifies or deletes.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "justified", "reason"],
+        "properties": {
+          "file": {"type": "string"},
+          "justified": {"type": "boolean"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "description": "The test files you wrote or updated in this round.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "purpose", "covers", "expected"],
+        "properties": {
+          "path": {"type": "string", "description": "repo-relative path inside test_dir"},
+          "purpose": {"type": "string"},
+          "covers": {"type": "array", "items": {"type": "string"}, "description": "AC ids, e.g. [\"AC-1\"]"},
+          "expected": {"type": "string", "description": "input, expected output, and why that follows from the AC"}
+        }
+      }
+    },
+    "not_testable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ac", "reason"],
+        "properties": {
+          "ac": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "suggestions": {"type": "array", "items": {"type": "string"}, "description": "Out-of-scope improvement ideas; never required for this PR."}
+  }
+}

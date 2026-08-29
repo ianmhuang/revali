@@ -10,6 +10,8 @@ from revali.state import (LockHeld, State, acquire_lock, append_history, lock_ow
 class StateTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="revali state ")
+        from tests.helpers import rmtree_force
+        self.addCleanup(rmtree_force, self.tmp)
 
     def test_safe_branch(self):
         self.assertEqual(safe_branch("feature/mul"), "feature__mul")

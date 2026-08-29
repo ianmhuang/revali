@@ -132,8 +132,11 @@ def head_contains(sha: str, cwd: str) -> bool:
     return is_ancestor(sha, "HEAD", cwd)
 
 
-def push_branch(branch: str, cwd: str, log: Logger = None) -> Result:
-    return run_retry(resolve("git") + ["push", "--quiet", "-u", "origin", branch], cwd=cwd, log=log, timeout=300)
+def push_branch(branch: str, cwd: str, log: Logger = None, force: bool = False) -> Result:
+    args = ["push", "--quiet", "-u"]
+    if force:
+        args.append("--force-with-lease")
+    return run_retry(resolve("git") + args + ["origin", branch], cwd=cwd, log=log, timeout=300)
 
 
 def ensure_gitignore(repo: str, entry: str = ".revali/") -> bool:

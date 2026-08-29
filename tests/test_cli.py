@@ -2,7 +2,7 @@ import os
 import time
 import unittest
 
-from tests.helpers import RepoCase, run_cli
+from tests.helpers import RepoCase, claude_entry, run_cli
 from revali import EXIT_ERROR, EXIT_OK, VERSION
 from revali.state import State, review_dir, lock_owner_alive
 
@@ -16,12 +16,13 @@ class CliTests(RepoCase):
         self.assertEqual(code, EXIT_OK)
         self.assertIn(VERSION, out)
 
-    def test_run_foreground_stops_after_preflight(self):
+    def test_run_foreground_stops_after_review(self):
+        self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_ERROR)
-        self.assertIn("not implemented", out)
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("validate stage is not implemented", out)
         state = State.load(self.rdir())
-        self.assertEqual(state.stage, "error")
+        self.assertEqual(state.stage, "validate")
         self.assertEqual(state.branch, "feature/mul")
         self.assertTrue(state.head_sha)
         self.assertIsNone(lock_owner_alive(self.rdir()))
@@ -40,13 +41,15 @@ class CliTests(RepoCase):
         self.assertIn("state: none", out)
 
     def test_status_after_run_and_stale_dirs(self):
+        self.claude(claude_entry())
         run_cli(["run", "--foreground"])
         os.makedirs(os.path.join(self.repo, ".revali", "gone__branch"))
         code, out = run_cli(["status"])
-        self.assertIn("stage: error", out)
+        self.assertIn("stage: validate", out)
         self.assertIn("gone__branch", out)
 
     def test_reset_and_clean(self):
+        self.claude(claude_entry())
         run_cli(["run", "--foreground"])
         code, out = run_cli(["reset"])
         self.assertEqual(code, EXIT_OK)
@@ -64,16 +67,18 @@ class CliTests(RepoCase):
         self.assertIn("no revali run", out)
 
     def test_detached_run_then_wait(self):
+        self.claude(claude_entry())
         code, out = run_cli(["run"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("started revali run", out)
         code, out = run_cli(["wait", "--timeout", "90s"])
-        self.assertEqual(code, EXIT_ERROR, out)   # v1 milestone 1: stops after preflight
+        self.assertEqual(code, EXIT_ERROR, out)   # validate stage arrives in milestone 3
         self.assertIn("not implemented", out)
         self.assertIsNone(lock_owner_alive(self.rdir()))
         self.assertTrue(os.path.isfile(os.path.join(self.rdir(), "logs", "run.log")))
 
     def test_second_run_refused_while_running(self):
+        self.claude(claude_entry())
         code, out = run_cli(["run"])
         self.assertEqual(code, EXIT_OK, out)
         code2, out2 = run_cli(["run"])

@@ -1,6 +1,6 @@
 """Build a tiny Python project as a git repo for revali trials and tests.
 
-    python tests/fixtures/make_sample_repo.py <dir> [--no-remote] [--no-branch]
+    python tests/fixtures/make_sample_repo.py <dir> [--no-remote] [--no-branch] [--local]
 
 Creates: src/calc.py, tests/test_calc.py, revali.toml, CONVENTIONS.md,
 .gitignore, requirements.txt, one commit on main, a bare `origin` remote the
@@ -31,15 +31,17 @@ def mul(a, b):
     return a * b
 '''
 
-TEST_CALC = '''from src.calc import add, sub
+TEST_CALC = '''import unittest
+
+from src.calc import add, sub
 
 
-def test_add():
-    assert add(2, 3) == 5
+class CalcTests(unittest.TestCase):
+    def test_add(self):
+        self.assertEqual(add(2, 3), 5)
 
-
-def test_sub():
-    assert sub(5, 3) == 2
+    def test_sub(self):
+        self.assertEqual(sub(5, 3), 2)
 '''
 
 CONFIG = '''[project]
@@ -61,15 +63,22 @@ model = "opus"
 budget_usd = 0.5
 
 [validate.linux]
-runner = "wsl"
-distro = "Ubuntu"
-setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"
-test = ".venv/bin/python -m pytest -q"
-new_test = ".venv/bin/python -m pytest -q tests"
+%(platform)s
 
 [merge]
 method = "squash"
 '''
+
+PLATFORM_WSL = '''runner = "wsl"
+distro = "Ubuntu"
+setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"
+test = ".venv/bin/python -m pytest -q"
+new_test = ".venv/bin/python -m pytest -q tests"'''
+
+PLATFORM_LOCAL = '''runner = "local"
+setup = ""
+test = "python -m unittest discover -s tests -t . -p \\"test_calc*.py\\""
+new_test = "python -m unittest discover -s tests -t . -p \\"test_review_*.py\\""'''
 
 CHANGE_MD = '''---
 title: Add mul to calc
@@ -111,19 +120,21 @@ def write(path, text):
         fh.write(text)
 
 
-def create(target, with_remote=True, with_branch=True):
+def create(target, with_remote=True, with_branch=True, runner="wsl"):
     target = os.path.abspath(target)
     os.makedirs(target, exist_ok=True)
     git(["init", "-q", "-b", "main"], target)
     git(["config", "user.email", "fixture@example.invalid"], target)
     git(["config", "user.name", "Fixture"], target)
     git(["config", "commit.gpgsign", "false"], target)
+    git(["config", "core.autocrlf", "false"], target)
     write(os.path.join(target, "src", "__init__.py"), "")
     write(os.path.join(target, "src", "calc.py"), CALC)
     write(os.path.join(target, "tests", "__init__.py"), "")
     write(os.path.join(target, "tests", "test_calc.py"), TEST_CALC)
     write(os.path.join(target, "requirements.txt"), "pytest\n")
-    write(os.path.join(target, "revali.toml"), CONFIG)
+    platform = PLATFORM_LOCAL if runner == "local" else PLATFORM_WSL
+    write(os.path.join(target, "revali.toml"), CONFIG % {"platform": platform})
     write(os.path.join(target, ".gitignore"), ".revali/\n.venv/\n__pycache__/\n")
     with open(os.path.join(ROOT, "templates", "CONVENTIONS.md"), "r", encoding="utf-8") as fh:
         write(os.path.join(target, "CONVENTIONS.md"), fh.read())
@@ -151,7 +162,8 @@ def main(argv):
     if not argv or argv[0].startswith("-"):
         print(__doc__)
         return 2
-    info = create(argv[0], with_remote="--no-remote" not in argv, with_branch="--no-branch" not in argv)
+    info = create(argv[0], with_remote="--no-remote" not in argv, with_branch="--no-branch" not in argv,
+                  runner="local" if "--local" in argv else "wsl")
     print("repo: %s" % info["repo"])
     if info["remote"]:
         print("remote: %s" % info["remote"])

@@ -76,6 +76,7 @@ def run(cmd: list, cwd: Optional[str] = None, timeout: Optional[float] = None,
     try:
         proc = subprocess.run(
             [str(c) for c in cmd], cwd=cwd, env=child_env(env), input=input_text,
+            stdin=None if input_text is not None else subprocess.DEVNULL,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
         )

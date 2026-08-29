@@ -55,6 +55,9 @@ class State:
     fallback: bool = False
     no_tests: bool = False
     pending_effect: str = ""     # write-ahead marker for commit/push/comment
+    needs_info_used: bool = False
+    force_push: bool = False     # set after a detected history rewrite; cleared by the next push
+    last_verdict: str = ""       # APPROVE | CHANGES_REQUESTED | NEEDS_INFO | PASS | FAIL
     last_exit: int = -1
     message: str = ""
     started_at: str = ""

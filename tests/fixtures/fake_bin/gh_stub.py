@@ -76,6 +76,8 @@ def main(argv):
     if argv[:2] == ["pr", "checks"]:
         print(json.dumps(sc["checks"]))
         return 0
+    if argv[:2] == ["pr", "edit"]:
+        return 0
     if argv[:2] == ["pr", "ready"]:
         return 0
     if argv[:2] == ["pr", "merge"]:
