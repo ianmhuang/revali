@@ -18,7 +18,10 @@ class SshConfigTests(RepoCase):
 
     def platform_table(self, body):
         """Replace the fixture's wsl lines of [validate.linux] with `body` and commit."""
-        before = self.read("revali.toml")
+        # replace on the pristine fixture so a test may call this more than once
+        if not hasattr(self, "_pristine_toml"):
+            self._pristine_toml = self.read("revali.toml")
+        before = self._pristine_toml
         after = before.replace('runner = "wsl"\ndistro = "Ubuntu"\n', body)
         self.assertNotEqual(before, after, "fixture platform table not found")
         self.write("revali.toml", after)

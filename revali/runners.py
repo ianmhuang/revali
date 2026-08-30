@@ -24,6 +24,11 @@ FAKE_ENV = "REVALI_FAKE_RUNNER"
 # no password or host-key prompts: a prompt would hang the pipeline
 SSH_OPTS = ["-o", "BatchMode=yes"]
 SSH_PROBE = "git --version && command -v timeout && command -v bash"
+# safety margins on top of the configured timeouts (not tunables): a short remote
+# command beyond its connect time, the remote session beyond its steps, one git bundle
+SHORT_MARGIN_S = 60
+SESSION_MARGIN_S = 300
+BUNDLE_TIMEOUT_S = 300
 
 
 class RunnerError(Exception):
@@ -378,7 +383,7 @@ class SshRunner(Runner):
 
     def _short(self) -> float:
         """Budget for a call that only connects and runs a trivial command."""
-        return max(self.plat.connect_timeout_s, 0) + 60
+        return max(self.plat.connect_timeout_s, 0) + SHORT_MARGIN_S
 
     def _failure(self, what: str, res) -> str:
         return "ssh: %s host '%s' (exit %d): %s" % (what, self.host, res.returncode,
@@ -400,7 +405,7 @@ class SshRunner(Runner):
         bundle_path = os.path.join(logs_dir, bundle)
         # --all: a bare sha has no ref name and git refuses to bundle it; the script checks out `ref`
         res = run(resolve("git") + ["bundle", "create", "--quiet", bundle_path, "--all"], cwd=repo_root,
-                  timeout=300, log=log)
+                  timeout=BUNDLE_TIMEOUT_S, log=log)
         if not res.ok:
             shutil.rmtree(extra_dir, ignore_errors=True)
             raise RunnerError("git bundle create failed: %s" % res.text.strip()[:400])
@@ -432,7 +437,7 @@ class SshRunner(Runner):
                 raise RunnerError(self._failure("could not copy the inputs to", r))
             try:
                 res = self._ssh("bash %s" % shell_path("%s/%s" % (inbox, script_name)),
-                                timeout=timeout_s * max(1, len(steps)) + (transfer_s or 300), log=log)
+                                timeout=timeout_s * max(1, len(steps)) + SESSION_MARGIN_S, log=log)
             except ProcTimeout:
                 raise RunnerError("ssh session on %s for %s did not finish in time" % (self.host, label))
             r = self._scp(["%s:%s/." % (self.host, scp_logs), "."], cwd=logs_dir, timeout=transfer_s, log=log)
