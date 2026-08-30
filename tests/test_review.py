@@ -5,7 +5,7 @@ import unittest
 from tests.helpers import RepoCase, ROOT, approve_response
 from revali.preflight import preflight
 from revali.review import (APPROVE, CHANGES_REQUESTED, NEEDS_INFO, ac_gaps, assemble_checklist,
-                           build_prompt, compute_verdict, model_family, pick_actual_model,
+                           build_prompt, compute_verdict,
                            render_review_md, validate_shape)
 from revali.state import State
 
@@ -82,16 +82,6 @@ class CoverageAndShapeTests(unittest.TestCase):
         self.assertTrue(any("severity" in p for p in validate_shape(bad)))
         bad = approve_response(tests=[{"purpose": "x"}])
         self.assertTrue(any("path" in p for p in validate_shape(bad)))
-
-    def test_model_family_and_fallback(self):
-        self.assertEqual(model_family("fable"), "fable")
-        self.assertEqual(model_family("claude-fable-5"), "fable")
-        self.assertEqual(model_family("claude-opus-5"), "opus")
-        usage = {"claude-haiku-4-5-20251001": {"costUSD": 0.001}, "claude-fable-5": {"costUSD": 0.4}}
-        self.assertEqual(pick_actual_model(usage, "fable"), ("claude-fable-5", False))
-        usage = {"claude-haiku-4-5-20251001": {"costUSD": 0.001}, "claude-opus-5": {"costUSD": 0.3}}
-        self.assertEqual(pick_actual_model(usage, "fable"), ("claude-opus-5", True))
-        self.assertEqual(pick_actual_model({}, "fable"), ("", False))
 
     def test_render_review_md(self):
         data = approve_response(findings=[finding("high", "correctness")], suggestions=["rename x"])

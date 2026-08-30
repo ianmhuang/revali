@@ -168,8 +168,10 @@ stated.
   then `gh pr merge --<method> --delete-branch`, which also deletes the
   local branch and checks out the base branch; then `git pull --prune` and
   deletion of the branch's state directory
-- on resume after `stop`, may delete untracked files matching
-  `test_file_pattern` left behind by an interrupted reviewer
+- after a review round that stops before its tests are committed (a failed
+  or interrupted Reviewer session, unusable output, a smoke run that fails
+  twice), deletes the untracked files matching `test_file_pattern` under
+  `test_dir` that the session left behind, and names them in the log
 
 It never modifies files outside `test_dir` and the state directory, never merges on
 its own, and never runs on a repo you do not own or that is public.
