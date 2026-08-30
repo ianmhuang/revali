@@ -26,26 +26,28 @@ sequenceDiagram
     U-->>D: approves the AC
     D->>D: implements, writes own tests, commits
     U->>D: /revali
-    D->>R: revali run
-    R->>R: preflight: clean tree, private repo, base, diff size, secrets, lint, baseline
-    R->>G: push, draft PR
     loop until APPROVE + PASS (max 2 fix cycles)
+        D->>R: revali run
+        R->>R: preflight: clean tree, private repo, base, diff size, secrets, lint, baseline
+        R->>G: push, draft PR
         R->>B: diff, change.md, checklist, previous round
         B-->>R: verdict, findings, acceptance tests
         R->>G: commit tests, PR comment
-        alt CHANGES_REQUESTED / NEEDS_INFO
-            R-->>D: exit 2
-            D->>D: fixes or answers (response-n.md), commits
-            U->>D: /revali
-        else APPROVE
+        alt APPROVE
             R->>V: sandbox: existing suite + new tests
-            alt FAIL
-                V->>V: diagnosis session (code / test / env)
-                R-->>D: exit 2
-            else PASS
+            alt PASS
                 R->>G: PR marked ready
                 R-->>D: READY TO MERGE, exit 0
+            else FAIL
+                V->>V: diagnosis session (code / test / env)
+                R-->>D: exit 2
             end
+        else CHANGES_REQUESTED / NEEDS_INFO
+            R-->>D: exit 2
+        end
+        opt exit 2
+            D->>D: fixes or answers (response-n.md), commits
+            U->>D: /revali
         end
     end
     U->>D: merge
