@@ -105,6 +105,13 @@ class DocsTests(unittest.TestCase):
         self.assertIn("ssh", text)
         self.assertIn('host = "', text)
 
+    def test_template_documents_the_ssh_timeout_keys(self):
+        # round 2, F2: the two timeout keys are public interface, so the template
+        # shows them next to host (commented, like the other optional keys)
+        text = self.read("templates", "revali.toml")
+        self.assertRegex(text, r"(?m)^#?\s*connect_timeout_s\s*=")
+        self.assertRegex(text, r"(?m)^#?\s*transfer_timeout_min\s*=")
+
     def test_defaults_carry_the_ssh_keys(self):
         text = self.read("defaults.toml")
         self.assertRegex(text, r"(?m)^host\s*=")
