@@ -60,7 +60,7 @@ def status_porcelain(cwd: str) -> List[Tuple[str, str]]:
     return entries
 
 
-def dirty_paths(cwd: str, ignore_prefixes: Tuple[str, ...] = (".revali/",)) -> List[str]:
+def dirty_paths(cwd: str, ignore_prefixes: Tuple[str, ...]) -> List[str]:
     out = []
     for code, path in status_porcelain(cwd):
         p = path.replace("\\", "/")
@@ -139,7 +139,7 @@ def push_branch(branch: str, cwd: str, log: Logger = None, force: bool = False) 
     return run_retry(resolve("git") + args + ["origin", branch], cwd=cwd, log=log, timeout=300)
 
 
-def ensure_gitignore(repo: str, entry: str = ".revali/") -> bool:
+def ensure_gitignore(repo: str, entry: str) -> bool:
     """Append entry to .gitignore if missing. Returns True when the file was changed."""
     path = os.path.join(repo, ".gitignore")
     lines = []

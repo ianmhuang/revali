@@ -7,9 +7,12 @@
 [paths]
 state_dir = ".revali"            # per-branch state under <repo>/<state_dir>/<branch>/
 logs_dir = "logs"                # inside the branch directory
+history_file = "history.jsonl"   # under ~/.revali/ unless history_path is set there
 
 # Model ladders, weakest to strongest, one table per engine. A model id is
-# matched to a tier by substring ("claude-opus-5" -> "opus").
+# matched to a tier by substring ("claude-opus-5" -> "opus"). "auto" picks
+# the Reviewer one tier above the Developer's model and the diagnoser one
+# tier below; see README "Configuration".
 [engines.claude]
 tiers = ["haiku", "sonnet", "opus", "fable"]
 helper_prefix = "claude-haiku"   # usage rows starting with this are helpers, not the reviewer
@@ -27,8 +30,8 @@ context_files = []
 [review]
 engine = "claude"
 strategy = "prompt"              # reserved: hybrid (v1.x)
-model = "fable"
-fallback_model = "opus,sonnet"
+model = "auto"
+fallback_model = "auto"          # auto = the tiers below the chosen one, strongest first
 effort = "high"
 max_fixes = 2
 max_diff_lines = 800
@@ -44,14 +47,15 @@ security_paths = []
 
 [validate]
 engine = "claude"
-model = "opus"
-fallback_model = "sonnet"
+model = "auto"
+fallback_model = "auto"
 effort = "high"
 budget_usd = 1.0
 prompt = ""                      # empty = prompts/diagnose.md
 schema = ""                      # empty = schemas/diagnose.schema.json
 
-# Defaults for every [validate.<platform>] table.
+# Defaults for every [validate.<platform>] table; a user or project file may
+# repeat this table to change the defaults for all of its platforms.
 [validate.platform]
 runner = "wsl"
 distro = "Ubuntu"

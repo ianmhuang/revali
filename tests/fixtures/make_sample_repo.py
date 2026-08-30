@@ -54,14 +54,12 @@ lint = ""
 test_dir = "tests"
 
 [review]
-model = "fable"
 max_fixes = 2
 max_diff_lines = 800
 budget_usd = 1.0
 exclude = ["*.lock"]
 
 [validate]
-model = "opus"
 budget_usd = 0.5
 
 [validate.linux]

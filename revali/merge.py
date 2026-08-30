@@ -92,7 +92,7 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
     base = state.base or cfg.project.base_branch
     if gitops.current_branch(root) != branch:
         raise Stop(EXIT_ERROR, "check out %s before merging (you are on %s)" % (branch, gitops.current_branch(root)))
-    if gitops.dirty_paths(root):
+    if gitops.dirty_paths(root, (cfg.paths.state_dir + "/",)):
         raise Stop(EXIT_ERROR, "working tree is not clean")
     head = gitops.rev_parse("HEAD", root) or ""
     if state.head_sha and head != state.head_sha:

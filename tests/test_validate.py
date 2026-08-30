@@ -219,7 +219,7 @@ class WslRunnerTests(RepoCase):
     @unittest.skipUnless(os.name == "nt" or os.path.exists("/bin/bash"), "needs bash")
     def test_run_reports_failing_step(self):
         from revali.runners import WslRunner as W
-        r = W(PlatformCfg(runner="wsl", distro="Ubuntu", command_timeout_min=1))
+        r = W(PlatformCfg(runner="wsl", distro="Ubuntu", command_timeout_min=1, sandbox_dir="~/.revali/sandbox"))
         logs = os.path.join(self.rdir(), "logs")
         head = git(["rev-parse", "HEAD"], self.repo).strip()
         report = r.run(self.repo, head, [("setup", "true"), ("test", "exit 3"), ("new_test", "true")], {}, logs, "validate-r2")
@@ -231,7 +231,7 @@ class WslRunnerTests(RepoCase):
     def test_real_wsl(self):
         os.environ.pop("REVALI_WSL_CMD", None)
         from revali.runners import WslRunner as W
-        r = W(PlatformCfg(runner="wsl", distro="Ubuntu"))
+        r = W(PlatformCfg(runner="wsl", distro="Ubuntu", sandbox_dir="~/.revali/sandbox"))
         logs = os.path.join(self.rdir(), "logs")
         head = git(["rev-parse", "HEAD"], self.repo).strip()
         report = r.run(self.repo, head, [("test", "python3 -m unittest discover -s tests -t . -p 'test_calc*.py'")], {}, logs, "validate-real")

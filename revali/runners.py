@@ -208,7 +208,6 @@ class WslRunner(Runner):
     """Fresh clone inside the WSL distro's own filesystem, steps run by a generated
     bash script; per-step logs and exit codes come back through the host logs dir."""
     name = "wsl"
-    SANDBOX_ROOT = "$HOME/.revali/sandbox"
 
     def __init__(self, plat: PlatformCfg):
         super().__init__(plat)
@@ -247,7 +246,10 @@ class WslRunner(Runner):
         for name, cmd in steps:
             write_text(os.path.join(logs_dir, "%s-%s.cmd" % (label, name)), cmd + "\n")
         repo_name = os.path.basename(os.path.normpath(repo_root)) or "repo"
-        sandbox = "%s/%s/%s" % (self.SANDBOX_ROOT, repo_name, label)
+        root = self.plat.sandbox_dir.strip().rstrip("/")
+        if root.startswith("~"):
+            root = "$HOME" + root[1:]
+        sandbox = "%s/%s/%s" % (root, repo_name, label)
         timeout_s = self.plat.command_timeout_min * 60
         script = self.script(self.wslpath(repo_root), self.wslpath(logs_dir), self.wslpath(extra_dir), ref,
                              steps, label, sandbox, timeout_s)

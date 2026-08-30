@@ -1,4 +1,4 @@
-"""Per-branch state under .revali/<branch>/: state.json, lock, logs, history append."""
+"""Per-branch state under <state_dir>/<branch>/: state.json, lock, logs, history append."""
 import json
 import os
 import re
@@ -9,8 +9,6 @@ from typing import List, Optional
 
 from revali import STATE_VERSION, VERSION, PROMPT_VERSION
 from revali.procs import pid_alive
-
-REVIEW_DIR = ".revali"
 
 STAGES = (
     "preflight", "pr", "review", "validate", "ready_to_merge", "merged",
@@ -25,8 +23,8 @@ def safe_branch(branch: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", name)
 
 
-def review_dir(repo_root: str, branch: str) -> str:
-    return os.path.join(repo_root, REVIEW_DIR, safe_branch(branch))
+def review_dir(repo_root: str, branch: str, state_dir: str) -> str:
+    return os.path.join(repo_root, state_dir, safe_branch(branch))
 
 
 def now_iso() -> str:
@@ -172,10 +170,11 @@ def lock_owner_alive(rdir: str) -> Optional[int]:
 # ---- logs -------------------------------------------------------------------
 
 class RunLog:
-    """Timestamped stage lines to stdout and .revali/<branch>/logs/revali.log."""
+    """Timestamped stage lines to stdout and <state_dir>/<branch>/<logs_dir>/revali.log."""
 
-    def __init__(self, rdir: Optional[str] = None, verbose: bool = False, quiet: bool = False):
-        self.path = os.path.join(rdir, "logs", "revali.log") if rdir else None
+    def __init__(self, rdir: Optional[str] = None, verbose: bool = False, quiet: bool = False,
+                 logs_dir: str = ""):
+        self.path = os.path.join(rdir, logs_dir, "revali.log") if rdir else None
         self.verbose = verbose
         self.quiet = quiet
         if self.path:

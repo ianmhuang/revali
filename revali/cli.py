@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_reset = sub.add_parser("reset", help="drop state.json for the current branch, keep the files")
     p_reset.set_defaults(func=pipeline.cmd_reset)
 
-    p_clean = sub.add_parser("clean", help="delete .revali/<branch>/")
+    p_clean = sub.add_parser("clean", help="delete the state directory of a branch")
     p_clean.add_argument("branch")
     p_clean.set_defaults(func=pipeline.cmd_clean)
 
@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_merge = sub.add_parser("merge", help="merge the PR of the current branch (only after READY TO MERGE)")
     p_merge.set_defaults(func=pipeline.cmd_merge)
 
-    p_stats = sub.add_parser("stats", help="summarise ~/.revali/history.jsonl")
+    p_stats = sub.add_parser("stats", help="summarise the run history")
     p_stats.set_defaults(func=_cmd_stats)
 
     p_ver = sub.add_parser("version", help="print the version")

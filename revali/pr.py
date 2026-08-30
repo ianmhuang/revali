@@ -18,14 +18,15 @@ def _log(log: Optional[RunLog]):
 
 def ensure_pr(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> None:
     root = ctx.repo_root
-    if gitops.ensure_gitignore(root):
+    entry = ctx.cfg.paths.state_dir + "/"
+    if gitops.ensure_gitignore(root, entry):
         gitops.git_ok(["add", ".gitignore"], root)
-        res = run(resolve("git") + ["commit", "--quiet", "-m", "chore: ignore .revali/"], cwd=root, log=_log(log))
+        res = run(resolve("git") + ["commit", "--quiet", "-m", "chore: ignore %s" % entry], cwd=root, log=_log(log))
         if not res.ok:
             raise Stop(EXIT_ERROR, "could not commit .gitignore: %s" % res.text.strip())
         ctx.head_sha = gitops.rev_parse("HEAD", root) or ctx.head_sha
         if log:
-            log.stage("pr", "added .revali/ to .gitignore")
+            log.stage("pr", "added %s to .gitignore" % entry)
 
     if ctx.dry_run:
         if log:
@@ -66,7 +67,7 @@ def ensure_pr(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> N
 
 
 def create_draft(ctx: Context, rdir: str, log: Optional[RunLog]):
-    body_path = os.path.join(rdir, "logs", "pr-body.md")
+    body_path = os.path.join(ctx.logs, "pr-body.md")
     write_text(body_path, pr_body(ctx, None))
     res = run_retry(resolve("gh") + ["pr", "create", "--draft", "--base", ctx.base, "--head", ctx.branch,
                                      "--title", ctx.doc.title, "--body-file", body_path],
@@ -104,7 +105,7 @@ def pr_body(ctx: Context, state: Optional[State]) -> str:
 def update_body(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> None:
     if ctx.dry_run or not state.pr_number:
         return
-    path = os.path.join(rdir, "logs", "pr-body.md")
+    path = os.path.join(ctx.logs, "pr-body.md")
     write_text(path, pr_body(ctx, state))
     res = run_retry(resolve("gh") + ["pr", "edit", str(state.pr_number), "--body-file", path],
                     cwd=ctx.repo_root, log=_log(log), timeout=120)
@@ -129,10 +130,11 @@ def post_comment(ctx: Context, state: State, rdir: str, name: str, body: str, lo
     hits = scan_text(body, label=name)
     if hits:
         body = ("revali withheld this comment: it looked like it contained a credential (%s). "
-                "The full text is in .revali/ on the author's machine." % ", ".join(sorted({h.pattern for h in hits})))
+                "The full text is in %s/ on the author's machine."
+                % (", ".join(sorted({h.pattern for h in hits})), ctx.cfg.paths.state_dir))
         if log:
             log.stage("pr", "comment %s withheld: possible credential" % name)
-    path = os.path.join(rdir, "logs", "comment-%s.md" % name)
+    path = os.path.join(ctx.logs, "comment-%s.md" % name)
     write_text(path, body)
     state.pending_effect = "comment:" + name
     state.save(rdir)
