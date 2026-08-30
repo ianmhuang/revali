@@ -19,7 +19,8 @@ change it wrote; the Reviewer gets the acceptance criteria and the diff, not
 the Developer's reasoning, and derives its tests from the criteria; the
 Validator is a test run, not an opinion; the diagnosis session sees only the
 failure output. The models can differ by tier (`auto` puts the Reviewer one
-tier above the Developer) and, through the engine seam, by vendor. Fresh
+tier above the Developer); the engine seam is where a second vendor would
+plug in (only `claude` exists today). Fresh
 context removes the author's bias toward its own change; it does not remove
 blind spots the models share, which is why `revali stats` tracks the
 first-try approval rate.
@@ -83,7 +84,7 @@ everything between them is automatic. Exit codes: `0` done / ready to merge,
 answer a question), `3` a human must decide, `4` (`wait` only) still running.
 
 Status: v1.0 feature set complete (package version 0.1.0). Verified end to
-end on GitHub repositories with real Reviewer sessions and a real
+end on a private GitHub repository with real Reviewer sessions and a real
 WSL sandbox; revali reviews its own changes.
 
 ## Requirements
