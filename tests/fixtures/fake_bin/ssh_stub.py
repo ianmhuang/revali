@@ -8,6 +8,7 @@ REVALI_FAKE_SSH_BASH_FAILS=1 makes `bash` fail before the script starts.
 """
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -39,7 +40,9 @@ def one(words):
     name = words[0]
     if name == "git":            # the preflight probe
         print("git version 2.43.0 (fake)")
-        print("/usr/bin/timeout")
+        return 0
+    if name == "command":        # command -v <tool>
+        print("/usr/bin/%s" % words[-1])
         return 0
     if name == "true":
         return 0
@@ -49,15 +52,20 @@ def one(words):
                 os.makedirs(local(p), exist_ok=True)
         return 0
     if name == "rm":
+        if os.environ.get("REVALI_FAKE_SSH_RM_FAILS"):
+            print("rm: cannot remove: Permission denied", file=sys.stderr)
+            return 1
         for p in words[1:]:
             if not p.startswith("-"):
                 shutil.rmtree(local(p), ignore_errors=True)
         return 0
     if name == "rmdir":
         try:
-            os.rmdir(local(words[1]))
+            os.rmdir(local([w for w in words[1:] if not w.startswith("-")][0]))
         except OSError:
             pass
+        return 0
+    if name == "2>/dev/null":
         return 0
     if name == "bash":
         if os.environ.get("REVALI_FAKE_SSH_BASH_FAILS"):
@@ -85,18 +93,28 @@ def main(argv):
     if os.environ.get("REVALI_FAKE_SSH_DOWN"):
         print("ssh: connect to host %s port 22: Connection refused" % host, file=sys.stderr)
         return 255
-    groups, cur = [], []
-    for tok in cmd:
-        if tok == ";":
-            groups.append(cur)
-            cur = []
+    # revali passes one command line; the remote shell would split and unquote it
+    tokens = shlex.split(" ".join(cmd))
+    # (separator, words): ";" always runs the next group, "&&" only after success
+    groups, cur, sep = [], [], ";"
+    for tok in tokens:
+        if tok in (";", "&&"):
+            groups.append((sep, cur))
+            cur, sep = [], tok
+        elif tok.endswith(";") and len(tok) > 1:
+            cur.append(tok[:-1])
+            groups.append((sep, cur))
+            cur, sep = [], ";"
         else:
             cur.append(tok)
-    groups.append(cur)
+    groups.append((sep, cur))
     rc = 0
-    for words in groups:
-        if words:
-            rc = one(words)
+    for sep, words in groups:
+        if not words:
+            continue
+        if sep == "&&" and rc != 0:
+            continue
+        rc = one(words)
     return rc
 
 

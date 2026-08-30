@@ -7,6 +7,8 @@
 """
 import json
 import os
+import re
+import shlex
 import shutil
 import tempfile
 import time
@@ -20,7 +22,8 @@ from revali.state import write_text
 Logger = Optional[Callable[[str], None]]
 FAKE_ENV = "REVALI_FAKE_RUNNER"
 # no password or host-key prompts: a prompt would hang the pipeline
-SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+SSH_OPTS = ["-o", "BatchMode=yes"]
+SSH_PROBE = "git --version && command -v timeout && command -v bash"
 
 
 class RunnerError(Exception):
@@ -219,6 +222,22 @@ def sandbox_root(plat: PlatformCfg) -> Tuple[str, str]:
     return root, root
 
 
+def remote_name(repo_root: str) -> str:
+    """The repository's directory name reduced to [A-Za-z0-9._-], so remote paths never
+    need quoting on the scp side (sftp and legacy scp disagree on how to quote)."""
+    name = os.path.basename(os.path.normpath(repo_root)) or "repo"
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name) or "repo"
+
+
+def shell_path(path: str) -> str:
+    """Quote a remote path for a shell command line, keeping a leading $HOME expandable."""
+    if path == "$HOME":
+        return '"$HOME"'
+    if path.startswith("$HOME/"):
+        return '"$HOME"/' + shlex.quote(path[6:])
+    return shlex.quote(path)
+
+
 def render_script(source: str, logs: str, extra: str, ref: str, steps: List[Tuple[str, str]],
                   label: str, sandbox: str, timeout_s: int, cmds: str = "") -> str:
     """The sandbox script with its placeholders filled; `source` is what git clone reads
@@ -344,18 +363,27 @@ class SshRunner(Runner):
         super().__init__(plat)
         self.host = plat.host.strip()
 
-    def _ssh(self, args: list, timeout: float, log: Logger = None):
-        return run(resolve("ssh") + SSH_OPTS + [self.host] + args, timeout=timeout, log=log)
+    def _opts(self) -> list:
+        return SSH_OPTS + ["-o", "ConnectTimeout=%d" % self.plat.connect_timeout_s]
+
+    def _ssh(self, command: str, timeout: float, log: Logger = None):
+        """Run one shell command line on the host (ssh hands it to the remote shell as is)."""
+        return run(resolve("ssh") + self._opts() + [self.host, command], timeout=timeout, log=log)
 
     def _scp(self, args: list, cwd: str, timeout: float, log: Logger = None):
-        return run(resolve("scp") + SSH_OPTS + ["-q", "-r"] + args, cwd=cwd, timeout=timeout, log=log)
+        return run(resolve("scp") + self._opts() + ["-q", "-r"] + args, cwd=cwd, timeout=timeout, log=log)
+
+    def _short(self) -> float:
+        """Budget for a call that only connects and runs a trivial command."""
+        return self.plat.connect_timeout_s + 60
 
     def _failure(self, what: str, res) -> str:
         return "ssh: %s host '%s' (exit %d): %s" % (what, self.host, res.returncode,
                                                    res.text.strip()[:400] or "no output")
 
     def probe(self):
-        return self._ssh(["git", "--version", "&&", "command", "-v", "timeout"], timeout=60)
+        resolve("scp")   # the transport needs both; report a missing scp before anything is pushed
+        return self._ssh(SSH_PROBE, timeout=self._short())
 
     def script(self, bundle: str, logs: str, extra: str, ref: str, steps: List[Tuple[str, str]],
                label: str, sandbox: str, timeout_s: int) -> str:
@@ -373,7 +401,7 @@ class SshRunner(Runner):
         if not res.ok:
             shutil.rmtree(extra_dir, ignore_errors=True)
             raise RunnerError("git bundle create failed: %s" % res.text.strip()[:400])
-        repo_name = os.path.basename(os.path.normpath(repo_root)) or "repo"
+        repo_name = remote_name(repo_root)
         shell_root, scp_root = sandbox_root(self.plat)
         base = "%s/%s" % (shell_root, repo_name)
         inbox = "%s/%s-in" % (base, label)
@@ -390,28 +418,27 @@ class SshRunner(Runner):
         results_path = os.path.join(logs_dir, "%s.results" % label)
         if log:
             log("[%s] ssh %s: %d step(s) on %s" % (label, self.host, len(steps), ref[:10]))
+        transfer_s = self.plat.transfer_timeout_min * 60
         res = None
         try:
-            r = self._ssh(["mkdir", "-p", inbox, rlogs], timeout=120, log=log)
+            r = self._ssh("mkdir -p %s %s" % (shell_path(inbox), shell_path(rlogs)), timeout=self._short(), log=log)
             if not r.ok:
                 raise RunnerError(self._failure("could not reach", r))
-            r = self._scp(uploads + ["%s:%s/" % (self.host, scp_inbox)], cwd=logs_dir, timeout=600, log=log)
+            r = self._scp(uploads + ["%s:%s/" % (self.host, scp_inbox)], cwd=logs_dir, timeout=transfer_s, log=log)
             if not r.ok:
                 raise RunnerError(self._failure("could not copy the inputs to", r))
             try:
-                res = self._ssh(["bash", "%s/%s" % (inbox, script_name)],
-                                timeout=timeout_s * max(1, len(steps)) + 300, log=log)
+                res = self._ssh("bash %s" % shell_path("%s/%s" % (inbox, script_name)),
+                                timeout=timeout_s * max(1, len(steps)) + transfer_s, log=log)
             except ProcTimeout:
                 raise RunnerError("ssh session on %s for %s did not finish in time" % (self.host, label))
-            r = self._scp(["%s:%s/." % (self.host, scp_logs), "."], cwd=logs_dir, timeout=600, log=log)
+            r = self._scp(["%s:%s/." % (self.host, scp_logs), "."], cwd=logs_dir, timeout=transfer_s, log=log)
             if not r.ok and not os.path.isfile(results_path):
                 raise RunnerError(self._failure("could not copy the logs back from", r))
+        except ExeNotFound as exc:
+            raise RunnerError(str(exc))
         finally:
-            try:
-                self._ssh(["rm", "-rf", inbox, rlogs, sandbox, ";", "rmdir", base, "2>/dev/null", ";", "true"],
-                          timeout=120)
-            except (ProcTimeout, ExeNotFound):
-                pass
+            self._cleanup([inbox, rlogs, sandbox], base, log)
             shutil.rmtree(extra_dir, ignore_errors=True)
             if os.path.isfile(bundle_path):
                 os.remove(bundle_path)
@@ -420,25 +447,44 @@ class SshRunner(Runner):
                               % (self.host, res.returncode, res.text.strip()[:400]))
         return report_from_results(logs_dir, label, steps, log)
 
+    def _cleanup(self, paths: List[str], base: str, log: Logger = None) -> None:
+        """Remove the staging dirs and the clone on the host; a failure is logged, never raised."""
+        # the exit code is rm's; the parent dir goes only when nothing else is in it
+        command = "rm -rf %s && rmdir --ignore-fail-on-non-empty %s" % (
+            " ".join(shell_path(p) for p in paths), shell_path(base))
+        try:
+            r = self._ssh(command, timeout=self._short())
+        except (ProcTimeout, ExeNotFound) as exc:
+            r = None
+            reason = str(exc)
+        else:
+            reason = r.text.strip()[:200]
+        if log:
+            if r is not None and r.ok:
+                log("[ssh] removed %s on %s" % (", ".join(paths), self.host))
+            else:
+                log("[ssh] could not remove %s on %s (left for you to delete): %s"
+                    % (", ".join(paths), self.host, reason or "no output"))
+
 
 def probe_runner(plat: PlatformCfg) -> str:
-    """"" when the runner can start, else one line for preflight. The fake runner always can."""
+    """Return "" when the runner can start, else one line for preflight. The fake runner always can."""
     if os.environ.get(FAKE_ENV):
         return ""
     try:
         if plat.runner == "ssh":
             res = SshRunner(plat).probe()
             if not res.ok:
-                return ("ssh host '%s' is unreachable or lacks git / coreutils timeout (exit %d, ssh = %s): %s; "
+                return ("ssh host '%s' is unreachable or lacks git, bash or coreutils timeout (exit %d, ssh = %s): %s; "
                         "if the host is new, run `ssh %s` once by hand to accept its key"
                         % (plat.host, res.returncode, resolve("ssh")[0], res.text.strip()[:300] or "no output",
                            plat.host))
         elif plat.runner == "wsl":
             runner = WslRunner(plat)
-            res = runner._wsl(["true"], timeout=60)
+            res = runner._wsl(["bash", "-c", SSH_PROBE], timeout=plat.connect_timeout_s + 60)
             if not res.ok:
-                return "WSL distro '%s' did not start (exit %d): %s" % (runner.distro, res.returncode,
-                                                                        res.text.strip()[:300] or "no output")
+                return ("WSL distro '%s' did not start or lacks git, bash or coreutils timeout (exit %d): %s"
+                        % (runner.distro, res.returncode, res.text.strip()[:300] or "no output"))
     except ExeNotFound as exc:
         return str(exc)
     except ProcTimeout as exc:

@@ -88,6 +88,8 @@ class PlatformCfg:
     host: str = ""
     network: bool = False
     command_timeout_min: int = 0
+    connect_timeout_s: int = 0
+    transfer_timeout_min: int = 0
     sandbox_dir: str = ""
     setup: str = ""
     build: str = ""
@@ -341,6 +343,10 @@ def parse_project_config(text: str, path: str = PROJECT_FILE, defaults: Optional
                             "(an ssh destination or a ~/.ssh/config alias)" % name)
         if plat.runner in ("wsl", "ssh") and not plat.sandbox_dir.strip():
             problems.append("validate.%s.sandbox_dir must not be empty for the %s runner" % (name, plat.runner))
+        if plat.runner == "ssh" and any(ch.isspace() for ch in plat.sandbox_dir.strip()):
+            problems.append("validate.%s.sandbox_dir must not contain whitespace for the ssh runner" % name)
+        if plat.runner == "ssh" and (plat.connect_timeout_s <= 0 or plat.transfer_timeout_min <= 0):
+            problems.append("validate.%s.connect_timeout_s and transfer_timeout_min must be positive" % name)
     for role, cfg in (("review", review), ("validate", validate)):
         if role == "review" and cfg.engine in RETIRED_REVIEW_ENGINES and cfg.engine not in engines:
             problems.append("%s.engine '%s' is now %s.strategy; engine names the CLI: use engine = \"claude\""

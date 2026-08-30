@@ -4,22 +4,31 @@ The remote host is a directory (REVALI_FAKE_REMOTE) served by ssh_stub / scp_stu
 sandbox script itself runs with the host's bash, as the WSL runner tests do.
 """
 import os
+import shutil
 import sys
 import unittest
+from unittest import mock
 
 from tests.helpers import FAKE_BIN, RepoCase, _quote, claude_entry, git, run_cli
 from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, PY, toml_str
 from revali import EXIT_ERROR, EXIT_OK
 from revali.config import PlatformCfg
-from revali.runners import RunnerError, SshRunner, sandbox_root
+from revali.runners import SSH_PROBE, RunnerError, SshRunner, remote_name, sandbox_root, shell_path
 
 SSH_STUB = os.path.join(FAKE_BIN, "ssh_stub.py")
 SCP_STUB = os.path.join(FAKE_BIN, "scp_stub.py")
 HAVE_BASH = os.name == "nt" or os.path.exists("/bin/bash")
 
 
+def without_scp():
+    """PATH lookup that finds everything except scp (git must keep working)."""
+    real = shutil.which
+    return mock.patch("shutil.which", side_effect=lambda cmd, *a, **k: None if cmd == "scp" else real(cmd, *a, **k))
+
+
 def plat(**kw):
-    base = dict(runner="ssh", host="box", command_timeout_min=1, sandbox_dir="~/.revali/sandbox")
+    base = dict(runner="ssh", host="box", command_timeout_min=1, sandbox_dir="~/.revali/sandbox",
+                connect_timeout_s=15, transfer_timeout_min=10)
     base.update(kw)
     return PlatformCfg(**base)
 
@@ -35,7 +44,7 @@ class SshCase(RepoCase):
         os.environ["REVALI_FAKE_REMOTE"] = self.remote
         os.environ["REVALI_SSH_CMD"] = "%s %s" % (_quote(sys.executable), _quote(SSH_STUB))
         os.environ["REVALI_SCP_CMD"] = "%s %s" % (_quote(sys.executable), _quote(SCP_STUB))
-        for knob in ("REVALI_FAKE_SSH_DOWN", "REVALI_FAKE_SSH_BASH_FAILS"):
+        for knob in ("REVALI_FAKE_SSH_DOWN", "REVALI_FAKE_SSH_BASH_FAILS", "REVALI_FAKE_SSH_RM_FAILS"):
             os.environ.pop(knob, None)
         cfg = self.read("revali.toml")
         cfg = cfg.replace('runner = "wsl"\ndistro = "Ubuntu"\n', 'runner = "ssh"\nhost = "box"\n')
@@ -72,6 +81,21 @@ class ConfigTests(SshCase):
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn("validate.linux.runner must be one of wsl, local, ssh", out)
+
+    def test_sandbox_dir_with_whitespace_is_rejected_for_ssh(self):
+        cfg = self.read("revali.toml").replace('host = "box"\n', 'host = "box"\nsandbox_dir = "~/sand box"\n')
+        self.write("revali.toml", cfg)
+        self.commit_all("space")
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("validate.linux.sandbox_dir must not contain whitespace for the ssh runner", out)
+
+    def test_remote_name_and_shell_path(self):
+        self.assertEqual(remote_name("D:/work/My Project"), "My_Project")
+        self.assertEqual(remote_name("/srv/repo.git/"), "repo.git")
+        self.assertEqual(shell_path("$HOME/.revali/sandbox/x"), '"$HOME"/.revali/sandbox/x')
+        self.assertEqual(shell_path("$HOME/a b/c"), "\"$HOME\"/'a b/c'")
+        self.assertEqual(shell_path("/srv/a b"), "'/srv/a b'")
 
     def test_sandbox_root_forms(self):
         self.assertEqual(sandbox_root(plat(sandbox_dir="~/.revali/sandbox")), ("$HOME/.revali/sandbox", ".revali/sandbox"))
@@ -121,14 +145,40 @@ class TransportTests(SshCase):
         self.assertEqual([c[0] for c in calls], ["ssh", "scp", "ssh", "scp", "ssh"])
         for exe, argv in calls:
             self.assertIn("BatchMode=yes", argv, (exe, argv))
-        self.assertIn("mkdir", calls[0][1])
+        self.assertIn("mkdir -p ", calls[0][1][-1])
+        self.assertIn("ConnectTimeout=15", calls[0][1])
         self.assertIn("validate-r1.bundle", calls[1][1])
         self.assertIn("validate-r1.sh", calls[1][1])
         self.assertIn("validate-r1-extra", calls[1][1])
         self.assertTrue(calls[1][1][-1].startswith("box:.revali/sandbox/sample/validate-r1-in"), calls[1][1])
-        self.assertIn("bash", calls[2][1])
+        self.assertTrue(calls[2][1][-1].startswith('bash "$HOME"/'), calls[2][1])
         self.assertEqual(calls[3][1][-2:], ["box:.revali/sandbox/sample/validate-r1-logs/.", "."])
-        self.assertIn("rm", calls[4][1])
+        self.assertTrue(calls[4][1][-1].startswith("rm -rf "), calls[4][1])
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_repository_name_with_a_space(self):
+        # the remote directory is derived from the repo's directory name; spaces are replaced
+        clone = os.path.join(self.tmp, "my project")
+        git(["clone", "-q", self.repo, clone], self.tmp)
+        r = SshRunner(plat())
+        logs = os.path.join(self.rdir(), "logs")
+        head = git(["rev-parse", "HEAD"], clone).strip()
+        report = r.run(clone, head, [("test", LOCAL_TEST)], {}, logs, "validate-r5")
+        self.assertTrue(report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in report.steps])
+        self.assertEqual(self.remote_leftovers(), [])
+        upload = [c for c in self.calls() if c[0] == "scp"][0][1][-1]
+        self.assertEqual(upload, "box:.revali/sandbox/my_project/validate-r5-in/")
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_failed_cleanup_is_logged_not_raised(self):
+        os.environ["REVALI_FAKE_SSH_RM_FAILS"] = "1"
+        lines = []
+        r = SshRunner(plat())
+        logs = os.path.join(self.rdir(), "logs")
+        head = git(["rev-parse", "HEAD"], self.repo).strip()
+        report = r.run(self.repo, head, [("test", "true")], {}, logs, "validate-r6", log=lines.append)
+        self.assertTrue(report.ok)
+        self.assertTrue(any("could not remove" in l and "validate-r6-in" in l for l in lines), lines)
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_failing_step_is_reported_and_cleaned_up(self):
@@ -141,7 +191,7 @@ class TransportTests(SshCase):
         self.assertEqual(report.failed.returncode, 3)
         self.assertEqual(self.remote_leftovers(), [])
         self.assertEqual(self.calls()[-1][0], "ssh")
-        self.assertIn("rm", self.calls()[-1][1])
+        self.assertTrue(self.calls()[-1][1][-1].startswith("rm -rf "))
 
     def test_remote_bash_failure_still_cleans_up(self):
         os.environ["REVALI_FAKE_SSH_BASH_FAILS"] = "1"
@@ -153,8 +203,18 @@ class TransportTests(SshCase):
         self.assertIn("could not start (exit 127)", str(cm.exception))
         self.assertIn("box", str(cm.exception))
         self.assertEqual(self.remote_leftovers(), [])
-        self.assertIn("rm", self.calls()[-1][1])
+        self.assertTrue(self.calls()[-1][1][-1].startswith("rm -rf "))
         self.assertFalse(os.path.exists(os.path.join(logs, "validate-r3.bundle")))
+
+    def test_missing_scp_is_a_runner_error(self):
+        os.environ.pop("REVALI_SCP_CMD", None)
+        r = SshRunner(plat())
+        logs = os.path.join(self.rdir(), "logs")
+        head = git(["rev-parse", "HEAD"], self.repo).strip()
+        with without_scp(), self.assertRaises(RunnerError) as cm:
+            r.run(self.repo, head, [("test", "true")], {}, logs, "validate-r7")
+        self.assertIn("executable not found on PATH: scp", str(cm.exception))
+        self.assertEqual(self.remote_leftovers(), [])
 
     def test_unreachable_host_is_named(self):
         os.environ["REVALI_FAKE_SSH_DOWN"] = "1"
@@ -172,10 +232,19 @@ class PreflightProbeTests(SshCase):
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertIn("ssh host 'box' is unreachable or lacks git / coreutils timeout", out)
+        self.assertIn("ssh host 'box' is unreachable or lacks git, bash or coreutils timeout", out)
         self.assertIn("run `ssh box` once by hand", out)
         self.assertFalse(any(c["argv"][:2] == ["pr", "create"] for c in self.fake_calls("gh")))
         self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_missing_scp_stops_preflight(self):
+        os.environ.pop("REVALI_SCP_CMD", None)
+        self.claude(claude_entry())
+        with without_scp():
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("executable not found on PATH: scp", out)
+        self.assertFalse(any(c["argv"][:2] == ["pr", "create"] for c in self.fake_calls("gh")))
 
     def test_dry_run_skips_the_probe(self):
         os.environ["REVALI_FAKE_SSH_DOWN"] = "1"
@@ -195,7 +264,8 @@ class PreflightProbeTests(SshCase):
         self.assertEqual(self.remote_leftovers(), [])
         # the probe ran once before anything was pushed
         first = self.calls()[0][1]
-        self.assertEqual(first[-6:], ["git", "--version", "&&", "command", "-v", "timeout"])
+        self.assertEqual(first[-1], SSH_PROBE)
+        self.assertIn("command -v bash", SSH_PROBE)
 
 
 if __name__ == "__main__":

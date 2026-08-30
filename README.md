@@ -191,12 +191,15 @@ Ubuntu 24.04 that means `python3-venv` and `python3-pip` for a Python project.
 host reached over ssh: the branch travels as a git bundle (the host needs no
 GitHub access), the sandbox script and the step commands go up with scp, the
 per-step logs come back the same way, and the staging directories under
-`sandbox_dir` are removed afterwards. `host` is anything `ssh` accepts, so
-user, port and key belong in `~/.ssh/config`. Every call runs with
+`sandbox_dir` are removed afterwards (the repository's directory name is
+reduced to `[A-Za-z0-9._-]` on the host, and `sandbox_dir` may not contain
+whitespace). `host` is anything `ssh` accepts, so user, port and key belong
+in `~/.ssh/config`; `connect_timeout_s` and `transfer_timeout_min` bound the
+connection and each scp transfer. Every call runs with
 `BatchMode=yes`: nothing prompts, so key-based login must already work and
 the host key must be known (run `ssh <host>` once by hand). Preflight probes
 the host (reachable, git and `timeout` present) before anything is pushed;
-the same probe starts the WSL distro for `runner = "wsl"`. The ssh runner was
+the same probe runs inside the WSL distro for `runner = "wsl"`. The ssh runner was
 verified against sshd inside WSL (`ListenAddress 127.0.0.1`, a non-default
 port, key-only login); on Ubuntu 24.04 `Port` in `sshd_config` is ignored
 while `ssh.socket` is active, so disable the socket and enable `ssh.service`
