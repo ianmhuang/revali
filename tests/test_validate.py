@@ -4,6 +4,7 @@ import sys
 import unittest
 
 from tests.helpers import FAKE_BIN, RepoCase, _quote, approve_response, claude_entry, git, run_cli
+from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, PY, toml_str
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.config import PlatformCfg
 from revali.runners import WslRunner
@@ -35,7 +36,7 @@ class BaselineTests(RepoCase):
         self.assertFalse(any(c["argv"][:2] == ["pr", "create"] for c in self.fake_calls("gh")))
 
     def test_baseline_skipped_without_existing_suite(self):
-        self.write("revali.toml", self.read("revali.toml").replace('test = "python -m unittest discover -s tests -t . -p \\"test_calc*.py\\""', 'test = ""'))
+        self.write("revali.toml", self.read("revali.toml").replace('test = %s' % toml_str(LOCAL_TEST), 'test = ""'))
         self.commit_all("no suite")
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
@@ -173,9 +174,9 @@ class WslRunnerTests(RepoCase):
         os.environ["REVALI_WSL_CMD"] = "%s %s" % (_quote(sys.executable), _quote(WSL_STUB))
         # Commands that work under Git Bash on the host.
         cfg = self.read("revali.toml")
-        cfg = cfg.replace('setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"', 'setup = "python --version"')
-        cfg = cfg.replace('test = ".venv/bin/python -m pytest -q"', 'test = "python -m unittest discover -s tests -t . -p \\"test_calc*.py\\""')
-        cfg = cfg.replace('new_test = ".venv/bin/python -m pytest -q tests"', 'new_test = "python -m unittest discover -s tests -t . -p \\"test_review_*.py\\""')
+        cfg = cfg.replace('setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"', 'setup = "%s --version"' % PY)
+        cfg = cfg.replace('test = ".venv/bin/python -m pytest -q"', 'test = %s' % toml_str(LOCAL_TEST))
+        cfg = cfg.replace('new_test = ".venv/bin/python -m pytest -q tests"', 'new_test = %s' % toml_str(LOCAL_NEW_TEST))
         self.write("revali.toml", cfg)
         self.commit_all("bash-friendly commands")
 

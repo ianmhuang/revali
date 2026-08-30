@@ -2,6 +2,7 @@ import os
 import unittest
 
 from tests.helpers import RepoCase, git, run_cli
+from tests.fixtures.make_sample_repo import PY
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.preflight import Stop, preflight
 
@@ -126,14 +127,14 @@ class PreflightFailures(RepoCase):
         preflight(self.repo)
 
     def test_lint_failure(self):
-        toml_line = 'lint = "python -c \\"import sys; print(\'style: bad\'); sys.exit(3)\\""'
+        toml_line = 'lint = "%s -c \\"import sys; print(\'style: bad\'); sys.exit(3)\\""' % PY
         self.write("revali.toml", self.read("revali.toml").replace('lint = ""', toml_line))
         self.commit_all("lint")
         stop = self.assert_stop(EXIT_ACTION, "lint failed")
         self.assertIn("style: bad", stop.message)
 
     def test_lint_success(self):
-        self.write("revali.toml", self.read("revali.toml").replace('lint = ""', 'lint = "python -c pass"'))
+        self.write("revali.toml", self.read("revali.toml").replace('lint = ""', 'lint = "%s -c pass"' % PY))
         self.commit_all("lint")
         preflight(self.repo)
 

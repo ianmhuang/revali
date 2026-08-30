@@ -7,7 +7,9 @@ Creates: src/calc.py, tests/test_calc.py, revali.toml, CONVENTIONS.md,
 main branch is pushed to, and a feature branch `feature/mul` with a change and
 a filled-in .revali/feature__mul/change.md.
 """
+import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -75,10 +77,22 @@ setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"
 test = ".venv/bin/python -m pytest -q"
 new_test = ".venv/bin/python -m pytest -q tests"'''
 
+# The interpreter name differs per platform: Windows and most venvs have `python`,
+# a stock Ubuntu (the WSL sandbox) only `python3`.
+PY = "python" if shutil.which("python") else "python3"
+LOCAL_TEST = PY + ' -m unittest discover -s tests -t . -p "test_calc*.py"'
+LOCAL_NEW_TEST = PY + ' -m unittest discover -s tests -t . -p "test_review_*.py"'
+
+
+def toml_str(value):
+    """A TOML basic string; JSON escaping is a subset of TOML's."""
+    return json.dumps(value)
+
+
 PLATFORM_LOCAL = '''runner = "local"
 setup = ""
-test = "python -m unittest discover -s tests -t . -p \\"test_calc*.py\\""
-new_test = "python -m unittest discover -s tests -t . -p \\"test_review_*.py\\""'''
+test = %s
+new_test = %s''' % (toml_str(LOCAL_TEST), toml_str(LOCAL_NEW_TEST))
 
 CHANGE_MD = '''---
 title: Add mul to calc
