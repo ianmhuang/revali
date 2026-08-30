@@ -79,7 +79,9 @@ WSL sandbox; revali reviews its own changes.
 
 - Python 3.11+ (stdlib only), git, GitHub CLI (`gh auth login` done)
 - Claude Code CLI on PATH (`claude`), for the reviewer / diagnoser sessions
-- On Windows: WSL with an Ubuntu distro for the linux sandbox
+- A place to run the sandbox: on Windows, WSL with an Ubuntu distro; on any
+  host, a Linux machine reachable by key-based ssh (`runner = "ssh"`) with
+  git, bash and coreutils installed
 
 ## Usage
 
@@ -152,7 +154,7 @@ time and recorded in the review and diagnosis headers.
 | Reviewer prompt and schema | revali | Reviewer | `prompts/review.md`, `schemas/review.schema.json` in revali | `[review] prompt`, `schema` |
 | diagnosis prompt and schema | revali | diagnosis session | `prompts/diagnose.md`, `schemas/diagnose.schema.json` in revali | `[validate] prompt`, `schema` |
 | how tests are added here | the project | Reviewer | none | `[project] test_guide` |
-| sandbox clone | Validator | Validator; deleted after the run | `~/.revali/sandbox/<repo>/<label>/` inside WSL | `[validate.<platform>] sandbox_dir` |
+| sandbox clone | Validator | Validator; deleted after the run | `~/.revali/sandbox/<repo>/<label>/` inside WSL or on the ssh host | `[validate.<platform>] sandbox_dir` |
 | run history | revali | `revali stats` | `~/.revali/history.jsonl` | `history_path` or `[paths] history_file` in `~/.revali/config.toml` (user level only) |
 
 Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves
@@ -185,8 +187,16 @@ deletes the clone. The distro needs git and whatever `setup` installs; on
 Ubuntu 24.04 that means `python3-venv` and `python3-pip` for a Python project.
 `runner = "local"` uses a git worktree on the host with no isolation.
 
-```
-```
+`runner = "ssh"` with `host = "<destination>"` does the same as `wsl` on a Linux
+host reached over ssh: the branch travels as a git bundle (the host needs no
+GitHub access), the sandbox script and the step commands go up with scp, the
+per-step logs come back the same way, and the staging directories under
+`sandbox_dir` are removed afterwards. `host` is anything `ssh` accepts, so
+user, port and key belong in `~/.ssh/config`. Every call runs with
+`BatchMode=yes`: nothing prompts, so key-based login must already work and
+the host key must be known (run `ssh <host>` once by hand). Preflight probes
+the host (reachable, git and `timeout` present) before anything is pushed;
+the same probe starts the WSL distro for `runner = "wsl"`.
 
 `REVALI_DISABLE=1` in the environment switches revali off entirely.
 

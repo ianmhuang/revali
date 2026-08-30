@@ -24,6 +24,8 @@ def main(argv):
         cmd = argv
     if not cmd:
         return 1
+    if cmd[0] == "true":
+        return 0
     if cmd[0] == "wslpath":
         print(bash_path(cmd[-1]))
         return 0
