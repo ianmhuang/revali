@@ -8,7 +8,7 @@ test_dir = "tests"
 test_file_pattern = "test_review_{topic}.py"
 
 [review]
-budget_usd = 2.0
+budget_usd = 4.0                  # config-wide refactors need more than the 2.0 default
 checklist = "CONVENTIONS.md"
 exclude = []
 
