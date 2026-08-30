@@ -1,7 +1,8 @@
 """AC-2: the ssh runner delivers the branch as a git bundle, runs the shared sandbox
 script on the host, brings the per-step logs back under the WSL runner's file names,
-removes its staging and log directories on the host on every path, and passes
-BatchMode=yes to every ssh / scp call.
+removes its staging and log directories on the host on every path (and says so in the
+run log when it cannot; round 1, F4), copes with a repository directory name that
+contains a space (round 1, F1), and passes BatchMode=yes to every ssh / scp call.
 
 The host is a directory served by tests/fixtures/fake_bin/ssh_stub.py and scp_stub.py;
 the sandbox script runs with the host's bash, as the WSL runner tests do.
@@ -41,7 +42,7 @@ class SshTransportCase(RepoCase):
         os.environ["REVALI_SSH_CMD"] = "%s %s" % (_quote(sys.executable), _quote(SSH_STUB))
         os.environ["REVALI_SCP_CMD"] = "%s %s" % (_quote(sys.executable), _quote(SCP_STUB))
         os.environ["REVALI_WSL_CMD"] = "%s %s" % (_quote(sys.executable), _quote(WSL_STUB))
-        for knob in ("REVALI_FAKE_SSH_DOWN", "REVALI_FAKE_SSH_BASH_FAILS"):
+        for knob in ("REVALI_FAKE_SSH_DOWN", "REVALI_FAKE_SSH_BASH_FAILS", "REVALI_FAKE_SSH_RM_FAILS"):
             os.environ.pop(knob, None)
         self.head = git(["rev-parse", "HEAD"], self.repo).strip()
 
@@ -55,9 +56,9 @@ class SshTransportCase(RepoCase):
     def transport_calls(self):
         return [(c["exe"], c["argv"]) for c in self.fake_calls() if c["exe"] in ("ssh", "scp")]
 
-    def run_ssh(self, steps, extra, label):
+    def run_ssh(self, steps, extra, label, repo=None, log=None):
         logs = os.path.join(self.tmp, "logs-" + label)
-        report = SshRunner(ssh_plat()).run(self.repo, self.head, steps, extra, logs, label)
+        report = SshRunner(ssh_plat()).run(repo or self.repo, self.head, steps, extra, logs, label, log=log)
         return report, logs
 
     def assert_host_clean_and_rm_last(self):
@@ -65,7 +66,7 @@ class SshTransportCase(RepoCase):
         calls = self.transport_calls()
         self.assertTrue(calls, "no ssh / scp call recorded")
         self.assertEqual(calls[-1][0], "ssh", calls[-1])
-        # since round 1 the cleanup is one shell line (F1: quoted remote commands)
+        # the cleanup is one shell line handed to the remote shell
         self.assertTrue(calls[-1][1][-1].startswith("rm -rf "), calls[-1])
 
 
@@ -106,6 +107,27 @@ class Delivery(SshTransportCase):
         self.assertEqual([s.log_path for s in ssh_report.steps],
                          [os.path.join(ssh_logs, "validate-r1-%s.log" % n) for n in ("setup", "test", "new_test")])
 
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_repository_directory_with_a_space_runs_and_leaves_the_host_clean(self):
+        # round 1, F1: the remote directories carry the repository's directory name; a
+        # name with a space must neither split the remote command lines nor leak files
+        clone = os.path.join(self.tmp, "my project")
+        git(["clone", "-q", self.repo, clone], self.tmp)
+        self.assertEqual(git(["rev-parse", "HEAD"], clone).strip(), self.head)
+        report, _ = self.run_ssh([("test", LOCAL_TEST)], {}, "validate-r5", repo=clone)
+        self.assertTrue(report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in report.steps])
+        self.assertEqual([s.name for s in report.steps], ["test"])
+        self.assert_host_clean_and_rm_last()
+        for exe, argv in self.transport_calls():
+            remote_specs = [a for a in argv if a.startswith("box:")]
+            for spec in remote_specs:
+                self.assertFalse(any(ch.isspace() for ch in spec), (exe, argv))
+        # nothing landed outside the sandbox root on the host, e.g. a stray "project/..."
+        self.assertFalse(os.path.exists(os.path.join(self.remote, "project")), os.listdir(self.remote))
+        self.assertFalse(os.path.exists(os.path.join(self.remote, ".revali", "sandbox", "my")),
+                         os.listdir(os.path.join(self.remote, ".revali", "sandbox"))
+                         if os.path.isdir(os.path.join(self.remote, ".revali", "sandbox")) else [])
+
 
 class Cleanup(SshTransportCase):
     @unittest.skipUnless(HAVE_BASH, "needs bash")
@@ -129,6 +151,18 @@ class Cleanup(SshTransportCase):
         self.assertIn("box", str(cm.exception))
         self.assert_host_clean_and_rm_last()
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "logs-validate-r3", "validate-r3.bundle")))
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_cleanup_that_fails_on_the_host_is_named_in_the_run_log(self):
+        # round 1, F4: a remote rm that fails must not be swallowed; the run still
+        # succeeds, and the log names the host and what was left behind
+        os.environ["REVALI_FAKE_SSH_RM_FAILS"] = "1"
+        lines = []
+        report, _ = self.run_ssh([("test", "true")], {}, "validate-r6", log=lines.append)
+        self.assertTrue(report.ok)
+        hits = [l for l in lines if "box" in l and "validate-r6" in l
+                and ("remove" in l.lower() or "delete" in l.lower() or "clean" in l.lower())]
+        self.assertTrue(hits, lines)
 
 
 class NonInteractive(SshTransportCase):
