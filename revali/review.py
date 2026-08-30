@@ -208,7 +208,7 @@ def validate_shape(data) -> List[str]:
 def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt: int,
                    log: Optional[RunLog]) -> ReviewerRun:
     cfg = ctx.cfg.review
-    requested = (ctx.user_cfg.review_model if ctx.user_cfg and ctx.user_cfg.review_model else cfg.model)
+    requested = cfg.model
     raw_path = os.path.join(rdir, "logs", "review-r%d-%d.raw.json" % (round_no, attempt))
     if log:
         log.stage("review", "round %d attempt %d: reviewer %s (budget $%.2f, timeout %d min)"

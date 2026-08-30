@@ -47,6 +47,27 @@ After exit code 2 the author fixes or answers in
 `.revali/<branch>/response-<n>.md` (`- F1: fixed` / `- F1: wontfix: <reason>`),
 commits, and runs again; each such cycle counts against `review.max_fixes`.
 
+## Configuration
+
+Three layers, the most specific wins, and every key may appear in any of
+them:
+
+1. `defaults.toml` in the revali checkout: every key with its default. Edit
+   it only when a new model generation arrives (the model ladders live
+   here, under `[engines.<name>]`).
+2. `~/.revali/config.toml`: your machine, every project. `checklist`,
+   `history_path`, and any `[section]` from the project file (a WSL distro
+   name, a budget, a pinned model). `REVALI_HOME` moves the directory.
+3. `revali.toml` in the project root: the commands to build and test, the
+   platforms, anything project-specific. `templates/revali.toml` is a
+   starting point; a key left out inherits from the layers above.
+
+Unknown keys are errors in every layer. `[review] engine` and
+`[validate] engine` name the CLI that runs the session (`claude`; the old
+`prompt | hybrid` meaning moved to `strategy`). Keys that name a file
+(`prompt`, `schema`, `checklist_builtin`) are relative to the project
+root; empty means the file revali ships with.
+
 ## Workflow
 
 The acceptance criteria come before the code. In a project that has

@@ -1,0 +1,71 @@
+# revali tool defaults. Lowest layer of three:
+#   defaults.toml (this file) < ~/.revali/config.toml (user) < revali.toml (project)
+# Every key here may be repeated in the other two files; the most specific
+# file wins. Keys that name a file are relative to the project root; empty
+# means "the file revali ships with".
+
+[paths]
+state_dir = ".revali"            # per-branch state under <repo>/<state_dir>/<branch>/
+logs_dir = "logs"                # inside the branch directory
+
+# Model ladders, weakest to strongest, one table per engine. A model id is
+# matched to a tier by substring ("claude-opus-5" -> "opus").
+[engines.claude]
+tiers = ["haiku", "sonnet", "opus", "fable"]
+helper_prefix = "claude-haiku"   # usage rows starting with this are helpers, not the reviewer
+
+[project]
+base_branch = ""                 # empty = the repository's default branch (via gh)
+platforms = ["linux"]
+lint = ""
+test_dir = "tests"
+test_file_pattern = "test_review_{topic}.py"
+test_guide = ""
+change_source = "manual"
+context_files = []
+
+[review]
+engine = "claude"
+strategy = "prompt"              # reserved: hybrid (v1.x)
+model = "fable"
+fallback_model = "opus,sonnet"
+effort = "high"
+max_fixes = 2
+max_diff_lines = 800
+small_max_lines = 50
+budget_usd = 2.0
+checklist = "CONVENTIONS.md"     # project layer of the checklist
+checklist_builtin = ""           # empty = checklists/default.md shipped with revali
+prompt = ""                      # empty = prompts/review.md shipped with revali
+schema = ""                      # empty = schemas/review.schema.json shipped with revali
+timeout_min = 20
+exclude = []
+security_paths = []
+
+[validate]
+engine = "claude"
+model = "opus"
+fallback_model = "sonnet"
+effort = "high"
+budget_usd = 1.0
+prompt = ""                      # empty = prompts/diagnose.md
+schema = ""                      # empty = schemas/diagnose.schema.json
+
+# Defaults for every [validate.<platform>] table.
+[validate.platform]
+runner = "wsl"
+distro = "Ubuntu"
+network = false
+command_timeout_min = 15
+sandbox_dir = "~/.revali/sandbox"   # inside the WSL distro; ~ is the distro user's home
+setup = ""
+build = ""
+test = ""
+new_test = ""
+check_name = ""
+
+[merge]
+auto_merge = false
+method = "squash"
+wait_for_checks = true
+checks_timeout_min = 30

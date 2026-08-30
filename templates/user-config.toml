@@ -1,12 +1,19 @@
 # ~/.revali/config.toml (or $REVALI_HOME/config.toml). Every key is optional.
+# Sits between revali's defaults.toml and each project's revali.toml: a key
+# here overrides the tool default and is overridden by the project.
 
-# Your personal review checklist, prepended to every project's CONVENTIONS.md.
-# Relative paths resolve against ~/.revali/.
+# Your personal review checklist, read after the built-in list and before the
+# project's CONVENTIONS.md. Relative paths resolve against ~/.revali/.
 checklist = ""
 
 # Where run records are appended (default ~/.revali/history.jsonl).
 history_path = ""
 
-# Default models when a project does not set them (reserved).
-review_model = ""
-validate_model = ""
+# Any [section] from revali.toml / defaults.toml may appear here, e.g.:
+# [review]
+# model = "opus"            # pin the Reviewer for every project that does not set one
+# budget_usd = 1.0
+# [validate.linux]
+# distro = "Ubuntu-24.04"   # the WSL distro on this machine
+# [engines.claude]
+# tiers = ["haiku", "sonnet", "opus", "fable"]   # the model ladder, weakest first
