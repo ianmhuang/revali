@@ -14,23 +14,45 @@ GitHub repositories. Three roles take part.
   whether the code, the test, or the environment is at fault.
 
 ```mermaid
-flowchart TD
-    D1[Developer writes change.md<br/>Request, Goal, AC-n, status: draft] --> U1{User approves AC?}
-    U1 -- edits --> D1
-    U1 -- yes --> D2[Developer implements,<br/>writes own tests, commits]
-    D2 --> U2[/User types /revali/]
-    U2 --> P[preflight<br/>clean tree, private repo you own,<br/>base not ahead, diff size, secret scan,<br/>lint, existing suite in sandbox]
-    P -- fail --> D2
-    P --> PR[push + draft PR]
-    PR --> R[Reviewer<br/>reviews diff against AC,<br/>writes acceptance tests]
-    R -- CHANGES_REQUESTED / NEEDS_INFO<br/>exit 2 --> D3[Developer fixes or answers<br/>in response-n.md, commits]
-    D3 --> U2
-    R -- APPROVE --> V[Validator<br/>sandbox: existing suite + new tests]
-    V -- FAIL --> C[diagnosis session<br/>code / test / env]
-    C -- exit 2 --> D3
-    V -- PASS --> M[READY TO MERGE<br/>PR marked ready, exit 0]
-    M --> U3[/User runs revali merge/]
-    U3 --> G[wait for CI, squash merge,<br/>delete branch, clean state dir]
+sequenceDiagram
+    actor U as User
+    participant D as Developer
+    participant R as revali
+    participant B as Reviewer
+    participant V as Validator
+    participant G as GitHub
+
+    D->>U: change.md (Request, Goal, AC-n), status: draft
+    U-->>D: approves the AC
+    D->>D: implements, writes own tests, commits
+    U->>D: /revali
+    loop until APPROVE + PASS (max 2 fix cycles)
+        D->>R: revali run
+        R->>R: preflight: clean tree, private repo, base, diff size, secrets, lint, baseline
+        R->>G: push, draft PR
+        R->>B: diff, change.md, checklist, previous round
+        B-->>R: verdict, findings, acceptance tests
+        R->>G: commit tests, PR comment
+        alt APPROVE
+            R->>V: sandbox: existing suite + new tests
+            alt PASS
+                R->>G: PR marked ready
+                R-->>D: READY TO MERGE, exit 0
+            else FAIL
+                V->>V: diagnosis session (code / test / env)
+                R-->>D: exit 2
+            end
+        else CHANGES_REQUESTED / NEEDS_INFO
+            R-->>D: exit 2
+        end
+        opt exit 2
+            D->>D: fixes or answers (response-n.md), commits
+            U->>D: /revali
+        end
+    end
+    U->>D: merge
+    D->>R: revali merge
+    R->>G: wait for CI, squash merge, delete branch
 ```
 
 The preflight baseline (the existing suite in the sandbox) runs on every
