@@ -97,7 +97,7 @@ time and recorded in the review and diagnosis headers.
 | diagnosis prompt and schema | revali | diagnosis session | `prompts/diagnose.md`, `schemas/diagnose.schema.json` in revali | `[validate] prompt`, `schema` |
 | how tests are added here | the project | Reviewer | none | `[project] test_guide` |
 | sandbox clone | Validator | Validator; deleted after the run | `~/.revali/sandbox/<repo>/<label>/` inside WSL | `[validate.<platform>] sandbox_dir` |
-| run history | revali | `revali stats` | `~/.revali/history.jsonl` | `[paths] history_file`, or `history_path` in `~/.revali/config.toml` |
+| run history | revali | `revali stats` | `~/.revali/history.jsonl` | `history_path` or `[paths] history_file` in `~/.revali/config.toml` (user level only) |
 
 Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves
 with the `REVALI_HOME` environment variable. Developer, Reviewer, and

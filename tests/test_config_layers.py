@@ -112,8 +112,13 @@ class EngineAndPathChecks(unittest.TestCase):
         self.assertEqual(cfg.validate.platforms["linux"].distro, "V")
 
     def test_history_file_from_defaults(self):
-        from revali.config import history_path
+        from revali.config import UserConfig, history_path
         self.assertTrue(history_path().endswith("history.jsonl"))
+        user = UserConfig(sections={"paths": {"history_file": "runs.jsonl"}})
+        self.assertTrue(history_path(user).endswith("runs.jsonl"))
+        with self.assertRaises(ConfigError) as cm:
+            parse_project_config(MINIMAL + '\n[paths]\nhistory_file = "x.jsonl"\n')
+        self.assertTrue(any("user-level key" in p for p in cm.exception.problems))
 
     def test_empty_tiers_rejected(self):
         with self.assertRaises(ConfigError) as cm:

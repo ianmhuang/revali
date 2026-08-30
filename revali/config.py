@@ -366,6 +366,8 @@ def parse_project_config(text: str, path: str = PROJECT_FILE, defaults: Optional
         problems.append("paths.logs_dir must be a single directory name (got %r)" % paths.logs_dir)
     if not _single_component(paths.history_file):
         problems.append("paths.history_file must be a single file name (got %r)" % paths.history_file)
+    if "history_file" in data.get("paths", {}):
+        problems.append("paths.history_file is a user-level key (~/.revali/config.toml), not a project one")
     if repo_root:
         for key, value in (("review.prompt", review.prompt), ("review.schema", review.schema),
                            ("review.checklist_builtin", review.checklist_builtin),
@@ -421,17 +423,38 @@ def load_user_config() -> UserConfig:
 
 
 def paths_for(repo_root: str) -> PathsCfg:
-    """The [paths] table for a repo, from its config when it loads, else from the defaults.
-    Used by commands that must find the state directory before a full config is required."""
+    """The [paths] table for a repo: from its config when it loads; else the raw [paths]
+    table of revali.toml (so a broken config still points at the right state dir) over
+    the defaults. Used by commands that must find the state directory before a full
+    config is required."""
     try:
         return load_project_config(repo_root).paths
     except ConfigError:
         pass
-    return _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
+    paths = _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
+    project_file = os.path.join(repo_root, PROJECT_FILE)
+    if os.path.isfile(project_file):
+        try:
+            with open(project_file, "r", encoding="utf-8", newline="") as fh:
+                raw = tomllib.loads(fh.read()).get("paths", {})
+        except (OSError, tomllib.TOMLDecodeError):
+            raw = {}
+        for key in ("state_dir", "logs_dir"):
+            value = raw.get(key)
+            if isinstance(value, str) and _single_component(value):
+                setattr(paths, key, value)
+    return paths
 
 
 def history_path(user_cfg: Optional[UserConfig] = None) -> str:
+    """history_path from the user file wins; else [paths] history_file from the user file
+    or defaults.toml, under the user directory. The project file has no say (history is
+    per machine)."""
     if user_cfg and user_cfg.history_path:
         return user_cfg.history_path
     paths = _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
+    if user_cfg:
+        name = user_cfg.sections.get("paths", {}).get("history_file")
+        if isinstance(name, str) and name:
+            paths.history_file = name
     return os.path.join(user_home(), paths.history_file)

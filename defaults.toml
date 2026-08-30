@@ -7,7 +7,7 @@
 [paths]
 state_dir = ".revali"            # per-branch state under <repo>/<state_dir>/<branch>/
 logs_dir = "logs"                # inside the branch directory
-history_file = "history.jsonl"   # under ~/.revali/ unless history_path is set there
+history_file = "history.jsonl"   # under ~/.revali/; the user file may rename it, the project file may not
 
 # Model ladders, weakest to strongest, one table per engine. A model id is
 # matched to a tier by substring ("claude-opus-5" -> "opus"). "auto" picks

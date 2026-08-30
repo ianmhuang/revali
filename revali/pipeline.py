@@ -150,6 +150,10 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
                                                        os.path.join(rdir, "review-%d.md" % len(state.rounds))))
 
 
+def _model_label(chosen) -> str:
+    return chosen.model + (" (%s)" % chosen.reason if chosen.reason else "")
+
+
 def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     from revali import pr as prstage
     from revali import review
@@ -166,7 +170,8 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
 
     if args.dry_run:
         msg = ("dry run: would push %s, open a draft PR against %s, run reviewer %s (round %d), "
-               "then stop" % (ctx.branch, ctx.base, review.planned_reviewer(ctx).model, len(state.rounds) + 1))
+               "then stop" % (ctx.branch, ctx.base, _model_label(review.planned_reviewer(ctx)),
+                              len(state.rounds) + 1))
         log.stage("run", msg)
         state.set_stage(rdir, "preflight", msg, EXIT_OK)
         print("DRY RUN OK: " + msg)
@@ -290,8 +295,9 @@ def cmd_wait(args) -> int:
             lock = read_lock(rdir)
             if lock and not pid_alive(int(lock.get("pid", 0))):
                 release_lock(rdir)
-                print("error: the run (pid %s) died at stage '%s' without a result; see logs/run.log"
-                      % (lock.get("pid"), state.stage))
+                print("error: the run (pid %s) died at stage '%s' without a result; see %s"
+                      % (lock.get("pid"), state.stage,
+                         os.path.join(rdir, paths_for(gitops.repo_root(os.getcwd())).logs_dir, "run.log")))
                 return EXIT_ERROR
             print("%s: %s" % (state.stage, state.message))
             return state.last_exit if state.last_exit >= 0 else EXIT_ERROR

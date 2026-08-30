@@ -173,7 +173,9 @@ class RunLog:
     """Timestamped stage lines to stdout and <state_dir>/<branch>/<logs_dir>/revali.log."""
 
     def __init__(self, rdir: Optional[str] = None, verbose: bool = False, quiet: bool = False,
-                 logs_dir: str = ""):
+                 logs_dir: Optional[str] = None):
+        if rdir and not logs_dir:
+            raise TypeError("RunLog needs logs_dir (the configured [paths] logs_dir) when rdir is given")
         self.path = os.path.join(rdir, logs_dir, "revali.log") if rdir else None
         self.verbose = verbose
         self.quiet = quiet

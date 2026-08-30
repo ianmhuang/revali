@@ -103,7 +103,7 @@ class ModelResolutionTests(RepoCase):
         self.set_author("claude-sonnet-5")
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertIn("run reviewer opus", out)
+        self.assertIn("run reviewer opus (auto: one tier above author claude-sonnet-5)", out)
 
 
 class PromptOverrideTests(RepoCase):
@@ -120,6 +120,16 @@ class PromptOverrideTests(RepoCase):
         self.assertTrue(prompt.startswith("CUSTOM PROMPT for feature/mul"))
         self.assertIn("PROJECT BUILTIN LIST", prompt)
         self.assertNotIn("Behaviour changes have tests", prompt)
+
+    def test_config_error_does_not_add_change_md_noise(self):
+        broken = self.read("revali.toml").replace("[review]\n", '[review]\nengine = "nope"\n') + '\n[paths]\nstate_dir = ".rv"\n'
+        self.write("revali.toml", broken)
+        self.write(".rv/feature__mul/change.md", self.read(".revali/feature__mul/change.md"))
+        self.commit_all("broken")
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, 1)
+        self.assertIn("engine 'nope' is unknown", out)
+        self.assertNotIn("change.md", out)
 
     def test_missing_override_file_is_a_preflight_error(self):
         self.write("revali.toml", self.read("revali.toml").replace("[review]\n", '[review]\nprompt = "docs/none.md"\n'))
