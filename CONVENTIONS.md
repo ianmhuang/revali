@@ -18,7 +18,7 @@ Things a linter cannot check; formatting is not listed.
 ## Behaviour changes
 - Every behaviour change ships with a test in `tests/` built on
   `tests/helpers.RepoCase` (fake `gh` / `claude` / runner, real `git`).
-- Changing `prompts/` or `schemas/` bumps `PROMPT_VERSION` in
+- Changing `prompts/`, `schemas/`, or `checklists/` bumps `PROMPT_VERSION` in
   `revali/__init__.py`; changing the state file layout bumps `STATE_VERSION`.
 - Existing tests are not weakened to make a change pass; if an assertion
   must change, the change description says why.
@@ -33,6 +33,8 @@ Things a linter cannot check; formatting is not listed.
 ## Portability
 - Runs on the Windows host (PowerShell / Git Bash) and inside WSL or Linux:
   no absolute paths, no user names, no platform-only tools in `revali/`.
+- No default value in code: models, budgets, timeouts, paths, and file
+  names live in `defaults.toml`; a CLI flag lives only in `revali/engines/`.
 - Files are written with `newline=""` and LF; subprocesses use UTF-8 with
   `errors="replace"`.
 - Prompts, schemas, comments, commit messages, and docs are in English.

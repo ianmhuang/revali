@@ -1,16 +1,27 @@
-"""revali.toml (project) and ~/.revali/config.toml (user) loading and validation.
+"""Configuration in three layers, most specific wins:
 
-Unknown keys are errors: a typo in a command name must not silently disable a step.
+    defaults.toml (shipped with revali) < ~/.revali/config.toml (user) < revali.toml (project)
+
+Unknown keys are errors in every layer: a typo in a command name must not
+silently disable a step. No default value lives in this module; they are all
+in defaults.toml.
 """
 import os
 import tomllib
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from revali import CONFIG_VERSION, V1_PLATFORMS
 
+TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULTS_FILE = os.path.join(TOOL_ROOT, "defaults.toml")
 PROJECT_FILE = "revali.toml"
 USER_DIR_ENV = "REVALI_HOME"
+SECTIONS = ("project", "review", "validate", "merge", "paths", "engines")
+PLATFORM_DEFAULTS_KEY = "platform"   # [validate.platform] in defaults.toml
+USER_TOP_KEYS = ("checklist", "history_path")
+RETIRED_USER_KEYS = {"review_model": "[review] model", "validate_model": "[validate] model"}
+RETIRED_REVIEW_ENGINES = ("prompt", "hybrid")   # the old meaning of review.engine, now review.strategy
 
 
 class ConfigError(Exception):
@@ -19,42 +30,62 @@ class ConfigError(Exception):
         super().__init__("; ".join(self.problems))
 
 
+# Dataclass fields carry types only; values come from defaults.toml.
+
+@dataclass
+class PathsCfg:
+    state_dir: str = ""
+    logs_dir: str = ""
+
+
+@dataclass
+class EngineCfg:
+    name: str = ""
+    tiers: List[str] = field(default_factory=list)
+    helper_prefix: str = ""
+
+
 @dataclass
 class ProjectCfg:
     base_branch: str = ""
-    platforms: List[str] = field(default_factory=lambda: ["linux"])
+    platforms: List[str] = field(default_factory=list)
     lint: str = ""
-    test_dir: str = "tests"
-    test_file_pattern: str = "test_review_{topic}.py"
+    test_dir: str = ""
+    test_file_pattern: str = ""
     test_guide: str = ""
-    change_source: str = "manual"
+    change_source: str = ""
     context_files: List[str] = field(default_factory=list)
     config_version: int = CONFIG_VERSION
 
 
 @dataclass
 class ReviewCfg:
-    engine: str = "prompt"
-    model: str = "fable"
-    fallback_model: str = "opus,sonnet"
-    effort: str = "high"
-    max_fixes: int = 2
-    max_diff_lines: int = 800
-    small_max_lines: int = 50
-    budget_usd: float = 2.0
-    checklist: str = "CONVENTIONS.md"
-    timeout_min: int = 20
+    engine: str = ""
+    strategy: str = ""
+    model: str = ""
+    fallback_model: str = ""
+    effort: str = ""
+    max_fixes: int = 0
+    max_diff_lines: int = 0
+    small_max_lines: int = 0
+    budget_usd: float = 0.0
+    checklist: str = ""
+    checklist_builtin: str = ""
+    prompt: str = ""
+    schema: str = ""
+    timeout_min: int = 0
     exclude: List[str] = field(default_factory=list)
     security_paths: List[str] = field(default_factory=list)
 
 
 @dataclass
 class PlatformCfg:
-    name: str = "linux"
-    runner: str = "wsl"
-    distro: str = "Ubuntu"
+    name: str = ""
+    runner: str = ""
+    distro: str = ""
     network: bool = False
-    command_timeout_min: int = 15
+    command_timeout_min: int = 0
+    sandbox_dir: str = ""
     setup: str = ""
     build: str = ""
     test: str = ""
@@ -64,19 +95,22 @@ class PlatformCfg:
 
 @dataclass
 class ValidateCfg:
-    model: str = "opus"
-    fallback_model: str = "sonnet"
-    effort: str = "high"
-    budget_usd: float = 1.0
+    engine: str = ""
+    model: str = ""
+    fallback_model: str = ""
+    effort: str = ""
+    budget_usd: float = 0.0
+    prompt: str = ""
+    schema: str = ""
     platforms: dict = field(default_factory=dict)  # name -> PlatformCfg
 
 
 @dataclass
 class MergeCfg:
     auto_merge: bool = False
-    method: str = "squash"
-    wait_for_checks: bool = True
-    checks_timeout_min: int = 30
+    method: str = ""
+    wait_for_checks: bool = False
+    checks_timeout_min: int = 0
 
 
 @dataclass
@@ -85,22 +119,37 @@ class Config:
     review: ReviewCfg
     validate: ValidateCfg
     merge: MergeCfg
+    paths: PathsCfg
+    engines: Dict[str, EngineCfg]
     path: str = ""
     warnings: List[str] = field(default_factory=list)
+
+    def engine_for(self, role: str) -> EngineCfg:
+        """role: 'review' or 'validate'."""
+        name = self.review.engine if role == "review" else self.validate.engine
+        return self.engines[name]
 
 
 @dataclass
 class UserConfig:
     checklist: str = ""
     history_path: str = ""
-    review_model: str = ""
-    validate_model: str = ""
     path: str = ""
+    sections: dict = field(default_factory=dict)   # raw [section] tables for layering
 
 
 def user_home() -> str:
     return os.environ.get(USER_DIR_ENV) or os.path.join(os.path.expanduser("~"), ".revali")
 
+
+def tool_file(configured: str, repo_root: str, *default_parts: str) -> str:
+    """A configurable file: empty = the one shipped with revali, else relative to the repo."""
+    if configured:
+        return configured if os.path.isabs(configured) else os.path.join(repo_root, configured)
+    return os.path.join(TOOL_ROOT, *default_parts)
+
+
+# ---- filling dataclasses ----------------------------------------------------
 
 def _fill(dc_type, data: dict, section: str, problems: list, **fixed):
     """Instantiate a dataclass from a dict, rejecting unknown keys and wrong types."""
@@ -131,27 +180,119 @@ def _fill(dc_type, data: dict, section: str, problems: list, **fixed):
     return obj
 
 
-def parse_project_config(text: str, path: str = PROJECT_FILE) -> Config:
-    problems = []
-    warnings = []
+def _split_validate(vdata: dict):
+    """[validate] scalar keys and its [validate.<name>] sub-tables."""
+    scalars = {k: v for k, v in vdata.items() if not isinstance(v, dict)}
+    tables = {k: v for k, v in vdata.items() if isinstance(v, dict)}
+    return scalars, tables
+
+
+def _check_layer(sections: dict, label: str, problems: list) -> None:
+    """Every layer must use known sections and keys, checked against the dataclasses."""
+    for name in sections:
+        if name not in SECTIONS:
+            problems.append("%s: unknown section [%s]" % (label, name))
+    _fill(ProjectCfg, sections.get("project", {}), "%s: project" % label, problems)
+    _fill(ReviewCfg, sections.get("review", {}), "%s: review" % label, problems)
+    _fill(MergeCfg, sections.get("merge", {}), "%s: merge" % label, problems)
+    _fill(PathsCfg, sections.get("paths", {}), "%s: paths" % label, problems)
+    scalars, tables = _split_validate(sections.get("validate", {}))
+    _fill(ValidateCfg, scalars, "%s: validate" % label, problems)
+    for pname, table in tables.items():
+        _fill(PlatformCfg, table, "%s: validate.%s" % (label, pname), problems, name=pname)
+    for ename, table in sections.get("engines", {}).items():
+        if not isinstance(table, dict):
+            problems.append("%s: engines.%s must be a table" % (label, ename))
+            continue
+        _fill(EngineCfg, table, "%s: engines.%s" % (label, ename), problems, name=ename)
+
+
+def merge_layers(*layers: dict) -> dict:
+    """Section-wise overlay of raw TOML dicts, earlier layers first.
+
+    [validate.<name>] tables start from the defaults' [validate.platform];
+    [engines.<name>] tables from the same engine's table in the earlier layer."""
+    merged = {"project": {}, "review": {}, "validate": {}, "merge": {}, "paths": {},
+              "engines": {}, "_platforms": {}}
+    platform_defaults = {}
+    for layer in layers:
+        if not layer:
+            continue
+        for name in ("project", "review", "merge", "paths"):
+            merged[name].update(layer.get(name, {}))
+        scalars, tables = _split_validate(layer.get("validate", {}))
+        merged["validate"].update(scalars)
+        if PLATFORM_DEFAULTS_KEY in tables:
+            platform_defaults.update(tables.pop(PLATFORM_DEFAULTS_KEY))
+        for pname, table in tables.items():
+            base = merged["_platforms"].get(pname) or dict(platform_defaults)
+            base.update(table)
+            merged["_platforms"][pname] = base
+        for ename, table in layer.get("engines", {}).items():
+            if isinstance(table, dict):
+                base = merged["engines"].get(ename, {})
+                base.update(table)
+                merged["engines"][ename] = base
+    merged["_platform_defaults"] = platform_defaults
+    return merged
+
+
+def _single_component(value: str) -> bool:
+    return bool(value) and value not in (".", "..") and "/" not in value and "\\" not in value
+
+
+# ---- loading ----------------------------------------------------------------
+
+_DEFAULTS_CACHE: dict = {}
+
+
+def load_defaults(path: str = DEFAULTS_FILE) -> dict:
+    if path in _DEFAULTS_CACHE:
+        return _DEFAULTS_CACHE[path]
+    if not os.path.isfile(path):
+        raise ConfigError(["%s is missing; the revali checkout is incomplete" % path])
+    with open(path, "r", encoding="utf-8", newline="") as fh:
+        try:
+            data = tomllib.loads(fh.read())
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(["%s: not valid TOML: %s" % (path, exc)])
+    problems: List[str] = []
+    _check_layer(data, "defaults.toml", problems)
+    if problems:
+        raise ConfigError(problems)
+    _DEFAULTS_CACHE[path] = data
+    return data
+
+
+def parse_project_config(text: str, path: str = PROJECT_FILE, defaults: Optional[dict] = None,
+                         user_sections: Optional[dict] = None, repo_root: str = "") -> Config:
+    problems: List[str] = []
+    warnings: List[str] = []
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(["%s: not valid TOML: %s" % (path, exc)])
+    defaults = defaults if defaults is not None else load_defaults()
+    user_sections = user_sections or {}
 
-    for section in data:
-        if section not in ("project", "review", "validate", "merge"):
-            problems.append("unknown section [%s]" % section)
+    _check_layer(user_sections, "user config", problems)
+    _check_layer(data, path, problems)
 
-    project = _fill(ProjectCfg, data.get("project", {}), "project", problems)
-    review = _fill(ReviewCfg, data.get("review", {}), "review", problems)
-    merge = _fill(MergeCfg, data.get("merge", {}), "merge", problems)
-
-    vdata = dict(data.get("validate", {}))
-    platform_tables = {k: vdata.pop(k) for k in list(vdata) if isinstance(vdata[k], dict)}
-    validate = _fill(ValidateCfg, vdata, "validate", problems)
-    for name, table in platform_tables.items():
-        validate.platforms[name] = _fill(PlatformCfg, table, "validate.%s" % name, problems, name=name)
+    # Key and type problems were reported per layer above; fill the merged
+    # result quietly so the semantic checks below can still run and everything
+    # is reported in one pass.
+    quiet: List[str] = []
+    merged = merge_layers(defaults, user_sections, data)
+    project = _fill(ProjectCfg, merged["project"], "project", quiet)
+    review = _fill(ReviewCfg, merged["review"], "review", quiet)
+    merge = _fill(MergeCfg, merged["merge"], "merge", quiet)
+    paths = _fill(PathsCfg, merged["paths"], "paths", quiet)
+    validate = _fill(ValidateCfg, merged["validate"], "validate", quiet)
+    for pname, table in merged["_platforms"].items():
+        validate.platforms[pname] = _fill(PlatformCfg, table, "validate.%s" % pname, quiet, name=pname)
+    engines = {}
+    for ename, table in merged["engines"].items():
+        engines[ename] = _fill(EngineCfg, table, "engines.%s" % ename, quiet, name=ename)
 
     # Semantic checks.
     if project.config_version != CONFIG_VERSION:
@@ -172,9 +313,21 @@ def parse_project_config(text: str, path: str = PROJECT_FILE) -> Config:
             problems.append("validate.%s.new_test is required (how to run test_dir)" % name)
         if plat.runner not in ("wsl", "local"):
             problems.append("validate.%s.runner must be wsl or local" % name)
-    if review.engine != "prompt":
-        problems.append("review.engine '%s' is not available in this version (use 'prompt')"
-                        % review.engine)
+        if plat.runner == "wsl" and not plat.sandbox_dir.strip():
+            problems.append("validate.%s.sandbox_dir must not be empty for the wsl runner" % name)
+    for role, cfg in (("review", review), ("validate", validate)):
+        if cfg.engine in RETIRED_REVIEW_ENGINES and cfg.engine not in engines:
+            problems.append("%s.engine '%s' is now %s.strategy; engine names the CLI: use engine = \"claude\""
+                            % (role, cfg.engine, role))
+        elif cfg.engine not in engines:
+            problems.append("%s.engine '%s' is unknown (available: %s)"
+                            % (role, cfg.engine, ", ".join(sorted(engines)) or "none"))
+    for ename, eng in engines.items():
+        if not eng.tiers:
+            problems.append("engines.%s.tiers must list at least one tier" % ename)
+    if review.strategy != "prompt":
+        problems.append("review.strategy '%s' is not available in this version (use 'prompt')"
+                        % review.strategy)
     if project.change_source != "manual":
         problems.append("project.change_source '%s' is not available in this version"
                         % project.change_source)
@@ -187,19 +340,31 @@ def parse_project_config(text: str, path: str = PROJECT_FILE) -> Config:
         merge.auto_merge = False
     if "{topic}" not in project.test_file_pattern:
         problems.append("project.test_file_pattern must contain {topic}")
+    if not _single_component(paths.state_dir):
+        problems.append("paths.state_dir must be a single directory name (got %r)" % paths.state_dir)
+    if not _single_component(paths.logs_dir):
+        problems.append("paths.logs_dir must be a single directory name (got %r)" % paths.logs_dir)
+    if repo_root:
+        for key, value in (("review.prompt", review.prompt), ("review.schema", review.schema),
+                           ("review.checklist_builtin", review.checklist_builtin),
+                           ("validate.prompt", validate.prompt), ("validate.schema", validate.schema)):
+            if value and not os.path.isfile(tool_file(value, repo_root)):
+                problems.append("%s: file not found: %s" % (key, value))
 
     if problems:
         raise ConfigError(problems)
-    return Config(project=project, review=review, validate=validate, merge=merge,
-                  path=path, warnings=warnings)
+    return Config(project=project, review=review, validate=validate, merge=merge, paths=paths,
+                  engines=engines, path=path, warnings=warnings)
 
 
-def load_project_config(repo_root: str) -> Config:
+def load_project_config(repo_root: str, user_cfg: Optional[UserConfig] = None) -> Config:
     path = os.path.join(repo_root, PROJECT_FILE)
     if not os.path.isfile(path):
         raise ConfigError(["%s not found in %s (copy templates/revali.toml)" % (PROJECT_FILE, repo_root)])
+    if user_cfg is None:
+        user_cfg = load_user_config()
     with open(path, "r", encoding="utf-8", newline="") as fh:
-        return parse_project_config(fh.read(), path)
+        return parse_project_config(fh.read(), path, user_sections=user_cfg.sections, repo_root=repo_root)
 
 
 def load_user_config() -> UserConfig:
@@ -211,13 +376,36 @@ def load_user_config() -> UserConfig:
             data = tomllib.loads(fh.read())
         except tomllib.TOMLDecodeError as exc:
             raise ConfigError(["%s: not valid TOML: %s" % (path, exc)])
-    problems = []
-    cfg = _fill(UserConfig, data, "user config", problems, path=path)
+    problems: List[str] = []
+    cfg = UserConfig(path=path)
+    for key, value in data.items():
+        if key in RETIRED_USER_KEYS:
+            problems.append("user config: '%s' moved to %s" % (key, RETIRED_USER_KEYS[key]))
+        elif key in USER_TOP_KEYS:
+            if not isinstance(value, str):
+                problems.append("user config: %s must be a string" % key)
+            else:
+                setattr(cfg, key, value)
+        elif isinstance(value, dict):
+            cfg.sections[key] = value
+        else:
+            problems.append("user config: unknown key '%s'" % key)
+    _check_layer(cfg.sections, "user config", problems)
     if problems:
         raise ConfigError(problems)
     if cfg.checklist and not os.path.isabs(cfg.checklist):
         cfg.checklist = os.path.join(user_home(), cfg.checklist)
     return cfg
+
+
+def paths_for(repo_root: str) -> PathsCfg:
+    """The [paths] table for a repo, from its config when it loads, else from the defaults.
+    Used by commands that must find the state directory before a full config is required."""
+    try:
+        return load_project_config(repo_root).paths
+    except ConfigError:
+        pass
+    return _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
 
 
 def history_path(user_cfg: Optional[UserConfig] = None) -> str:

@@ -77,11 +77,11 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
 
     problems: List[str] = []
     try:
-        ctx.cfg = load_project_config(root)
+        ctx.user_cfg = load_user_config()
     except ConfigError as exc:
         problems.extend(exc.problems)
     try:
-        ctx.user_cfg = load_user_config()
+        ctx.cfg = load_project_config(root, ctx.user_cfg or UserConfig())
     except ConfigError as exc:
         problems.extend(exc.problems)
 

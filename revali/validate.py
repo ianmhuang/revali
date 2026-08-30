@@ -120,7 +120,7 @@ def run_validation(ctx: Context, state: State, rdir: str, log: Optional[RunLog])
 
 def _diagnose(ctx: Context, state: State, rdir: str, failed, outcome: ValidationOutcome, log: Optional[RunLog]) -> None:
     cfg = ctx.cfg.validate
-    model = (ctx.user_cfg.validate_model if ctx.user_cfg and ctx.user_cfg.validate_model else cfg.model)
+    model = cfg.model
     tests_md_path = os.path.join(rdir, "tests.md")
     values = {
         "branch": ctx.branch, "base": ctx.base, "kind": ctx.doc.kind,

@@ -30,6 +30,9 @@ class ConfigTests(unittest.TestCase):
         cfg = parse_project_config(MINIMAL)
         self.assertEqual(cfg.project.test_dir, "tests")
         self.assertEqual(cfg.review.model, "fable")
+        self.assertEqual(cfg.review.engine, "claude")
+        self.assertEqual(cfg.paths.state_dir, ".revali")
+        self.assertEqual(cfg.validate.platforms["linux"].sandbox_dir, "~/.revali/sandbox")
         self.assertEqual(cfg.validate.platforms["linux"].new_test, "pytest tests")
 
     def test_unknown_key_is_error(self):
