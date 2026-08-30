@@ -1,5 +1,6 @@
-"""AC-4 / AC-5: a session that dies says why (budget, CLI error text) and a failed
-Reviewer session leaves the tree as it found it, so the next run is not blocked."""
+"""AC-4 / AC-5: a session that dies says why (budget, CLI error text) and a review
+round that stops before its tests are committed leaves the tree as it found it,
+so the next run is not blocked."""
 import json
 import unittest
 
@@ -44,6 +45,23 @@ class AC4FailureIsNamed(RepoCase):
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn("reviewer session failed (exit 1): Invalid API key. Fix external API key", out)
 
+    def test_null_result_without_errors_says_no_error_text(self):
+        # A JSON null result must not be quoted as the text "None".
+        self.claude({"exit": 1, "raw_stdout": cli_result(
+            subtype="error_during_execution", is_error=True, result=None, errors=[])})
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("reviewer session failed (exit 1): no error text", out)
+        self.assertNotIn("(exit 1): None", out)
+
+    def test_plain_text_cli_error_is_quoted(self):
+        # The CLI printed no JSON at all (bad flag, auth prompt): its own words are the message.
+        self.claude({"exit": 2, "raw_stdout": "error: unknown option '--json-schema'\n"})
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("reviewer returned invalid JSON (exit 2): error: unknown option '--json-schema'", out)
+        self.assertIn("raw output saved to", out)
+
     def test_diagnoser_budget_exhaustion_is_named_in_tests_md(self):
         self.runner_scenario({"default": 0, "results": {"validate-r1": {"new_test": 1}},
                               "outputs": {"validate-r1": {"new_test": "AssertionError: 12 != 7"}}})
@@ -58,6 +76,14 @@ class AC4FailureIsNamed(RepoCase):
 
 
 class AC5TreeLeftClean(RepoCase):
+    def assert_clean_and_rerun_completes(self, expected_claude_calls):
+        self.assertEqual(git(["status", "--porcelain"], self.repo).strip(), "")
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertNotIn("working tree is not clean", out)
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(len(self.fake_calls("claude")), expected_claude_calls)
+
     def test_pattern_files_removed_named_and_rerun_unblocked(self):
         self.claude({"exit": 1, "raw_stdout": budget_exhausted(),
                      "write_files": {"tests/test_review_mul.py": TEST_REVIEW_MUL,
@@ -71,13 +97,46 @@ class AC5TreeLeftClean(RepoCase):
         self.assertIn("tests/sub/test_review_deep.py", out)
         log = self.read(".revali/feature__mul/logs/revali.log")
         self.assertIn("tests/sub/test_review_deep.py", log)
-        self.assertEqual(git(["status", "--porcelain"], self.repo).strip(), "")
-        # the next run gets past preflight and completes
-        self.claude(claude_entry())
+        self.assert_clean_and_rerun_completes(expected_claude_calls=2)
+
+    def test_unusable_output_cleans_up(self):
+        # exit 0 but the answer fails the shape check: the session "succeeded" from the
+        # CLI's point of view, yet the round stops before any commit.
+        self.claude({"exit": 0, "structured_output": {"verdict": "MAYBE"},
+                     "write_files": {"tests/test_review_mul.py": TEST_REVIEW_MUL}})
         code, out = run_cli(["run", "--foreground"])
-        self.assertNotIn("working tree is not clean", out)
-        self.assertEqual(code, EXIT_OK, out)
-        self.assertEqual(len(self.fake_calls("claude")), 2)
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("does not match the schema", out)
+        self.assertIn("removed 1 unfinished test file(s)", out)
+        self.assertIn("tests/test_review_mul.py", out)
+        self.assertFalse(self.exists("tests/test_review_mul.py"))
+        self.assert_clean_and_rerun_completes(expected_claude_calls=2)
+
+    def test_smoke_failing_twice_cleans_up(self):
+        self.runner_scenario({"default": 0, "results": {"smoke-r1-1": {"new_test": 2},
+                                                        "smoke-r1-2": {"new_test": 2}}})
+        self.claude(claude_entry(), claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("still cannot run", out)
+        self.assertIn("removed 1 unfinished test file(s)", out)
+        self.assertFalse(self.exists("tests/test_review_mul.py"))
+        self.runner_scenario({"default": 0})
+        self.assert_clean_and_rerun_completes(expected_claude_calls=3)
+
+    def test_guard_offender_cleans_up(self):
+        # The reviewer wrote outside test_dir: the guard reverts that and stops the round;
+        # its half-written test file must go too, or the next run is blocked.
+        entry = claude_entry()
+        entry["write_files"]["src/evil.py"] = "print('hi')\n"
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("outside tests", out)
+        self.assertFalse(self.exists("src/evil.py"))
+        self.assertFalse(self.exists("tests/test_review_mul.py"))
+        self.assertIn("removed 1 unfinished test file(s)", out)
+        self.assert_clean_and_rerun_completes(expected_claude_calls=2)
 
     def test_untracked_files_outside_the_pattern_are_kept(self):
         self.claude({"exit": 1, "raw_stdout": budget_exhausted(),

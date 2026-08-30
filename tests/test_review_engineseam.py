@@ -6,10 +6,11 @@ import os
 import unittest
 from dataclasses import fields
 
-from tests.helpers import ROOT, RepoCase, claude_entry, run_cli
+from tests.helpers import ROOT, RepoCase, claude_entry, git, run_cli
 from tests.test_validate import diagnosis
-from revali import EXIT_ACTION, EXIT_OK
+from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.config import ConfigError, EngineCfg
+from revali.state import State
 
 CLAUDE_FLAGS = ("--permission-mode", "--allowedTools", "--tools", "--json-schema",
                 "--max-budget-usd", "--fallback-model", "--output-format", "--effort")
@@ -144,6 +145,35 @@ class AC3Registry(unittest.TestCase):
         cfg_all = parse_project_config(MINIMAL)
         self.assertEqual(for_role(cfg_all, "review").name, "claude")
         self.assertEqual(for_role(cfg_all, "validate").name, "claude")
+
+
+class AC3UnimplementedEngineIsAConfigError(RepoCase):
+    """An [engines.<name>] table without an implementation passes config parsing; it must
+    still be a config error, reported before anything leaves the machine."""
+
+    def name_codex_for_review(self):
+        cfg = self.read("revali.toml").replace("[review]\n", '[review]\nengine = "codex"\n')
+        self.write("revali.toml", cfg + '\n[engines.codex]\ntiers = ["mini", "max"]\n')
+        self.commit_all("codex")
+
+    def test_run_stops_before_push_and_pr(self):
+        self.name_codex_for_review()
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("review.engine: engine 'codex' is not implemented (available: claude)", out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.fake_calls("claude"), [])
+        self.assertFalse(any(c["argv"][:2] == ["pr", "create"] for c in self.fake_calls("gh")))
+        self.assertNotIn("origin/feature/mul", git(["branch", "-r"], self.repo))
+        state = State.load(self.rdir())
+        self.assertEqual(state.stage, "error")
+        self.assertIn("not implemented", state.message)
+
+    def test_preflight_command_reports_it(self):
+        self.name_codex_for_review()
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("engine 'codex' is not implemented (available: claude)", out)
 
 
 if __name__ == "__main__":
