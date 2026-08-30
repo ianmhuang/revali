@@ -5,15 +5,15 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from revali import EXIT_ERROR
-from revali import claude, models
+from revali import engines, models
 from revali.config import PlatformCfg
+from revali.engines import EngineRequest
 from revali.preflight import Context, Stop
 from revali.runners import RunReport, RunnerError, get_runner, steps_for, tail
 from revali.state import RunLog, State, now_iso, read_text, write_text
 
 PASS, FAIL = "PASS", "FAIL"
 LOG_LINES = 200
-DIAGNOSER_TOOLS = "Read,Grep,Glob"
 
 
 @dataclass
@@ -118,9 +118,9 @@ def run_validation(ctx: Context, state: State, rdir: str, log: Optional[RunLog])
 
 def _diagnose(ctx: Context, state: State, rdir: str, failed, outcome: ValidationOutcome, log: Optional[RunLog]) -> None:
     cfg = ctx.cfg.validate
-    engine_cfg = ctx.cfg.engine_for("validate")
+    engine = engines.for_role(ctx.cfg, "validate")
     chosen = models.resolve(models.DIAGNOSER, cfg.model, cfg.fallback_model, ctx.doc.author_model,
-                            engine_cfg.tiers, ctx.cfg.foreign_ladders(engine_cfg.name))
+                            engine.tiers, engines.foreign_ladders(ctx.cfg, engine.name))
     model = chosen.model
     outcome.model_reason = chosen.reason
     tests_md_path = os.path.join(rdir, "tests.md")
@@ -136,15 +136,15 @@ def _diagnose(ctx: Context, state: State, rdir: str, failed, outcome: Validation
     prompt = string.Template(read_text(ctx.diagnose_prompt)).safe_substitute(values)
     write_text(os.path.join(ctx.logs, "prompt-diagnose-%d.md" % outcome.number), prompt)
     if log:
-        log.stage("validate", "diagnoser %s%s (budget $%.2f)"
-                  % (model, " (%s)" % chosen.reason if chosen.reason else "", cfg.budget_usd))
+        log.stage("validate", "diagnoser %s%s via %s (budget $%.2f)"
+                  % (model, " (%s)" % chosen.reason if chosen.reason else "", engine.name, cfg.budget_usd))
     try:
-        result = claude.invoke(
-            role="diagnoser", model=model, fallback_model=chosen.fallback, effort=cfg.effort,
-            schema_text=read_text(ctx.diagnose_schema), budget_usd=cfg.budget_usd,
-            extra_args=["--tools", DIAGNOSER_TOOLS], prompt=prompt, cwd=ctx.repo_root,
-            timeout_s=ctx.cfg.review.timeout_min * 60,
-            raw_path=os.path.join(ctx.logs, "diagnose-%d.raw.json" % outcome.number), log=log)
+        result = engine.run(EngineRequest(
+            role="diagnoser", prompt=prompt, schema_text=read_text(ctx.diagnose_schema),
+            model=model, fallback_model=chosen.fallback, effort=cfg.effort, budget_usd=cfg.budget_usd,
+            timeout_s=ctx.cfg.review.timeout_min * 60, cwd=ctx.repo_root,
+            raw_path=os.path.join(ctx.logs, "diagnose-%d.raw.json" % outcome.number),
+            read_only=True), log)
     except Stop as stop:
         outcome.diagnosis_error = stop.message
         if log:

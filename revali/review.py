@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from revali import EXIT_ERROR
-from revali import claude, gitops, models
-from revali.claude import model_family, pick_actual_model  # noqa: F401  (re-exported)
+from revali import engines, gitops, models
+from revali.engines import EngineRequest
 from revali.preflight import Context, Stop
 from revali.procs import resolve, run
 from revali.runners import RunnerError, get_runner, steps_for
@@ -22,7 +22,7 @@ MANIFEST_PATTERNS = [
     "Cargo.toml", "Cargo.lock", "go.mod", "go.sum", "CMakeLists.txt", ".gitmodules",
     "conanfile.*", "vcpkg.json", "Gemfile", "Gemfile.lock",
 ]
-ALLOWED_TOOLS = "Bash(git diff *) Bash(git log *) Bash(git show *)"
+SHELL_ALLOW = ["git diff", "git log", "git show"]   # read-only git, mapped by the engine
 LIST_FIELDS = ("questions", "findings", "previous_findings", "scope_mismatch", "dependencies_changed",
                "test_changes", "tests", "not_testable", "suggestions")
 
@@ -206,33 +206,60 @@ def planned_reviewer(ctx: Context) -> models.Resolved:
     cfg = ctx.cfg.review
     engine_cfg = ctx.cfg.engine_for("review")
     return models.resolve(models.REVIEWER, cfg.model, cfg.fallback_model, ctx.doc.author_model if ctx.doc else "",
-                          engine_cfg.tiers, ctx.cfg.foreign_ladders(engine_cfg.name))
+                          engine_cfg.tiers, engines.foreign_ladders(ctx.cfg, engine_cfg.name))
 
 
 def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt: int,
                    log: Optional[RunLog]) -> ReviewerRun:
     cfg = ctx.cfg.review
+    engine = engines.for_role(ctx.cfg, "review")
     chosen = planned_reviewer(ctx)
-    requested = chosen.model
     raw_path = os.path.join(ctx.logs, "review-r%d-%d.raw.json" % (round_no, attempt))
     if log:
-        log.stage("review", "round %d attempt %d: reviewer %s%s (budget $%.2f, timeout %d min)"
-                  % (round_no, attempt, requested, " (%s)" % chosen.reason if chosen.reason else "",
-                     cfg.budget_usd, cfg.timeout_min))
-    result = claude.invoke(
-        role="reviewer", model=requested, fallback_model=chosen.fallback, effort=cfg.effort,
-        schema_text=read_text(ctx.review_schema), budget_usd=cfg.budget_usd,
-        extra_args=["--permission-mode", "acceptEdits", "--allowedTools", ALLOWED_TOOLS],
-        prompt=prompt, cwd=ctx.repo_root, timeout_s=cfg.timeout_min * 60, raw_path=raw_path, log=log)
+        log.stage("review", "round %d attempt %d: reviewer %s%s via %s (budget $%.2f, timeout %d min)"
+                  % (round_no, attempt, chosen.model, " (%s)" % chosen.reason if chosen.reason else "",
+                     engine.name, cfg.budget_usd, cfg.timeout_min))
+    request = EngineRequest(
+        role="reviewer", prompt=prompt, schema_text=read_text(ctx.review_schema),
+        model=chosen.model, fallback_model=chosen.fallback, effort=cfg.effort, budget_usd=cfg.budget_usd,
+        timeout_s=cfg.timeout_min * 60, cwd=ctx.repo_root, raw_path=raw_path,
+        may_write=[ctx.cfg.project.test_dir], shell_allow=list(SHELL_ALLOW))
+    try:
+        result = engine.run(request, log)
+    except Stop:
+        discard_unfinished_tests(ctx, log)
+        raise
     problems = validate_shape(result.data)
     if problems:
         raise Stop(EXIT_ERROR, "reviewer output does not match the schema: %s; raw saved to %s"
                    % ("; ".join(problems[:5]), raw_path))
     return ReviewerRun(
-        data=result.data, raw=result.raw, model_requested=requested, model_actual=result.model_actual,
+        data=result.data, raw=result.raw, model_requested=chosen.model, model_actual=result.model_actual,
         fallback=result.fallback, cost=result.cost, denials=result.denials, duration_ms=result.duration_ms,
         model_reason=chosen.reason,
     )
+
+
+def discard_unfinished_tests(ctx: Context, log: Optional[RunLog]) -> List[str]:
+    """Delete untracked files matching test_file_pattern under test_dir after a Reviewer
+    session failed: they are half-written and would make the next run refuse a dirty tree.
+    This is the only deletion inside test_dir revali ever performs."""
+    pattern = test_pattern_glob(ctx)
+    removed = []
+    for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + '/',)):
+        code, path = entry.split(" ", 1)
+        path = path.replace("\\", "/")
+        if (code.strip() == "??" and _under_test_dir(path, ctx.cfg.project.test_dir)
+                and gitops.matches_any(path, [pattern])):
+            try:
+                os.remove(os.path.join(ctx.repo_root, path))
+                removed.append(path)
+            except OSError:
+                pass
+    if removed and log:
+        log.stage("review", "removed %d unfinished test file(s) the reviewer left behind: %s"
+                  % (len(removed), ", ".join(removed)))
+    return removed
 
 
 # ---- checks after the reviewer --------------------------------------------
