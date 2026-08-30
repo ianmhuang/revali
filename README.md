@@ -1,23 +1,51 @@
 # revali
 
-Headless review / validate / merge pipeline for feature branches on your own
-GitHub repositories. An authoring session (Claude Code, or you) writes
-`.revali/<branch>/change.md`, gets its acceptance criteria approved, then
-implements the change on a branch (see Workflow below); revali then:
+Review, validate, merge: a headless pipeline for feature branches on your own
+GitHub repositories. Three roles take part.
 
-1. runs preflight (clean tree, private repo you own, base not ahead, diff size,
-   credential scan, lint, existing suite),
-2. pushes the branch and opens a draft PR,
-3. spawns an independent reviewer session (`claude -p`) that reviews the diff
-   against the acceptance criteria and writes acceptance tests,
-4. runs the existing suite plus the new tests in a WSL sandbox, spawning a
-   diagnoser session only on failure,
-5. stops at READY TO MERGE for a human `revali merge`.
+- **Developer**: the authoring session (Claude Code, or you). Writes the
+  acceptance criteria before the code, gets them approved, implements, and
+  types `/revali`.
+- **Reviewer**: an independent headless session revali spawns. Reviews the
+  diff against the acceptance criteria and writes the acceptance tests. It
+  does not run them.
+- **Validator**: a sandbox run of the existing suite plus the Reviewer's
+  tests. On failure only, a diagnosis session reads the output and says
+  whether the code, the test, or the environment is at fault.
 
-Status: v1.0 feature set complete (preflight, review, validate, merge,
-stats). The WSL runner is verified against a real Ubuntu distro; the full
-pipeline against a real GitHub repository and real reviewer sessions is
-being exercised now.
+```mermaid
+flowchart TD
+    D1[Developer writes change.md<br/>Request, Goal, AC-n, status: draft] --> U1{User approves AC?}
+    U1 -- edits --> D1
+    U1 -- yes --> D2[Developer implements,<br/>writes own tests, commits]
+    D2 --> U2[/User types /revali/]
+    U2 --> P[preflight<br/>clean tree, private repo you own,<br/>base not ahead, diff size, secret scan,<br/>lint, existing suite in sandbox]
+    P -- fail --> D2
+    P --> PR[push + draft PR]
+    PR --> R[Reviewer<br/>reviews diff against AC,<br/>writes acceptance tests]
+    R -- CHANGES_REQUESTED / NEEDS_INFO<br/>exit 2 --> D3[Developer fixes or answers<br/>in response-n.md, commits]
+    D3 --> U2
+    R -- APPROVE --> V[Validator<br/>sandbox: existing suite + new tests]
+    V -- FAIL --> C[diagnosis session<br/>code / test / env]
+    C -- exit 2 --> D3
+    V -- PASS --> M[READY TO MERGE<br/>PR marked ready, exit 0]
+    M --> U3[/User runs revali merge/]
+    U3 --> G[wait for CI, squash merge,<br/>delete branch, clean state dir]
+```
+
+| Role | Started by | Reads | Writes | Model |
+|---|---|---|---|---|
+| Developer | the user | the request, the repo | `change.md`, code, its own tests | whatever the user's session runs; recorded as `author_model` |
+| Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round | `review-n.md`, tests in `test_dir` plus `tests.md`, a PR comment; does not run the tests | `auto`: one tier above the Developer |
+| Validator | revali, after APPROVE | a sandbox clone of the branch | `tests.md`, logs; on FAIL only, the diagnosis session writes `diagnose-n.json` | the runner needs none; diagnosis `auto`: one tier below the Developer |
+
+Three user actions (approve the AC, `/revali`, `revali merge`) are the gates;
+everything between them is automatic. Exit codes: `0` done / ready to merge,
+`1` pipeline error (not a verdict), `2` the Developer must act (fix, rebase,
+answer a question), `3` a human must decide, `4` (`wait` only) still running.
+
+Status: v1.0. Verified end to end on a private GitHub repository with real
+Reviewer sessions and a real WSL sandbox; revali reviews its own changes.
 
 ## Requirements
 
@@ -100,10 +128,7 @@ time and recorded in the review and diagnosis headers.
 | run history | revali | `revali stats` | `~/.revali/history.jsonl` | `history_path` or `[paths] history_file` in `~/.revali/config.toml` (user level only) |
 
 Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves
-with the `REVALI_HOME` environment variable. Developer, Reviewer, and
-Validator are the three roles of the loop: the authoring session, the
-independent review session revali spawns, and the sandbox run (with a
-diagnosis session on failure only).
+with the `REVALI_HOME` environment variable.
 
 ## Workflow
 
@@ -135,10 +160,6 @@ Ubuntu 24.04 that means `python3-venv` and `python3-pip` for a Python project.
 ```
 ```
 
-Exit codes: `0` done / ready to merge, `1` pipeline error (not a verdict),
-`2` the author must act (fix, rebase, answer a question), `3` a human must
-decide, `4` (`wait` only) still running.
-
 `REVALI_DISABLE=1` in the environment switches revali off entirely.
 
 ## Project setup
@@ -169,9 +190,11 @@ stated.
   local branch and checks out the base branch; then `git pull --prune` and
   deletion of the branch's state directory
 - after a review round that stops before its tests are committed (a failed
-  or interrupted Reviewer session, unusable output, a smoke run that fails
+  or timed-out Reviewer session, unusable output, a smoke run that fails
   twice), deletes the untracked files matching `test_file_pattern` under
-  `test_dir` that the session left behind, and names them in the log
+  `test_dir` that the session left behind, and names them in the log;
+  `revali stop` and Ctrl-C do not clean up, so a run interrupted that way
+  may leave such files for you to delete
 
 It never modifies files outside `test_dir` and the state directory, never merges on
 its own, and never runs on a repo you do not own or that is public.
