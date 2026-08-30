@@ -57,11 +57,14 @@ schema = ""                      # empty = schemas/diagnose.schema.json
 # Defaults for every [validate.<platform>] table; a user or project file may
 # repeat this table to change the defaults for all of its platforms.
 [validate.platform]
-runner = "wsl"
-distro = "Ubuntu"
+runner = "wsl"                       # wsl | local | ssh
+distro = "Ubuntu"                    # wsl only
+host = ""                            # ssh only: an ssh destination or ~/.ssh/config alias
 network = false
 command_timeout_min = 15
-sandbox_dir = "~/.revali/sandbox"   # inside the WSL distro; ~ is the distro user's home
+connect_timeout_s = 15               # ssh only: ConnectTimeout, and the budget for short remote commands
+transfer_timeout_min = 10            # ssh only: one scp transfer (inputs up, logs down)
+sandbox_dir = "~/.revali/sandbox"   # inside the WSL distro or on the ssh host; ~ is that user's home
 setup = ""
 build = ""
 test = ""

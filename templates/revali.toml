@@ -37,8 +37,11 @@ fallback_model = "auto"
 budget_usd = 1.0
 
 [validate.linux]
-runner = "wsl"                    # wsl | local
-distro = "Ubuntu"
+runner = "wsl"                    # wsl | local | ssh
+distro = "Ubuntu"                 # wsl only
+# host = "user@box"               # ssh only; port and key come from ~/.ssh/config
+# connect_timeout_s = 15          # ssh only; default from defaults.toml
+# transfer_timeout_min = 10       # ssh only; one scp transfer
 command_timeout_min = 15
 # sandbox_dir = "~/.revali/sandbox"      # inside the distro; default from defaults.toml
 setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"

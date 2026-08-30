@@ -164,6 +164,17 @@ def check_github(ctx: Context) -> None:
         raise Stop(EXIT_ERROR, "you are on '%s'; revali reviews a feature branch, not the base" % ctx.base)
 
 
+def check_runner(ctx: Context) -> None:
+    """The sandbox runner must be reachable before anything is pushed (skipped on dry runs)."""
+    if ctx.dry_run:
+        return
+    from revali.runners import probe_runner
+    plat = ctx.cfg.validate.platforms[ctx.cfg.project.platforms[0]]
+    problem = probe_runner(plat)
+    if problem:
+        raise Stop(EXIT_ERROR, problem)
+
+
 def check_base(ctx: Context) -> None:
     root = ctx.repo_root
     ref = ctx.base
@@ -242,6 +253,7 @@ def preflight(cwd: str, base_override: str = "", dry_run: bool = False,
     check_github(ctx)
     ctx.say("GitHub: %s/%s (%s), base %s" % (ctx.repo.owner, ctx.repo.name, ctx.repo.visibility.lower(), ctx.base))
     check_base(ctx)
+    check_runner(ctx)
     check_diff_size(ctx)
     ctx.say("diff: %d lines in %d files%s" % (
         ctx.diff_lines, len(ctx.changed_files),
