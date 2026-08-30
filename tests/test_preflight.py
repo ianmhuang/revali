@@ -7,6 +7,19 @@ from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.preflight import Stop, preflight
 
 
+class _ListLog:
+    """Collects preflight stage lines; detail lines are dropped."""
+
+    def __init__(self, lines):
+        self.lines = lines
+
+    def stage(self, stage, msg):
+        self.lines.append("%s: %s" % (stage, msg))
+
+    def detail(self, msg):
+        pass
+
+
 class PreflightHappyPath(RepoCase):
     def test_passes_on_fixture(self):
         ctx = preflight(self.repo)
@@ -90,9 +103,12 @@ class PreflightFailures(RepoCase):
         self.scenario({"owner": "someone-else"})
         self.assert_stop(EXIT_ERROR, "only runs on your own repos")
 
-    def test_public_repo_refused(self):
+    def test_public_repo_allowed_with_a_note(self):
         self.scenario({"visibility": "PUBLIC"})
-        self.assert_stop(EXIT_ERROR, "private repos")
+        lines = []
+        ctx = preflight(self.repo, log=_ListLog(lines))
+        self.assertEqual(ctx.repo.visibility, "PUBLIC")
+        self.assertTrue(any("public repository: PR comments will carry summaries only" in l for l in lines), lines)
 
     def test_stale_base(self):
         # Advance origin/main behind the branch's back.

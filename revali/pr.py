@@ -86,10 +86,15 @@ def create_draft(ctx: Context, rdir: str, log: Optional[RunLog]):
     return number, url
 
 
+def is_public(ctx: Context) -> bool:
+    """Anything but PRIVATE (public, internal, unknown) gets summaries on the PR."""
+    return bool(ctx.repo) and ctx.repo.visibility != "PRIVATE"
+
+
 def pr_body(ctx: Context, state: Optional[State]) -> str:
     """change.md minus the verbatim request when the repo is public, plus a status table."""
     body = ctx.doc.raw.strip()
-    if ctx.repo and ctx.repo.visibility != "PRIVATE":
+    if is_public(ctx):
         body = re.sub(r"## Request\n.*?(?=\n## )", "## Request\n(withheld: public repository)\n", body, flags=re.S)
     if state and state.rounds:
         rows = ["", "## revali status", "", "| round | verdict | model | cost |", "|---|---|---|---|"]

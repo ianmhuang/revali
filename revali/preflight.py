@@ -153,9 +153,6 @@ def check_github(ctx: Context) -> None:
     if not ctx.repo.owner or ctx.repo.owner.lower() != ctx.login.lower():
         raise Stop(EXIT_ERROR, "repo owner is '%s' but you are '%s'; revali only runs on your own repos"
                    % (ctx.repo.owner, ctx.login))
-    if ctx.repo.visibility != "PRIVATE":
-        raise Stop(EXIT_ERROR, "repo visibility is %s; this version only runs on private repos"
-                   % (ctx.repo.visibility or "unknown"))
     if not ctx.base:
         ctx.base = ctx.repo.default_branch
         if not ctx.base:
@@ -252,6 +249,9 @@ def preflight(cwd: str, base_override: str = "", dry_run: bool = False,
     check_tree(ctx)
     check_github(ctx)
     ctx.say("GitHub: %s/%s (%s), base %s" % (ctx.repo.owner, ctx.repo.name, ctx.repo.visibility.lower(), ctx.base))
+    if ctx.repo.visibility != "PRIVATE":
+        ctx.say("%s repository: PR comments will carry summaries only; the full review text stays under %s"
+                % (ctx.repo.visibility.lower() or "non-private", ctx.cfg.paths.state_dir))
     check_base(ctx)
     check_runner(ctx)
     check_diff_size(ctx)

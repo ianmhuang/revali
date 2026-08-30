@@ -1,9 +1,6 @@
-"""AC-3: the README wording. Checked against the file as text, since the README
-is the deliverable: the status line names the package version and does not read
-as a release version; the role table attributes review-n.md, tests.md and the PR
-comment to revali; the Reviewer reads response-n.md; the note under the diagram
-covers the baseline and the sandbox setup / build failure.
-"""
+"""README wording, checked as text: the "Why separate sessions" paragraph, the
+removed private-only requirement and the public-repository side effect (PR #11);
+the status line, the role table and the note under the diagram (PR #8, #9)."""
 import os
 import re
 import unittest
@@ -16,6 +13,78 @@ def readme():
     with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8", newline="") as fh:
         return fh.read()
 
+
+class WhySeparateSessions(unittest.TestCase):
+    def setUp(self):
+        self.text = readme()
+
+    def paragraph(self):
+        m = re.search(r"\*\*Why separate sessions\.?\*\*(.*?)\n\n", self.text, flags=re.S)
+        self.assertIsNotNone(m, "README has no 'Why separate sessions' paragraph")
+        return m.group(0)
+
+    def test_paragraph_follows_the_three_role_definitions(self):
+        text = self.text
+        roles = [text.index("**Developer**"), text.index("**Reviewer**"), text.index("**Validator**")]
+        why = text.index("**Why separate sessions")
+        self.assertGreater(why, max(roles))
+        self.assertLess(why, text.index("```mermaid"))
+
+    def test_paragraph_covers_the_four_points(self):
+        p = self.paragraph().lower()
+        self.assertIn("own work", p)                      # nobody grades their own work
+        self.assertIn("reviewer", p)                      # what each role sees
+        self.assertIn("validator", p)
+        self.assertIn("tier", p)                          # models differ by tier
+        self.assertIn("vendor", p)                        # or by vendor
+        self.assertIn("blind spot", p)                    # fresh context does not remove shared blind spots
+        self.assertIn("revali stats", p)                  # which stats tracks
+
+    def test_vendor_claim_names_the_single_engine(self):
+        # round 2: "by vendor" must not read as a present capability while only one engine is registered
+        from revali.engines import available
+        p = self.paragraph().lower()
+        self.assertIn("vendor", p)
+        for name in available():
+            self.assertIn("`%s`" % name, p, "the paragraph names the engines that exist today")
+        self.assertRegex(p, r"only `claude` exists today|would plug in")
+        self.assertNotIn("and, through the engine seam, by vendor", p)
+
+
+class StatusLineDoesNotOverstateVerification(unittest.TestCase):
+    def test_end_to_end_claim_is_scoped_to_a_private_repository(self):
+        # round 2: the public path is exercised by the fake-gh suite only; the README says so
+        text = readme()
+        m = re.search(r"^Status:.*?(?=\n\n)", text, flags=re.M | re.S)
+        self.assertIsNotNone(m, "no 'Status:' paragraph in README")
+        para = " ".join(m.group(0).split())
+        self.assertIn("Verified end to end on a private GitHub repository", para)
+        self.assertNotRegex(para.lower(), r"end to end on (a )?(public|github) repositor")
+
+
+class PrivateRequirementIsGone(unittest.TestCase):
+    def setUp(self):
+        self.text = readme()
+
+    def test_no_private_only_wording(self):
+        low = self.text.lower()
+        self.assertNotIn("or that is public", low)
+        self.assertNotIn("only runs on private", low)
+        self.assertNotIn("private repos", low)
+        self.assertNotIn("must be private", low)
+
+    def test_side_effect_list_describes_the_summary_comments(self):
+        start = self.text.index("## What revali does to your repository")
+        end = self.text.index("## Development", start)
+        section = self.text[start:end].lower()
+        self.assertIn("pr comment", section)
+        self.assertIn("summar", section)
+        self.assertIn("not private", section)
+        self.assertIn("request", section)   # the PR body withholds the Request section
+        self.assertIn("never runs on a repo you do not own", section)
+
+
+# --- kept from PR #8 / #9 (this file is shared across rounds; do not drop earlier checks) ---
 
 def table_row(text, role):
     """Cells of the role table row whose first cell is `role`."""

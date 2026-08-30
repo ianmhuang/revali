@@ -13,6 +13,18 @@ GitHub repositories. Three roles take part.
   tests. On failure only, a diagnosis session reads the output and says
   whether the code, the test, or the environment is at fault.
 
+**Why separate sessions.** Each role runs in its own session with its own
+inputs, so nobody grades their own work: the Developer never reviews the
+change it wrote; the Reviewer gets the acceptance criteria and the diff, not
+the Developer's reasoning, and derives its tests from the criteria; the
+Validator is a test run, not an opinion; the diagnosis session sees only the
+failure output. The models can differ by tier (`auto` puts the Reviewer one
+tier above the Developer); the engine seam is where a second vendor would
+plug in (only `claude` exists today). Fresh
+context removes the author's bias toward its own change; it does not remove
+blind spots the models share, which is why `revali stats` tracks the
+first-try approval rate.
+
 ```mermaid
 sequenceDiagram
     actor U as User
@@ -28,7 +40,7 @@ sequenceDiagram
     U->>D: /revali
     loop until APPROVE + PASS (max 2 fix cycles)
         D->>R: revali run
-        R->>R: preflight: clean tree, private repo, base, diff size, secrets, lint, baseline
+        R->>R: preflight: clean tree, own repo, base, diff size, secrets, lint, baseline
         R->>G: push, draft PR
         R->>B: diff, change.md, checklist, previous round
         B-->>R: verdict, findings, acceptance tests
@@ -228,7 +240,11 @@ stated.
 - `git push -u origin <branch>` and `gh pr create --draft`
 - commits the reviewer's test files into `test_dir`, with a
   `Co-Authored-By: Claude` trailer
-- posts review and validation results as PR comments
+- posts review and validation results as PR comments; on a repository that
+  is not private the comments are summaries (verdict, model, cost, finding
+  ids with severity and location, test files, AC coverage, validation exit
+  codes, diagnosis cause) and the PR body withholds the `Request` section;
+  the full text stays in the state directory
 - on `revali merge` (human-started, refused unless the last run ended READY
   TO MERGE and HEAD has not moved): waits for CI checks if the PR has any,
   then `gh pr merge --<method> --delete-branch`, which also deletes the
@@ -242,7 +258,7 @@ stated.
   may leave such files for you to delete
 
 It never modifies files outside `test_dir` and the state directory, never merges on
-its own, and never runs on a repo you do not own or that is public.
+its own, and never runs on a repo you do not own.
 
 ## Development
 

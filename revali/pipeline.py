@@ -201,7 +201,12 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         if not res.ok:
             raise Stop(EXIT_ERROR, "git push of the test commit failed: %s" % res.text.strip())
         state.head_sha = outcome.commit_sha
-    prstage.post_comment(ctx, state, rdir, "review-%d" % outcome.round_no, outcome.review_md, log)
+    comment = outcome.review_md
+    if prstage.is_public(ctx):
+        comment = review.render_review_summary(outcome.data, outcome.verdict, outcome.round_no,
+                                               outcome.model_actual, outcome.cost, [a[0] for a in ctx.doc.acs],
+                                               ctx.cfg.paths.state_dir)
+    prstage.post_comment(ctx, state, rdir, "review-%d" % outcome.round_no, comment, log)
 
     if outcome.verdict == review.NEEDS_INFO:
         questions = "\n".join("  - " + q for q in outcome.data.get("questions", []))
@@ -226,7 +231,10 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     state.set_stage(rdir, "validate", "review approved in round %d; validating" % outcome.round_no)
     prstage.update_body(ctx, state, rdir, log)
     vout = validate.run_validation(ctx, state, rdir, log)
-    prstage.post_comment(ctx, state, rdir, "validate-%d" % vout.number, vout.section_md, log)
+    section = vout.section_md
+    if prstage.is_public(ctx):
+        section = validate.render_section_summary(vout, ctx.cfg.paths.state_dir)
+    prstage.post_comment(ctx, state, rdir, "validate-%d" % vout.number, section, log)
 
     if vout.result == validate.FAIL:
         summary = validate.summary_for_author(vout, rdir)
