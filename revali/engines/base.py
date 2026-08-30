@@ -7,6 +7,7 @@ outside revali/engines/ knows a CLI flag.
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from revali import models
 from revali.config import EngineCfg
 from revali.state import RunLog
 
@@ -57,12 +58,8 @@ class Engine:
 
     def model_family(self, model: str) -> str:
         """The tier name inside a model id ("claude-opus-5" -> "opus"), else the id itself."""
-        m = (model or "").lower()
-        for tier in self.tiers:
-            t = tier.lower()
-            if m == t or t in m:
-                return t
-        return m
+        idx = models.tier_index(model, self.tiers)
+        return self.tiers[idx].lower() if idx is not None else (model or "").lower()
 
     def pick_actual_model(self, model_usage: dict, requested: str):
         """The non-helper model that did the work; fallback when it is not the requested family."""

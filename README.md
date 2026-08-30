@@ -33,19 +33,24 @@ flowchart TD
     U3 --> G[wait for CI, squash merge,<br/>delete branch, clean state dir]
 ```
 
+The preflight baseline (the existing suite in the sandbox) runs once per
+branch, on the first pass, and not for `kind: docs`. A sandbox `setup` or
+`build` failure is exit 1 (environment), not a FAIL verdict.
+
 | Role | Started by | Reads | Writes | Model |
 |---|---|---|---|---|
 | Developer | the user | the request, the repo | `change.md`, code, its own tests | whatever the user's session runs; recorded as `author_model` |
-| Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round | `review-n.md`, tests in `test_dir` plus `tests.md`, a PR comment; does not run the tests | `auto`: one tier above the Developer |
-| Validator | revali, after APPROVE | a sandbox clone of the branch | `tests.md`, logs; on FAIL only, the diagnosis session writes `diagnose-n.json` | the runner needs none; diagnosis `auto`: one tier below the Developer |
+| Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir`, and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment; does not run the tests | `auto`: one tier above the Developer |
+| Validator | revali, after APPROVE | a sandbox clone of the branch | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers and revali writes `diagnose-n.json` | the runner needs none; diagnosis `auto`: one tier below the Developer |
 
 Three user actions (approve the AC, `/revali`, `revali merge`) are the gates;
 everything between them is automatic. Exit codes: `0` done / ready to merge,
 `1` pipeline error (not a verdict), `2` the Developer must act (fix, rebase,
 answer a question), `3` a human must decide, `4` (`wait` only) still running.
 
-Status: v1.0. Verified end to end on a private GitHub repository with real
-Reviewer sessions and a real WSL sandbox; revali reviews its own changes.
+Status: v1.0 feature set complete (package version 0.1.0). Verified end to
+end on a private GitHub repository with real Reviewer sessions and a real
+WSL sandbox; revali reviews its own changes.
 
 ## Requirements
 

@@ -64,6 +64,14 @@ class ModelFamilyTests(unittest.TestCase):
         self.assertEqual(self.engine.model_family("claude-fable-5"), "fable")
         self.assertEqual(self.engine.model_family("claude-opus-5"), "opus")
         self.assertEqual(self.engine.model_family("something-else"), "something-else")
+        self.assertEqual(self.engine.model_family("Claude-Opus-5"), "opus")
+        self.assertEqual(self.engine.model_family(""), "")
+
+    def test_model_family_follows_tier_index(self):
+        # one lookup for both: a ladder with unusual names must give the same answer in both places
+        engine = ClaudeEngine(EngineCfg(name="claude", tiers=["Mini", "Max"], helper_prefix=""))
+        self.assertEqual(engine.model_family("vendor-max-2"), "max")
+        self.assertEqual(engine.model_family("vendor-mini"), "mini")
 
     def test_pick_actual_model(self):
         usage = {"claude-haiku-4-5-20251001": {"costUSD": 0.001}, "claude-fable-5": {"costUSD": 0.4}}

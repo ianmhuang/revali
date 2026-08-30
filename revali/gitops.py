@@ -80,6 +80,30 @@ def has_remote(remote: str, cwd: str) -> bool:
     return res.ok
 
 
+def remote_repo(remote: str, cwd: str) -> str:
+    """'owner/name' from a hosted remote URL (https, ssh, scp-like); '' for a local path or no remote."""
+    res = _git(["remote", "get-url", remote], cwd)
+    if not res.ok:
+        return ""
+    url = res.stdout.strip()
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+        if scheme.lower() == "file":
+            return ""
+        path = rest.split("/", 1)[1] if "/" in rest else ""
+    elif ":" in url and "@" in url.split(":", 1)[0]:
+        path = url.split(":", 1)[1]
+    else:
+        return ""
+    parts = [p for p in path.strip("/").split("/") if p]
+    if len(parts) < 2:
+        return ""
+    name = parts[-1]
+    if name.lower().endswith(".git"):
+        name = name[:-4]
+    return "%s/%s" % (parts[-2], name)
+
+
 def is_ancestor(ancestor: str, descendant: str, cwd: str) -> bool:
     res = _git(["merge-base", "--is-ancestor", ancestor, descendant], cwd)
     return res.returncode == 0
