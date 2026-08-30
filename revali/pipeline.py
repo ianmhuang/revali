@@ -165,12 +165,16 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     from revali import review
     from revali import validate
 
+    if not state.repo:
+        # so a run that stops in preflight still names its repo in history
+        state.repo = gitops.remote_repo("origin", cwd)
     first_pass = not state.rounds and not args.dry_run
     baseline_hook = (lambda ctx: validate.baseline(ctx, rdir, log)) if first_pass else None
     ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log, baseline=baseline_hook)
     _rerun_bookkeeping(ctx, state, rdir, log)
     state.branch, state.base = ctx.branch, ctx.base
-    state.repo = "%s/%s" % (ctx.repo.owner, ctx.repo.name) if ctx.repo else ""
+    # lowercased like gitops.remote_repo, so stats groups both sources under one row
+    state.repo = ("%s/%s" % (ctx.repo.owner, ctx.repo.name)).lower() if ctx.repo else ""
     state.head_sha, state.base_sha = ctx.head_sha, ctx.base_sha
     state.set_stage(rdir, "preflight", "preflight passed")
 

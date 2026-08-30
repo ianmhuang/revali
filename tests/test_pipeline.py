@@ -326,5 +326,34 @@ class ReviewerMisbehaviour(RepoCase):
         self.assertIn("AKIAIOSFODNN7EXAMPLE", self.read(".revali/feature__mul/review-1.md"))
 
 
+class HistoryRepoTests(RepoCase):
+    """A run that stops in preflight still names its repo in history (stats grouped it as unknown)."""
+
+    def test_preflight_stop_records_repo_from_origin(self):
+        git(["remote", "set-url", "origin", "https://github.com/Me/Sample.git"], self.repo)
+        self.write("src/calc.py", "# dirty\n")
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        rows = read_history(os.path.join(self.home, "history.jsonl"))
+        self.assertEqual(rows[-1]["repo"], "me/sample")
+        code, out = run_cli(["stats"])
+        self.assertNotIn("(unknown repo)", out)
+        self.assertIn("me/sample", out)
+
+    def test_ssh_style_origin(self):
+        git(["remote", "set-url", "origin", "git@github.com:me/sample.git"], self.repo)
+        self.write("src/calc.py", "# dirty\n")
+        run_cli(["run", "--foreground"])
+        rows = read_history(os.path.join(self.home, "history.jsonl"))
+        self.assertEqual(rows[-1]["repo"], "me/sample")
+
+    def test_local_origin_stays_blank(self):
+        # the fixture's origin is a bare directory on disk
+        self.write("src/calc.py", "# dirty\n")
+        run_cli(["run", "--foreground"])
+        rows = read_history(os.path.join(self.home, "history.jsonl"))
+        self.assertEqual(rows[-1]["repo"], "")
+
+
 if __name__ == "__main__":
     unittest.main()
