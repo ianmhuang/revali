@@ -196,7 +196,11 @@ user, port and key belong in `~/.ssh/config`. Every call runs with
 `BatchMode=yes`: nothing prompts, so key-based login must already work and
 the host key must be known (run `ssh <host>` once by hand). Preflight probes
 the host (reachable, git and `timeout` present) before anything is pushed;
-the same probe starts the WSL distro for `runner = "wsl"`.
+the same probe starts the WSL distro for `runner = "wsl"`. The ssh runner was
+verified against sshd inside WSL (`ListenAddress 127.0.0.1`, a non-default
+port, key-only login); on Ubuntu 24.04 `Port` in `sshd_config` is ignored
+while `ssh.socket` is active, so disable the socket and enable `ssh.service`
+if the port does not change.
 
 `REVALI_DISABLE=1` in the environment switches revali off entirely.
 
