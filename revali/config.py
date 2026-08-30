@@ -432,18 +432,23 @@ def paths_for(repo_root: str) -> PathsCfg:
     except ConfigError:
         pass
     paths = _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
-    project_file = os.path.join(repo_root, PROJECT_FILE)
-    if os.path.isfile(project_file):
-        try:
-            with open(project_file, "r", encoding="utf-8", newline="") as fh:
-                raw = tomllib.loads(fh.read()).get("paths", {})
-        except (OSError, tomllib.TOMLDecodeError):
-            raw = {}
-        for key in ("state_dir", "logs_dir"):
-            value = raw.get(key)
-            if isinstance(value, str) and _single_component(value):
+    for file in (os.path.join(user_home(), "config.toml"), os.path.join(repo_root, PROJECT_FILE)):
+        for key, value in _raw_paths(file).items():
+            if key in ("state_dir", "logs_dir") and isinstance(value, str) and _single_component(value):
                 setattr(paths, key, value)
     return paths
+
+
+def _raw_paths(file: str) -> dict:
+    """The [paths] table of a TOML file as written, {} when absent or unreadable."""
+    if not os.path.isfile(file):
+        return {}
+    try:
+        with open(file, "r", encoding="utf-8", newline="") as fh:
+            table = tomllib.loads(fh.read()).get("paths", {})
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    return table if isinstance(table, dict) else {}
 
 
 def history_path(user_cfg: Optional[UserConfig] = None) -> str:
@@ -455,6 +460,8 @@ def history_path(user_cfg: Optional[UserConfig] = None) -> str:
     paths = _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
     if user_cfg:
         name = user_cfg.sections.get("paths", {}).get("history_file")
-        if isinstance(name, str) and name:
+        if name is not None:
+            if not isinstance(name, str) or not _single_component(name):
+                raise ConfigError(["user config: paths.history_file must be a single file name (got %r)" % (name,)])
             paths.history_file = name
     return os.path.join(user_home(), paths.history_file)

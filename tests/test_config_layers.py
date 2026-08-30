@@ -179,6 +179,22 @@ class UserFileTests(unittest.TestCase):
     def test_paths_for_without_project_config(self):
         self.assertEqual(paths_for(self.home).state_dir, ".revali")
 
+    def test_paths_for_overlays_user_then_project_when_config_is_broken(self):
+        self.write('[paths]\nstate_dir = ".user"\nlogs_dir = "ulogs"\n')
+        repo = tempfile.mkdtemp(prefix="revali repo ")
+        self.addCleanup(rmtree_force, repo)
+        with open(os.path.join(repo, "revali.toml"), "w", encoding="utf-8") as fh:
+            fh.write('[project]\nconfig_version = 1\n[review]\nengine = "nope"\n[paths]\nstate_dir = ".proj"\n')
+        paths = paths_for(repo)
+        self.assertEqual((paths.state_dir, paths.logs_dir), (".proj", "ulogs"))
+
+    def test_history_file_in_user_file_is_validated(self):
+        from revali.config import history_path
+        self.write('[paths]\nhistory_file = "a/b.jsonl"\n')
+        with self.assertRaises(ConfigError) as cm:
+            history_path(load_user_config())
+        self.assertIn("single file name", cm.exception.problems[0])
+
 
 if __name__ == "__main__":
     unittest.main()

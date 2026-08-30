@@ -99,7 +99,7 @@ class StateAndLogsDir(RepoCase):
     def test_broken_config_still_uses_the_configured_state_dir(self):
         # AC-6 (round-1 F5): with a config that does not validate, the change.md lookup
         # follows the project's own [paths] state_dir instead of the tool default
-        self.write("revali.toml", self.read("revali.toml").replace("[review]\n", '[review]\nbudget_usd = "lots"\n'))
+        self.write("revali.toml", self.read("revali.toml").replace("budget_usd = 1.0", 'budget_usd = "lots"'))
         self.commit_all("broken config")
         code, out = run_cli(["preflight"])
         self.assertEqual(code, EXIT_ERROR, out)
