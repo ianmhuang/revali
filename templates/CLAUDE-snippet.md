@@ -13,4 +13,6 @@ Then implement, write your own tests, run the existing suite, fill in
 `What`, and commit. Never run revali on your own; the user types `/revali`
 when they want the review. Details: `<revali dir>/skill/SKILL.md`.
 
+<!-- The import below must name the file set as review.checklist in
+     revali.toml (CONVENTIONS.md by default). -->
 @CONVENTIONS.md

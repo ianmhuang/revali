@@ -1,8 +1,9 @@
 # revali
 
 Headless review / validate / merge pipeline for feature branches on your own
-GitHub repositories. An authoring session (Claude Code, or you) finishes a
-change on a branch and writes `.revali/<branch>/change.md`; revali then:
+GitHub repositories. An authoring session (Claude Code, or you) writes
+`.revali/<branch>/change.md`, gets its acceptance criteria approved, then
+implements the change on a branch (see Workflow below); revali then:
 
 1. runs preflight (clean tree, private repo you own, base not ahead, diff size,
    credential scan, lint, existing suite),
@@ -55,7 +56,8 @@ The acceptance criteria come before the code. In a project that has
 `Request`, `Goal`, numbered acceptance criteria, `Out of scope`, and
 `Dependencies` sections, keeps `status: draft` in the front matter, and
 shows the criteria to the user. Approval means deleting the `status: draft`
-line; preflight refuses a draft, so nothing runs on unapproved criteria.
+line; preflight refuses a draft (`change.md: status is 'draft'; review it and
+remove the status line`), so nothing runs on unapproved criteria.
 Then the author implements, writes its own tests, runs the existing suite,
 fills in `What`, commits, and the user types `/revali`. The reviewer's
 acceptance tests come on top of the author's tests, not instead of them.

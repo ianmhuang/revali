@@ -43,7 +43,8 @@ usual; the reviewer's acceptance tests come on top, they do not replace
 yours). Run the existing suite plus your tests locally before committing;
 revali's preflight runs the suite again as a safety net and stops with exit
 1 if it is red. Fill in `What` (and `Why` if the request does not already
-say) in `change.md`. Commit everything on the feature branch.
+say) in `change.md`. Commit everything on the feature branch (with the
+user's go-ahead when their rules require one for commits).
 
 ## Phase 3: `/revali`, typed by the user
 
