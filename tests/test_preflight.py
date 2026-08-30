@@ -90,9 +90,10 @@ class PreflightFailures(RepoCase):
         self.scenario({"owner": "someone-else"})
         self.assert_stop(EXIT_ERROR, "only runs on your own repos")
 
-    def test_public_repo_refused(self):
+    def test_public_repo_allowed_with_a_note(self):
         self.scenario({"visibility": "PUBLIC"})
-        self.assert_stop(EXIT_ERROR, "private repos")
+        ctx = preflight(self.repo)
+        self.assertEqual(ctx.repo.visibility, "PUBLIC")
 
     def test_stale_base(self):
         # Advance origin/main behind the branch's back.
