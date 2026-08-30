@@ -264,12 +264,12 @@ class AC6Paths(IsolatedHome):
     def test_file_overrides_must_exist_under_the_repo(self):
         for section, key in (("review", "prompt"), ("review", "schema"), ("review", "checklist_builtin"),
                              ("validate", "prompt"), ("validate", "schema")):
-            self.project_file(MINIMAL + '\n[%s]\n%s = "docs/%s.txt"\n' % (section, key, key))
+            self.project_file(MINIMAL + '\n[%s]\n%s = "docs/%s_%s.txt"\n' % (section, key, section, key))
             problems = _problems(load_project_config, self.repo)
             self.assertTrue(any("%s.%s" % (section, key) in p for p in problems), (key, problems))
-            _write(os.path.join(self.repo, "docs", "%s.txt" % key), "x")
+            _write(os.path.join(self.repo, "docs", "%s_%s.txt" % (section, key)), "x")
             cfg = load_project_config(self.repo)
-            self.assertEqual(getattr(getattr(cfg, section), key), "docs/%s.txt" % key)
+            self.assertEqual(getattr(getattr(cfg, section), key), "docs/%s_%s.txt" % (section, key))
 
     def test_empty_override_means_shipped_file(self):
         self.project_file(MINIMAL + '\n[review]\nprompt = ""\nschema = ""\nchecklist_builtin = ""\n')
