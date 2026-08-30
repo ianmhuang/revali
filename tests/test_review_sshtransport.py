@@ -65,7 +65,8 @@ class SshTransportCase(RepoCase):
         calls = self.transport_calls()
         self.assertTrue(calls, "no ssh / scp call recorded")
         self.assertEqual(calls[-1][0], "ssh", calls[-1])
-        self.assertIn("rm", calls[-1][1], calls[-1])
+        # since round 1 the cleanup is one shell line (F1: quoted remote commands)
+        self.assertTrue(calls[-1][1][-1].startswith("rm -rf "), calls[-1])
 
 
 class Delivery(SshTransportCase):
@@ -139,9 +140,9 @@ class NonInteractive(SshTransportCase):
         for exe, argv in calls:
             self.assertIn("BatchMode=yes", argv, (exe, argv))
         upload = [i for i, (e, a) in enumerate(calls) if e == "scp" and a[-1].startswith("box:")]
-        run = [i for i, (e, a) in enumerate(calls) if e == "ssh" and "bash" in a]
+        run = [i for i, (e, a) in enumerate(calls) if e == "ssh" and a[-1].startswith("bash ")]
         download = [i for i, (e, a) in enumerate(calls) if e == "scp" and a[-1] == "."]
-        cleanup = [i for i, (e, a) in enumerate(calls) if e == "ssh" and "rm" in a]
+        cleanup = [i for i, (e, a) in enumerate(calls) if e == "ssh" and a[-1].startswith("rm -rf ")]
         for name, found in (("upload", upload), ("run", run), ("download", download), ("cleanup", cleanup)):
             self.assertEqual(len(found), 1, "%s: %r in %r" % (name, found, calls))
         self.assertLess(upload[0], run[0])

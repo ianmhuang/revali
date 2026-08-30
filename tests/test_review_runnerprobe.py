@@ -51,10 +51,11 @@ class SshProbe(RepoCase):
         self.assertTrue(ssh, "preflight made no ssh call")
         first = ssh[0]["argv"]
         self.assertIn("box", first)
-        self.assertIn("git", first)
-        self.assertIn("timeout", first)
+        # since round 1 the probe is one shell line (F1: quoted remote commands)
+        self.assertIn("git --version", first[-1])
+        self.assertIn("command -v timeout", first[-1])
         self.assertIn("BatchMode=yes", first)
-        self.assertNotIn("bash", first)
+        self.assertFalse(first[-1].startswith("bash "), "the probe must not run the sandbox script")
 
     def test_dry_run_skips_the_ssh_probe(self):
         os.environ["REVALI_FAKE_SSH_DOWN"] = "1"

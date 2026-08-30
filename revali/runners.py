@@ -364,7 +364,10 @@ class SshRunner(Runner):
         self.host = plat.host.strip()
 
     def _opts(self) -> list:
-        return SSH_OPTS + ["-o", "ConnectTimeout=%d" % self.plat.connect_timeout_s]
+        # 0 (a PlatformCfg built by hand) leaves ssh at its own default
+        if self.plat.connect_timeout_s > 0:
+            return SSH_OPTS + ["-o", "ConnectTimeout=%d" % self.plat.connect_timeout_s]
+        return list(SSH_OPTS)
 
     def _ssh(self, command: str, timeout: float, log: Logger = None):
         """Run one shell command line on the host (ssh hands it to the remote shell as is)."""
@@ -375,7 +378,7 @@ class SshRunner(Runner):
 
     def _short(self) -> float:
         """Budget for a call that only connects and runs a trivial command."""
-        return self.plat.connect_timeout_s + 60
+        return max(self.plat.connect_timeout_s, 0) + 60
 
     def _failure(self, what: str, res) -> str:
         return "ssh: %s host '%s' (exit %d): %s" % (what, self.host, res.returncode,
@@ -418,7 +421,7 @@ class SshRunner(Runner):
         results_path = os.path.join(logs_dir, "%s.results" % label)
         if log:
             log("[%s] ssh %s: %d step(s) on %s" % (label, self.host, len(steps), ref[:10]))
-        transfer_s = self.plat.transfer_timeout_min * 60
+        transfer_s = self.plat.transfer_timeout_min * 60 or None   # None: no limit
         res = None
         try:
             r = self._ssh("mkdir -p %s %s" % (shell_path(inbox), shell_path(rlogs)), timeout=self._short(), log=log)
@@ -429,7 +432,7 @@ class SshRunner(Runner):
                 raise RunnerError(self._failure("could not copy the inputs to", r))
             try:
                 res = self._ssh("bash %s" % shell_path("%s/%s" % (inbox, script_name)),
-                                timeout=timeout_s * max(1, len(steps)) + transfer_s, log=log)
+                                timeout=timeout_s * max(1, len(steps)) + (transfer_s or 300), log=log)
             except ProcTimeout:
                 raise RunnerError("ssh session on %s for %s did not finish in time" % (self.host, label))
             r = self._scp(["%s:%s/." % (self.host, scp_logs), "."], cwd=logs_dir, timeout=transfer_s, log=log)
