@@ -5,11 +5,13 @@ import sys
 import unittest
 
 from tests.helpers import RepoCase, _quote, claude_entry, git, run_cli
-from revali import EXIT_ACTION, EXIT_OK
+from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.config import PlatformCfg
 from revali.runners import RunnerError, WslRunner
+from revali.state import RunLog, State, lock_path, write_json_atomic
 
 CHANGE = ".revali/feature__mul/change.md"
+DEAD_PID = 2 ** 31 - 1   # above any pid range on Windows and Linux: never alive
 
 REVIEW_PROMPT = "REVIEW PROMPT $branch round $round\n\n$checklist\n\n$diff\n"
 REVIEW_SCHEMA = '{"type": "object", "x-custom": "review"}\n'
@@ -80,6 +82,49 @@ class StateAndLogsDir(RepoCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("no run in progress", out)
         self.assertFalse(self.exists(".revali/feature__mul/lock"))
+
+    def test_wait_hint_names_the_configured_logs_dir(self):
+        # AC-1 / AC-5 (round-1 F3): a run that died leaves the user a hint pointing at
+        # <state_dir>/<branch>/<logs_dir>/run.log, not at a literal logs/ directory
+        rdir = os.path.join(self.repo, ".box", "feature__mul")
+        State(stage="review", message="reviewer round 1").save(rdir)
+        write_json_atomic(lock_path(rdir), {"pid": DEAD_PID, "since": "2026-01-01T00:00:00+0000"})
+        code, out = run_cli(["wait", "--timeout", "1s"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("died at stage 'review'", out)
+        self.assertIn(os.path.join(".box", "feature__mul", "trace", "run.log"), out)
+        self.assertNotIn(os.path.join("logs", "run.log"), out)
+        self.assertFalse(self.exists(".box/feature__mul/lock"))
+
+    def test_broken_config_still_uses_the_configured_state_dir(self):
+        # AC-6 (round-1 F5): with a config that does not validate, the change.md lookup
+        # follows the project's own [paths] state_dir instead of the tool default
+        self.write("revali.toml", self.read("revali.toml").replace("[review]\n", '[review]\nbudget_usd = "lots"\n'))
+        self.commit_all("broken config")
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("review.budget_usd must be a number", out)
+        self.assertNotIn("change.md", out)
+        # and when change.md really is missing, the message names the configured directory
+        os.remove(os.path.join(self.repo, ".box", "feature__mul", "change.md"))
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("change.md not found", out)
+        self.assertIn(".box", out)
+        self.assertNotIn(".revali", out)
+
+    def test_runlog_has_no_logs_dir_default(self):
+        # AC-5 / conventions (round-1 F4): the logs dir is not defaulted in code
+        rdir = os.path.join(self.repo, ".box", "feature__mul")
+        with self.assertRaises(TypeError):
+            RunLog(rdir)
+        with self.assertRaises(TypeError):
+            RunLog(rdir, logs_dir="")
+        RunLog(None)   # no branch directory, no file: allowed
+        log = RunLog(rdir, logs_dir="trace", quiet=True)
+        log.stage("test", "hello")
+        self.assertTrue(self.exists(".box/feature__mul/trace/revali.log"))
+        self.assertFalse(self.exists(".box/feature__mul/logs"))
 
 
 class UserLayerStateDir(RepoCase):

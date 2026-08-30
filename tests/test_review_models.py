@@ -132,12 +132,25 @@ class PipelineUsesAuto(RepoCase):
         meta = json.loads(self.read(".revali/feature__mul/diagnose-1.json"))["meta"]
         self.assertEqual(meta["model_reason"], "explicit")
 
-    def test_dry_run_states_the_resolved_model(self):
+    def test_dry_run_states_the_resolved_model_and_why(self):
+        # AC-4: the dry-run message carries the model and the reason (round-1 F1)
         self.set_author("claude-sonnet-5")
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertIn("run reviewer opus", out)
+        self.assertIn("run reviewer opus (auto: one tier above author claude-sonnet-5)", out)
         self.assertNotIn("run reviewer auto", out)
+        log = self.read(".revali/feature__mul/logs/revali.log")
+        self.assertIn("run reviewer opus (auto: one tier above author claude-sonnet-5)", log)
+        state = json.loads(self.read(".revali/feature__mul/state.json"))
+        self.assertIn("(auto: one tier above author claude-sonnet-5)", state["message"])
+
+    def test_dry_run_with_an_explicit_model_has_no_reason(self):
+        self.write("revali.toml", self.read("revali.toml").replace("[review]\n", '[review]\nmodel = "opus"\n'))
+        self.commit_all("pin")
+        code, out = run_cli(["run", "--dry-run"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("run reviewer opus (round 1)", out)
+        self.assertNotIn("auto:", out)
 
 
 if __name__ == "__main__":
