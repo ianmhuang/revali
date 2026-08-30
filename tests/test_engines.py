@@ -52,6 +52,7 @@ class FailureMessageTests(unittest.TestCase):
         payload = {"is_error": True, "subtype": "error_during_execution", "errors": ["boom"]}
         self.assertIn("reviewer session failed (exit 1): boom", failure_message("reviewer", payload, 1, 2.0, "r"))
         self.assertIn("no error text", failure_message("diagnoser", {"is_error": True}, 1, 1.0, "r"))
+        self.assertIn("no error text", failure_message("diagnoser", {"is_error": True, "result": None}, 1, 1.0, "r"))
 
 
 class ModelFamilyTests(unittest.TestCase):

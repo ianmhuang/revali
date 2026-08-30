@@ -120,7 +120,7 @@ def _diagnose(ctx: Context, state: State, rdir: str, failed, outcome: Validation
     cfg = ctx.cfg.validate
     engine = engines.for_role(ctx.cfg, "validate")
     chosen = models.resolve(models.DIAGNOSER, cfg.model, cfg.fallback_model, ctx.doc.author_model,
-                            engine.tiers, engines.foreign_ladders(ctx.cfg, engine.name))
+                            engine.tiers, ctx.cfg.foreign_ladders(engine.name))
     model = chosen.model
     outcome.model_reason = chosen.reason
     tests_md_path = os.path.join(rdir, "tests.md")

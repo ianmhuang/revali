@@ -102,6 +102,12 @@ def _run_foreground(args) -> int:
 def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     try:
         return _stages(args, cwd, rdir, state, log)
+    except ConfigError as exc:
+        stop = Stop(EXIT_ERROR, "configuration: " + "; ".join(exc.problems))
+        _print_stop(stop)
+        state.set_stage(rdir, "error", stop.message, EXIT_ERROR)
+        _record_history(state, EXIT_ERROR)
+        return EXIT_ERROR
     except Stop as stop:
         _print_stop(stop)
         state.set_stage(rdir, STAGE_FOR_EXIT.get(stop.exit_code, "error"), stop.message, stop.exit_code)

@@ -65,6 +65,18 @@ class Context:
             self.log.detail(msg)
 
 
+def check_engines(cfg: Config) -> List[str]:
+    """Both roles must name an engine revali implements, before anything is pushed."""
+    from revali import engines  # local: engines imports Stop from this module
+    problems: List[str] = []
+    for role in ("review", "validate"):
+        try:
+            engines.for_role(cfg, role)
+        except ConfigError as exc:
+            problems.extend("%s.engine: %s" % (role, p) for p in exc.problems)
+    return problems
+
+
 def _tail(text: str, lines: int = 30) -> str:
     parts = text.strip().splitlines()
     return "\n".join(parts[-lines:])
@@ -104,6 +116,7 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
         ctx.builtin_checklist = tool_file(ctx.cfg.review.checklist_builtin, root, "checklists", "default.md")
         ctx.diagnose_prompt = tool_file(ctx.cfg.validate.prompt, root, "prompts", "diagnose.md")
         ctx.diagnose_schema = tool_file(ctx.cfg.validate.schema, root, "schemas", "diagnose.schema.json")
+        problems.extend(check_engines(ctx.cfg))
 
     doc_path = os.path.join(ctx.rdir, changedoc.FILENAME)
     if not os.path.isfile(doc_path):

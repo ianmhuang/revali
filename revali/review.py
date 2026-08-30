@@ -206,7 +206,7 @@ def planned_reviewer(ctx: Context) -> models.Resolved:
     cfg = ctx.cfg.review
     engine_cfg = ctx.cfg.engine_for("review")
     return models.resolve(models.REVIEWER, cfg.model, cfg.fallback_model, ctx.doc.author_model if ctx.doc else "",
-                          engine_cfg.tiers, engines.foreign_ladders(ctx.cfg, engine_cfg.name))
+                          engine_cfg.tiers, ctx.cfg.foreign_ladders(engine_cfg.name))
 
 
 def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt: int,
@@ -224,11 +224,7 @@ def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt:
         model=chosen.model, fallback_model=chosen.fallback, effort=cfg.effort, budget_usd=cfg.budget_usd,
         timeout_s=cfg.timeout_min * 60, cwd=ctx.repo_root, raw_path=raw_path,
         may_write=[ctx.cfg.project.test_dir], shell_allow=list(SHELL_ALLOW))
-    try:
-        result = engine.run(request, log)
-    except Stop:
-        discard_unfinished_tests(ctx, log)
-        raise
+    result = engine.run(request, log)
     problems = validate_shape(result.data)
     if problems:
         raise Stop(EXIT_ERROR, "reviewer output does not match the schema: %s; raw saved to %s"
@@ -241,11 +237,12 @@ def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt:
 
 
 def discard_unfinished_tests(ctx: Context, log: Optional[RunLog]) -> List[str]:
-    """Delete untracked files matching test_file_pattern under test_dir after a Reviewer
-    session failed: they are half-written and would make the next run refuse a dirty tree.
-    This is the only deletion inside test_dir revali ever performs."""
+    """Delete untracked files matching test_file_pattern under test_dir after a review round
+    stopped before its tests were committed: they are half-written and would make the next
+    run refuse a dirty tree. This is the only deletion inside test_dir revali ever performs."""
     pattern = test_pattern_glob(ctx)
     removed = []
+    stuck = []
     for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + '/',)):
         code, path = entry.split(" ", 1)
         path = path.replace("\\", "/")
@@ -254,11 +251,14 @@ def discard_unfinished_tests(ctx: Context, log: Optional[RunLog]) -> List[str]:
             try:
                 os.remove(os.path.join(ctx.repo_root, path))
                 removed.append(path)
-            except OSError:
-                pass
+            except OSError as exc:
+                stuck.append("%s (%s)" % (path, exc))
     if removed and log:
         log.stage("review", "removed %d unfinished test file(s) the reviewer left behind: %s"
                   % (len(removed), ", ".join(removed)))
+    if stuck and log:
+        log.stage("review", "could not remove %d unfinished test file(s); delete them by hand: %s"
+                  % (len(stuck), ", ".join(stuck)))
     return removed
 
 
@@ -496,6 +496,16 @@ def render_tests_md(ctx: Context, state: State, rounds: List[dict]) -> str:
 # ---- the round --------------------------------------------------------------
 
 def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> RoundOutcome:
+    """One review round. Whatever stops it before the tests are committed leaves no
+    half-written test files behind."""
+    try:
+        return _run_round(ctx, state, rdir, log)
+    except Stop:
+        discard_unfinished_tests(ctx, log)
+        raise
+
+
+def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> RoundOutcome:
     round_no = len(state.rounds) + 1
     needs_info_allowed = not state.needs_info_used
     bounce_notes = ""

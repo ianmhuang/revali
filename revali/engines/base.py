@@ -23,7 +23,9 @@ class EngineRequest:
     timeout_s: int
     cwd: str
     raw_path: str                # where the raw CLI output is saved
-    may_write: List[str] = field(default_factory=list)    # directories the session may edit
+    may_write: List[str] = field(default_factory=list)    # directories the session is expected to edit;
+                                                          # an engine may grant broader write access,
+                                                          # revali's guard_worktree reverts anything outside
     read_only: bool = False                                # no edits, no shell at all
     shell_allow: List[str] = field(default_factory=list)  # command prefixes it may run, e.g. "git diff"
 

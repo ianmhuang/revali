@@ -21,10 +21,6 @@ def get_engine(name: str, cfg: EngineCfg) -> Engine:
 
 
 def for_role(cfg: Config, role: str) -> Engine:
-    """role: 'review' or 'validate'."""
-    name = cfg.review.engine if role == "review" else cfg.validate.engine
-    return get_engine(name, cfg.engine_for(role))
-
-
-def foreign_ladders(cfg: Config, engine_name: str) -> List[List[str]]:
-    return cfg.foreign_ladders(engine_name)
+    """role: 'review' or 'validate'; the name-to-role mapping lives in Config.engine_for."""
+    engine_cfg = cfg.engine_for(role)
+    return get_engine(engine_cfg.name, engine_cfg)

@@ -8,7 +8,9 @@ Things a linter cannot check; formatting is not listed.
   `json`, `re`). No third-party imports anywhere in the package.
 - One stage per module (`preflight`, `pr`, `review`, `validate`, `merge`),
   orchestrated by `pipeline.py`; runners sit behind the `Runner` interface in
-  `runners.py`; every `claude -p` call goes through `claude.invoke`; every
+  `runners.py`; every Reviewer / diagnosis session goes through an `Engine`
+  in `revali/engines/` (`revali/engines/claude.py` is the only place that
+  knows a `claude` flag); every
   external executable is resolved by `procs.resolve` so tests can replace it
   with `REVALI_<NAME>_CMD`.
 - Exit codes are fixed: 0 ok / ready, 1 pipeline error, 2 the author must

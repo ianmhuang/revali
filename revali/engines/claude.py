@@ -20,7 +20,7 @@ def failure_message(role: str, payload: dict, returncode: int, budget_usd: float
                 "project or split the change; raw output saved to %s"
                 % (role, budget_usd, payload.get("num_turns", "?"),
                    float(payload.get("total_cost_usd") or 0.0), raw_path))
-    detail = "; ".join(errors) or str(payload.get("result", ""))[:300] or "no error text"
+    detail = "; ".join(errors) or str(payload.get("result") or "")[:300] or "no error text"
     return "%s session failed (exit %d): %s; raw output saved to %s" % (role, returncode, detail, raw_path)
 
 
@@ -62,8 +62,9 @@ class ClaudeEngine(Engine):
         try:
             payload = json.loads(res.stdout)
         except ValueError:
-            raise Stop(EXIT_ERROR, "%s returned invalid JSON (exit %d); raw output saved to %s"
-                       % (role, res.returncode, request.raw_path))
+            text = (res.stderr.strip() or res.stdout.strip())[:300] or "no output"
+            raise Stop(EXIT_ERROR, "%s returned invalid JSON (exit %d): %s; raw output saved to %s"
+                       % (role, res.returncode, text, request.raw_path))
         if not isinstance(payload, dict):
             raise Stop(EXIT_ERROR, "%s output is not a JSON object; saved to %s" % (role, request.raw_path))
         if payload.get("is_error") or res.returncode != 0:
