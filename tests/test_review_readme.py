@@ -40,6 +40,27 @@ class WhySeparateSessions(unittest.TestCase):
         self.assertIn("blind spot", p)                    # fresh context does not remove shared blind spots
         self.assertIn("revali stats", p)                  # which stats tracks
 
+    def test_vendor_claim_names_the_single_engine(self):
+        # round 2: "by vendor" must not read as a present capability while only one engine is registered
+        from revali.engines import available
+        p = self.paragraph().lower()
+        self.assertIn("vendor", p)
+        for name in available():
+            self.assertIn("`%s`" % name, p, "the paragraph names the engines that exist today")
+        self.assertRegex(p, r"only `claude` exists today|would plug in")
+        self.assertNotIn("and, through the engine seam, by vendor", p)
+
+
+class StatusLineDoesNotOverstateVerification(unittest.TestCase):
+    def test_end_to_end_claim_is_scoped_to_a_private_repository(self):
+        # round 2: the public path is exercised by the fake-gh suite only; the README says so
+        text = readme()
+        m = re.search(r"^Status:.*?(?=\n\n)", text, flags=re.M | re.S)
+        self.assertIsNotNone(m, "no 'Status:' paragraph in README")
+        para = " ".join(m.group(0).split())
+        self.assertIn("Verified end to end on a private GitHub repository", para)
+        self.assertNotRegex(para.lower(), r"end to end on (a )?(public|github) repositor")
+
 
 class PrivateRequirementIsGone(unittest.TestCase):
     def setUp(self):
