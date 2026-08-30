@@ -57,6 +57,18 @@ class HostedOrigins(_PreflightStop):
         self.stop_in_preflight()
         self.assertEqual(self.last_repo(), "me/sample")
 
+    def test_mixed_case_url_is_lowercased(self):
+        # round 1 F2: the clone URL keeps whatever casing the user typed, gh answers with the
+        # canonical login; both must land on the same string or stats splits one repo in two
+        self.set_origin("https://github.com/Me/Sample.git")
+        self.stop_in_preflight()
+        self.assertEqual(self.last_repo(), "me/sample")
+
+    def test_mixed_case_scp_style_is_lowercased(self):
+        self.set_origin("git@GitHub.com:ME/Sample.GIT")
+        self.stop_in_preflight()
+        self.assertEqual(self.last_repo(), "me/sample")
+
     def test_stats_groups_the_stopped_run_under_the_repo(self):
         self.set_origin("https://github.com/me/sample.git")
         self.stop_in_preflight()
@@ -102,14 +114,18 @@ class StoppedAndCompletedRunsShareOneRow(RepoCase):
         # first run stops in preflight with a hosted origin; the second completes with the
         # local origin (so the push works) and gh naming the same owner/name. Both rows
         # must land in one stats row; before the change the first one was "(unknown repo)".
+        # The URL and the gh answer use different casing on purpose (round 1 F2): the two
+        # writers of `repo` must agree on one string.
         local_origin = git(["remote", "get-url", "origin"], self.repo).strip()
-        git(["remote", "set-url", "origin", "https://github.com/me/sample.git"], self.repo)
+        git(["remote", "set-url", "origin", "https://github.com/Me/Sample.git"], self.repo)
         self.write("src/calc.py", "# uncommitted edit\n")
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
         git(["checkout", "--", "src/calc.py"], self.repo)
         git(["remote", "set-url", "origin", local_origin], self.repo)
 
+        # gh reports the canonical login casing; preflight compares owner and login case-insensitively
+        self.scenario({"owner": "ME", "name": "Sample", "login": "me"})
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
