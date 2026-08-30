@@ -10,7 +10,7 @@ from typing import Optional
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION
 from revali import gitops
-from revali.config import history_path, load_user_config, ConfigError
+from revali.config import history_path, load_user_config, paths_for, ConfigError
 from revali.preflight import Stop, locate, preflight
 from revali.procs import kill_tree, pid_alive, python_exe, spawn_detached
 from revali.state import (LockHeld, RunLog, State, TERMINAL_STAGES, acquire_lock,
@@ -33,7 +33,7 @@ def _rdir_for(cwd: str, branch: str = "") -> Optional[str]:
         branch = branch or gitops.current_branch(root)
     except gitops.GitError:
         return None
-    return review_dir(root, branch)
+    return review_dir(root, branch, paths_for(root).state_dir)
 
 
 def _print_stop(stop: Stop) -> None:
@@ -60,8 +60,9 @@ def _run_detached(args) -> int:
     if pid:
         print("ERROR: a revali run is already in progress (pid %d); use `revali wait` or `revali stop`" % pid)
         return EXIT_ERROR
-    os.makedirs(os.path.join(rdir, "logs"), exist_ok=True)
-    log_path = os.path.join(rdir, "logs", "run.log")
+    logs = os.path.join(rdir, paths_for(gitops.repo_root(cwd)).logs_dir)
+    os.makedirs(logs, exist_ok=True)
+    log_path = os.path.join(logs, "run.log")
     cmd = [python_exe(), _entry_script(), "run", "--foreground"]
     if args.base:
         cmd += ["--base", args.base]
@@ -88,7 +89,7 @@ def _run_foreground(args) -> int:
     except LockHeld as exc:
         print("ERROR: %s" % exc)
         return EXIT_ERROR
-    log = RunLog(rdir, verbose=args.verbose)
+    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(gitops.repo_root(cwd)).logs_dir)
     state = State.load(rdir) or State()
     code = EXIT_ERROR
     try:
@@ -149,6 +150,10 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
                                                        os.path.join(rdir, "review-%d.md" % len(state.rounds))))
 
 
+def _model_label(chosen) -> str:
+    return chosen.model + (" (%s)" % chosen.reason if chosen.reason else "")
+
+
 def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     from revali import pr as prstage
     from revali import review
@@ -165,7 +170,8 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
 
     if args.dry_run:
         msg = ("dry run: would push %s, open a draft PR against %s, run reviewer %s (round %d), "
-               "then stop" % (ctx.branch, ctx.base, ctx.cfg.review.model, len(state.rounds) + 1))
+               "then stop" % (ctx.branch, ctx.base, _model_label(review.planned_reviewer(ctx)),
+                              len(state.rounds) + 1))
         log.stage("run", msg)
         state.set_stage(rdir, "preflight", msg, EXIT_OK)
         print("DRY RUN OK: " + msg)
@@ -245,7 +251,9 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
 def cmd_preflight(args) -> int:
     cwd = os.getcwd()
     rdir = _rdir_for(cwd)
-    log = RunLog(rdir if rdir and os.path.isdir(rdir) else None, verbose=args.verbose)
+    root = gitops.repo_root(cwd)
+    log = RunLog(rdir if rdir and os.path.isdir(rdir) else None, verbose=args.verbose,
+                 logs_dir=paths_for(root).logs_dir if root else "")
     try:
         preflight(cwd, base_override=args.base or "", dry_run=True, log=log)
     except Stop as stop:
@@ -287,8 +295,9 @@ def cmd_wait(args) -> int:
             lock = read_lock(rdir)
             if lock and not pid_alive(int(lock.get("pid", 0))):
                 release_lock(rdir)
-                print("error: the run (pid %s) died at stage '%s' without a result; see logs/run.log"
-                      % (lock.get("pid"), state.stage))
+                print("error: the run (pid %s) died at stage '%s' without a result; see %s"
+                      % (lock.get("pid"), state.stage,
+                         os.path.join(rdir, paths_for(gitops.repo_root(os.getcwd())).logs_dir, "run.log")))
                 return EXIT_ERROR
             print("%s: %s" % (state.stage, state.message))
             return state.last_exit if state.last_exit >= 0 else EXIT_ERROR
@@ -306,7 +315,8 @@ def cmd_status(args) -> int:
         print("not inside a git repository")
         return EXIT_ERROR
     branch = args.branch or gitops.current_branch(root)
-    rdir = review_dir(root, branch)
+    paths = paths_for(root)
+    rdir = review_dir(root, branch, paths.state_dir)
     state = State.load(rdir)
     pid = lock_owner_alive(rdir)
     print("%s %s" % (NAME, VERSION))
@@ -324,7 +334,7 @@ def cmd_status(args) -> int:
             print("pr: %s" % state.pr_url)
         print("updated: %s" % state.updated_at)
     # Leftover review dirs whose branch is gone.
-    base = os.path.join(root, ".revali")
+    base = os.path.join(root, paths.state_dir)
     if os.path.isdir(base):
         existing = set()
         res = gitops._git(["for-each-ref", "--format=%(refname:short)", "refs/heads/"], root)
@@ -360,9 +370,10 @@ def cmd_clean(args) -> int:
         print("not inside a git repository")
         return EXIT_ERROR
     name = args.branch
-    rdir = os.path.join(root, ".revali", safe_branch(name))
+    state_dir = paths_for(root).state_dir
+    rdir = os.path.join(root, state_dir, safe_branch(name))
     if not os.path.isdir(rdir):
-        rdir = os.path.join(root, ".revali", name)
+        rdir = os.path.join(root, state_dir, name)
     if not os.path.isdir(rdir):
         print("nothing to clean for '%s'" % name)
         return EXIT_ERROR
@@ -413,7 +424,7 @@ def cmd_merge(args) -> int:
         print("ERROR: a run is in progress")
         return EXIT_ERROR
     acquire_lock(rdir)
-    log = RunLog(rdir, verbose=args.verbose)
+    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(gitops.repo_root(cwd)).logs_dir)
     try:
         code = merge.do_merge(cwd, rdir, state, log)
     except Stop as stop:
@@ -429,8 +440,9 @@ def cmd_merge(args) -> int:
     print(merge.merge_summary(state, state.base))
     root = gitops.repo_root(cwd)
     if root:
-        merge.remove_tree(review_dir(root, state.branch))
-        print("  removed .revali/%s/" % safe_branch(state.branch))
+        state_dir = paths_for(root).state_dir
+        merge.remove_tree(review_dir(root, state.branch, state_dir))
+        print("  removed %s/%s/" % (state_dir, safe_branch(state.branch)))
     return code
 
 

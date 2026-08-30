@@ -6,8 +6,11 @@
 # project's CONVENTIONS.md. Relative paths resolve against ~/.revali/.
 checklist = ""
 
-# Where run records are appended (default ~/.revali/history.jsonl).
+# Where run records are appended (default ~/.revali/history.jsonl). Either a
+# full path here, or just the file name under [paths] below.
 history_path = ""
+# [paths]
+# history_file = "history.jsonl"   # user-level only; a project file may not set it
 
 # Any [section] from revali.toml / defaults.toml may appear here, e.g.:
 # [review]

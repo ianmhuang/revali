@@ -66,7 +66,44 @@ Unknown keys are errors in every layer. `[review] engine` and
 `[validate] engine` name the CLI that runs the session (`claude`; the old
 `prompt | hybrid` meaning moved to `strategy`). Keys that name a file
 (`prompt`, `schema`, `checklist_builtin`) are relative to the project
-root; empty means the file revali ships with.
+root; empty means the file revali ships with. `[validate.platform]` in
+any layer sets the defaults for every `[validate.<name>]` table.
+
+Models: `model = "auto"` (the default) picks the Reviewer one tier above
+the Developer's model (`author_model` in `change.md`) and the diagnosis
+session one tier below, on the ladder of the configured engine
+(`[engines.claude] tiers = ["haiku", "sonnet", "opus", "fable"]`); an
+unknown or missing `author_model` means the top tier for the Reviewer and
+one below the top for diagnosis. `fallback_model = "auto"` is the tiers
+below the chosen one, strongest first. Any explicit model name passes
+through unchanged. The chosen model and the reason are printed at spawn
+time and recorded in the review and diagnosis headers.
+
+## Files
+
+| Document | Written by | Read by | Default location | Config key |
+|---|---|---|---|---|
+| `change.md` (request, goal, AC-n) | Developer | Reviewer, diagnosis session | `.revali/<branch>/` | `[paths] state_dir` |
+| `response-n.md` | Developer | Reviewer, next round | same | same |
+| `review-n.md` / `.json` | revali, from the Reviewer's answer | you, the PR | same | same |
+| `tests.md` | revali, from the Reviewer's answer; validation results appended | you, diagnosis session | same | same |
+| `diagnose-n.json` | revali, from the diagnosis session | you | same | same |
+| logs, prompts, raw answers | revali | you | `.revali/<branch>/logs/` | `[paths] logs_dir` |
+| acceptance tests | Reviewer | Validator; merged into `main` | `tests/test_review_<topic>.py` | `[project] test_dir`, `test_file_pattern` |
+| checklist, built-in layer | revali | Reviewer | `checklists/default.md` in revali | `[review] checklist_builtin` |
+| checklist, user layer | you | Reviewer | none | `checklist` in `~/.revali/config.toml` |
+| checklist, project layer | the project | Developer (via `CLAUDE.md`), Reviewer | `CONVENTIONS.md` | `[review] checklist` |
+| Reviewer prompt and schema | revali | Reviewer | `prompts/review.md`, `schemas/review.schema.json` in revali | `[review] prompt`, `schema` |
+| diagnosis prompt and schema | revali | diagnosis session | `prompts/diagnose.md`, `schemas/diagnose.schema.json` in revali | `[validate] prompt`, `schema` |
+| how tests are added here | the project | Reviewer | none | `[project] test_guide` |
+| sandbox clone | Validator | Validator; deleted after the run | `~/.revali/sandbox/<repo>/<label>/` inside WSL | `[validate.<platform>] sandbox_dir` |
+| run history | revali | `revali stats` | `~/.revali/history.jsonl` | `history_path` or `[paths] history_file` in `~/.revali/config.toml` (user level only) |
+
+Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves
+with the `REVALI_HOME` environment variable. Developer, Reviewer, and
+Validator are the three roles of the loop: the authoring session, the
+independent review session revali spawns, and the sandbox run (with a
+diagnosis session on failure only).
 
 ## Workflow
 
@@ -89,7 +126,7 @@ To make an authoring session do this without being asked each time, paste
 ## Sandbox
 
 `[validate.linux] runner = "wsl"` clones the branch into the WSL distro's own
-filesystem (`~/.revali/sandbox/<repo>/<label>/`), runs `setup`, `build`,
+filesystem (`sandbox_dir`, default `~/.revali/sandbox/<repo>/<label>/`), runs `setup`, `build`,
 `test`, `new_test` there with a per-step timeout, copies the logs back, and
 deletes the clone. The distro needs git and whatever `setup` installs; on
 Ubuntu 24.04 that means `python3-venv` and `python3-pip` for a Python project.
@@ -121,7 +158,7 @@ User-level options live in `~/.revali/config.toml` (see
 Read this before the first run. All of it is on the feature branch unless
 stated.
 
-- appends `.revali/` to `.gitignore` if missing
+- appends the state directory (`.revali/`) to `.gitignore` if missing
 - `git push -u origin <branch>` and `gh pr create --draft`
 - commits the reviewer's test files into `test_dir`, with a
   `Co-Authored-By: Claude` trailer
@@ -130,11 +167,11 @@ stated.
   TO MERGE and HEAD has not moved): waits for CI checks if the PR has any,
   then `gh pr merge --<method> --delete-branch`, which also deletes the
   local branch and checks out the base branch; then `git pull --prune` and
-  deletion of `.revali/<branch>/`
+  deletion of the branch's state directory
 - on resume after `stop`, may delete untracked files matching
   `test_file_pattern` left behind by an interrupted reviewer
 
-It never modifies files outside `test_dir` and `.revali/`, never merges on
+It never modifies files outside `test_dir` and the state directory, never merges on
 its own, and never runs on a repo you do not own or that is public.
 
 ## Development

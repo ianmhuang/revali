@@ -11,7 +11,7 @@ from typing import List, Optional
 from revali import EXIT_ACTION, EXIT_ERROR, V1_KINDS
 from revali import changedoc, gitops
 from revali.config import (Config, ConfigError, UserConfig, load_project_config,
-                           load_user_config)
+                           load_user_config, paths_for, tool_file)
 from revali.procs import ExeNotFound, ProcTimeout, run_shell
 from revali.secretscan import format_hits, scan_diff
 from revali.state import RunLog, review_dir
@@ -49,6 +49,12 @@ class Context:
     notes: List[str] = field(default_factory=list)
     dry_run: bool = False
     log: Optional[RunLog] = None
+    logs: str = ""                 # <state_dir>/<branch>/<logs_dir>
+    review_prompt: str = ""        # resolved files (project override or the built-in)
+    review_schema: str = ""
+    builtin_checklist: str = ""
+    diagnose_prompt: str = ""
+    diagnose_schema: str = ""
 
     def say(self, msg: str) -> None:
         if self.log:
@@ -89,7 +95,15 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
     if ctx.branch == "HEAD":
         problems.append("detached HEAD; check out the feature branch first")
     ctx.base = base_override or (ctx.cfg.project.base_branch if ctx.cfg else "")
-    ctx.rdir = review_dir(root, ctx.branch)
+    paths = ctx.cfg.paths if ctx.cfg else paths_for(root)
+    ctx.rdir = review_dir(root, ctx.branch, paths.state_dir)
+    ctx.logs = os.path.join(ctx.rdir, paths.logs_dir)
+    if ctx.cfg:
+        ctx.review_prompt = tool_file(ctx.cfg.review.prompt, root, "prompts", "review.md")
+        ctx.review_schema = tool_file(ctx.cfg.review.schema, root, "schemas", "review.schema.json")
+        ctx.builtin_checklist = tool_file(ctx.cfg.review.checklist_builtin, root, "checklists", "default.md")
+        ctx.diagnose_prompt = tool_file(ctx.cfg.validate.prompt, root, "prompts", "diagnose.md")
+        ctx.diagnose_schema = tool_file(ctx.cfg.validate.schema, root, "schemas", "diagnose.schema.json")
 
     doc_path = os.path.join(ctx.rdir, changedoc.FILENAME)
     if not os.path.isfile(doc_path):
@@ -107,7 +121,7 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
 
 
 def check_tree(ctx: Context) -> None:
-    dirty = gitops.dirty_paths(ctx.repo_root)
+    dirty = gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",))
     if dirty:
         raise Stop(EXIT_ERROR, "working tree is not clean; commit or stash first:\n  "
                    + "\n  ".join(dirty[:20]))

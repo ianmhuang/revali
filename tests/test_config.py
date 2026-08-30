@@ -29,7 +29,7 @@ class ConfigTests(unittest.TestCase):
     def test_minimal_uses_defaults(self):
         cfg = parse_project_config(MINIMAL)
         self.assertEqual(cfg.project.test_dir, "tests")
-        self.assertEqual(cfg.review.model, "fable")
+        self.assertEqual(cfg.review.model, "auto")
         self.assertEqual(cfg.review.engine, "claude")
         self.assertEqual(cfg.paths.state_dir, ".revali")
         self.assertEqual(cfg.validate.platforms["linux"].sandbox_dir, "~/.revali/sandbox")

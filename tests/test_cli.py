@@ -9,7 +9,7 @@ from revali.state import State, review_dir, lock_owner_alive
 
 class CliTests(RepoCase):
     def rdir(self):
-        return review_dir(self.repo, "feature/mul")
+        return review_dir(self.repo, "feature/mul", ".revali")
 
     def test_version(self):
         code, out = run_cli(["version"])

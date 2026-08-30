@@ -1,4 +1,4 @@
-"""Parse and validate .revali/<branch>/change.md (the author's description, "file 1").
+"""Parse and validate <state_dir>/<branch>/change.md (the Developer's description, "file 1").
 
 Format:
     ---

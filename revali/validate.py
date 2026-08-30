@@ -5,15 +5,12 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from revali import EXIT_ERROR
-from revali import claude
+from revali import claude, models
 from revali.config import PlatformCfg
 from revali.preflight import Context, Stop
 from revali.runners import RunReport, RunnerError, get_runner, steps_for, tail
 from revali.state import RunLog, State, now_iso, read_text, write_text
 
-TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROMPT_PATH = os.path.join(TOOL_ROOT, "prompts", "diagnose.md")
-SCHEMA_PATH = os.path.join(TOOL_ROOT, "schemas", "diagnose.schema.json")
 PASS, FAIL = "PASS", "FAIL"
 LOG_LINES = 200
 DIAGNOSER_TOOLS = "Read,Grep,Glob"
@@ -28,6 +25,7 @@ class ValidationOutcome:
     diagnosis: Optional[dict] = None
     diagnosis_error: str = ""
     model_actual: str = ""
+    model_reason: str = ""
     fallback: bool = False
     cost: float = 0.0
     section_md: str = ""
@@ -59,7 +57,7 @@ def baseline(ctx: Context, rdir: str, log: Optional[RunLog]) -> None:
     if log:
         log.stage("preflight", "baseline: existing suite on %s" % runner.name)
     try:
-        report = runner.run(ctx.repo_root, "HEAD", steps, {}, os.path.join(rdir, "logs"), "baseline",
+        report = runner.run(ctx.repo_root, "HEAD", steps, {}, ctx.logs, "baseline",
                             log.detail if log else None)
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, "sandbox failed during baseline: %s" % exc)
@@ -83,7 +81,7 @@ def run_validation(ctx: Context, state: State, rdir: str, log: Optional[RunLog])
         if log:
             log.stage("validate", "run %d: %s on %s (%s)" % (number, ", ".join(n for n, _ in steps), runner.name, label))
         try:
-            report = runner.run(ctx.repo_root, "HEAD", steps, {}, os.path.join(rdir, "logs"), label,
+            report = runner.run(ctx.repo_root, "HEAD", steps, {}, ctx.logs, label,
                                 log.detail if log else None)
         except RunnerError as exc:
             raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc)
@@ -120,7 +118,11 @@ def run_validation(ctx: Context, state: State, rdir: str, log: Optional[RunLog])
 
 def _diagnose(ctx: Context, state: State, rdir: str, failed, outcome: ValidationOutcome, log: Optional[RunLog]) -> None:
     cfg = ctx.cfg.validate
-    model = cfg.model
+    engine_cfg = ctx.cfg.engine_for("validate")
+    chosen = models.resolve(models.DIAGNOSER, cfg.model, cfg.fallback_model, ctx.doc.author_model,
+                            engine_cfg.tiers, ctx.cfg.foreign_ladders(engine_cfg.name))
+    model = chosen.model
+    outcome.model_reason = chosen.reason
     tests_md_path = os.path.join(rdir, "tests.md")
     values = {
         "branch": ctx.branch, "base": ctx.base, "kind": ctx.doc.kind,
@@ -131,17 +133,18 @@ def _diagnose(ctx: Context, state: State, rdir: str, failed, outcome: Validation
         "test_files": "\n".join("- " + p for p in state.test_files) or "(none)",
         "log_lines": LOG_LINES, "log_tail": tail(failed.text, LOG_LINES) or "(empty)",
     }
-    prompt = string.Template(read_text(PROMPT_PATH)).safe_substitute(values)
-    write_text(os.path.join(rdir, "logs", "prompt-diagnose-%d.md" % outcome.number), prompt)
+    prompt = string.Template(read_text(ctx.diagnose_prompt)).safe_substitute(values)
+    write_text(os.path.join(ctx.logs, "prompt-diagnose-%d.md" % outcome.number), prompt)
     if log:
-        log.stage("validate", "diagnoser %s (budget $%.2f)" % (model, cfg.budget_usd))
+        log.stage("validate", "diagnoser %s%s (budget $%.2f)"
+                  % (model, " (%s)" % chosen.reason if chosen.reason else "", cfg.budget_usd))
     try:
         result = claude.invoke(
-            role="diagnoser", model=model, fallback_model=cfg.fallback_model, effort=cfg.effort,
-            schema_text=read_text(SCHEMA_PATH), budget_usd=cfg.budget_usd,
+            role="diagnoser", model=model, fallback_model=chosen.fallback, effort=cfg.effort,
+            schema_text=read_text(ctx.diagnose_schema), budget_usd=cfg.budget_usd,
             extra_args=["--tools", DIAGNOSER_TOOLS], prompt=prompt, cwd=ctx.repo_root,
             timeout_s=ctx.cfg.review.timeout_min * 60,
-            raw_path=os.path.join(rdir, "logs", "diagnose-%d.raw.json" % outcome.number), log=log)
+            raw_path=os.path.join(ctx.logs, "diagnose-%d.raw.json" % outcome.number), log=log)
     except Stop as stop:
         outcome.diagnosis_error = stop.message
         if log:
@@ -157,6 +160,7 @@ def _diagnose(ctx: Context, state: State, rdir: str, failed, outcome: Validation
     outcome.cost = result.cost
     write_text(os.path.join(rdir, "diagnose-%d.json" % outcome.number),
                __import__("json").dumps({"meta": {"model_requested": model, "model_actual": result.model_actual,
+                                                  "model_reason": chosen.reason or "explicit",
                                                   "fallback": result.fallback, "cost_usd": result.cost,
                                                   "at": now_iso()}, "data": data}, indent=2, ensure_ascii=False) + "\n")
 

@@ -9,7 +9,7 @@ in defaults.toml.
 import os
 import tomllib
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from revali import CONFIG_VERSION, V1_PLATFORMS
 
@@ -36,6 +36,7 @@ class ConfigError(Exception):
 class PathsCfg:
     state_dir: str = ""
     logs_dir: str = ""
+    history_file: str = ""
 
 
 @dataclass
@@ -129,6 +130,10 @@ class Config:
         name = self.review.engine if role == "review" else self.validate.engine
         return self.engines[name]
 
+    def foreign_ladders(self, engine_name: str) -> List[List[str]]:
+        """The tiers of every engine except the named one."""
+        return [list(e.tiers) for n, e in self.engines.items() if n != engine_name]
+
 
 @dataclass
 class UserConfig:
@@ -151,30 +156,34 @@ def tool_file(configured: str, repo_root: str, *default_parts: str) -> str:
 
 # ---- filling dataclasses ----------------------------------------------------
 
-def _fill(dc_type, data: dict, section: str, problems: list, **fixed):
-    """Instantiate a dataclass from a dict, rejecting unknown keys and wrong types."""
+def _type_problem(current, value) -> str:
+    if isinstance(current, bool):
+        return "" if isinstance(value, bool) else "must be true/false"
+    if isinstance(current, int):
+        return "" if isinstance(value, int) and not isinstance(value, bool) else "must be an integer"
+    if isinstance(current, float):
+        return "" if isinstance(value, (int, float)) and not isinstance(value, bool) else "must be a number"
+    if isinstance(current, str):
+        return "" if isinstance(value, str) else "must be a string"
+    if isinstance(current, list):
+        return "" if isinstance(value, list) else "must be a list"
+    return ""
+
+
+def _fill(dc_type, data: dict, section: str, problems: list, type_errors: Optional[list] = None, **fixed):
+    """Instantiate a dataclass from a dict, rejecting unknown keys and wrong types.
+    Type mismatches are also appended to `type_errors` when given."""
     obj = dc_type(**fixed)
     known = {f.name for f in obj.__dataclass_fields__.values()}
     for key, value in data.items():
         if key not in known or key in fixed:
             problems.append("%s: unknown key '%s'" % (section, key))
             continue
-        current = getattr(obj, key)
-        if isinstance(current, bool):
-            if not isinstance(value, bool):
-                problems.append("%s.%s must be true/false" % (section, key))
-                continue
-        elif isinstance(current, int) and not isinstance(value, int):
-            problems.append("%s.%s must be an integer" % (section, key))
-            continue
-        elif isinstance(current, float) and not isinstance(value, (int, float)):
-            problems.append("%s.%s must be a number" % (section, key))
-            continue
-        elif isinstance(current, str) and not isinstance(value, str):
-            problems.append("%s.%s must be a string" % (section, key))
-            continue
-        elif isinstance(current, list) and not isinstance(value, list):
-            problems.append("%s.%s must be a list" % (section, key))
+        why = _type_problem(getattr(obj, key), value)
+        if why:
+            problems.append("%s.%s %s" % (section, key, why))
+            if type_errors is not None:
+                type_errors.append("%s.%s" % (section, key))
             continue
         setattr(obj, key, value)
     return obj
@@ -187,34 +196,40 @@ def _split_validate(vdata: dict):
     return scalars, tables
 
 
-def _check_layer(sections: dict, label: str, problems: list) -> None:
-    """Every layer must use known sections and keys, checked against the dataclasses."""
+def _check_layer(sections: dict, label: str, problems: list) -> List[str]:
+    """Every layer must use known sections and keys, checked against the dataclasses.
+    Returns the keys whose value had the wrong type."""
+    bad: List[str] = []
     for name in sections:
         if name not in SECTIONS:
             problems.append("%s: unknown section [%s]" % (label, name))
-    _fill(ProjectCfg, sections.get("project", {}), "%s: project" % label, problems)
-    _fill(ReviewCfg, sections.get("review", {}), "%s: review" % label, problems)
-    _fill(MergeCfg, sections.get("merge", {}), "%s: merge" % label, problems)
-    _fill(PathsCfg, sections.get("paths", {}), "%s: paths" % label, problems)
+    _fill(ProjectCfg, sections.get("project", {}), "%s: project" % label, problems, bad)
+    _fill(ReviewCfg, sections.get("review", {}), "%s: review" % label, problems, bad)
+    _fill(MergeCfg, sections.get("merge", {}), "%s: merge" % label, problems, bad)
+    _fill(PathsCfg, sections.get("paths", {}), "%s: paths" % label, problems, bad)
     scalars, tables = _split_validate(sections.get("validate", {}))
-    _fill(ValidateCfg, scalars, "%s: validate" % label, problems)
+    _fill(ValidateCfg, scalars, "%s: validate" % label, problems, bad)
     for pname, table in tables.items():
-        _fill(PlatformCfg, table, "%s: validate.%s" % (label, pname), problems, name=pname)
+        _fill(PlatformCfg, table, "%s: validate.%s" % (label, pname), problems, bad, name=pname)
     for ename, table in sections.get("engines", {}).items():
         if not isinstance(table, dict):
             problems.append("%s: engines.%s must be a table" % (label, ename))
             continue
-        _fill(EngineCfg, table, "%s: engines.%s" % (label, ename), problems, name=ename)
+        _fill(EngineCfg, table, "%s: engines.%s" % (label, ename), problems, bad, name=ename)
+    return bad
 
 
 def merge_layers(*layers: dict) -> dict:
     """Section-wise overlay of raw TOML dicts, earlier layers first.
 
-    [validate.<name>] tables start from the defaults' [validate.platform];
-    [engines.<name>] tables from the same engine's table in the earlier layer."""
+    Every [validate.<name>] table starts from [validate.platform] merged across
+    all layers, then takes the per-platform tables in layer order; so a later
+    layer's [validate.platform] still reaches a platform an earlier layer named.
+    [engines.<name>] tables layer per engine."""
     merged = {"project": {}, "review": {}, "validate": {}, "merge": {}, "paths": {},
               "engines": {}, "_platforms": {}}
-    platform_defaults = {}
+    platform_defaults: dict = {}
+    platform_layers: List[Tuple[str, dict]] = []
     for layer in layers:
         if not layer:
             continue
@@ -224,15 +239,16 @@ def merge_layers(*layers: dict) -> dict:
         merged["validate"].update(scalars)
         if PLATFORM_DEFAULTS_KEY in tables:
             platform_defaults.update(tables.pop(PLATFORM_DEFAULTS_KEY))
-        for pname, table in tables.items():
-            base = merged["_platforms"].get(pname) or dict(platform_defaults)
-            base.update(table)
-            merged["_platforms"][pname] = base
+        platform_layers.extend(tables.items())
         for ename, table in layer.get("engines", {}).items():
             if isinstance(table, dict):
                 base = merged["engines"].get(ename, {})
                 base.update(table)
                 merged["engines"][ename] = base
+    for pname, table in platform_layers:
+        base = merged["_platforms"].get(pname) or dict(platform_defaults)
+        base.update(table)
+        merged["_platforms"][pname] = base
     merged["_platform_defaults"] = platform_defaults
     return merged
 
@@ -275,12 +291,16 @@ def parse_project_config(text: str, path: str = PROJECT_FILE, defaults: Optional
     defaults = defaults if defaults is not None else load_defaults()
     user_sections = user_sections or {}
 
-    _check_layer(user_sections, "user config", problems)
-    _check_layer(data, path, problems)
+    type_errors = _check_layer(user_sections, "user config", problems)
+    type_errors += _check_layer(data, path, problems)
+    if type_errors:
+        # A wrong-typed value leaves the zero value behind; semantic checks on
+        # that would only repeat the problem in another wording.
+        raise ConfigError(problems)
 
-    # Key and type problems were reported per layer above; fill the merged
-    # result quietly so the semantic checks below can still run and everything
-    # is reported in one pass.
+    # Unknown keys were reported per layer above; fill the merged result
+    # quietly so the semantic checks below still run and everything is
+    # reported in one pass.
     quiet: List[str] = []
     merged = merge_layers(defaults, user_sections, data)
     project = _fill(ProjectCfg, merged["project"], "project", quiet)
@@ -316,7 +336,7 @@ def parse_project_config(text: str, path: str = PROJECT_FILE, defaults: Optional
         if plat.runner == "wsl" and not plat.sandbox_dir.strip():
             problems.append("validate.%s.sandbox_dir must not be empty for the wsl runner" % name)
     for role, cfg in (("review", review), ("validate", validate)):
-        if cfg.engine in RETIRED_REVIEW_ENGINES and cfg.engine not in engines:
+        if role == "review" and cfg.engine in RETIRED_REVIEW_ENGINES and cfg.engine not in engines:
             problems.append("%s.engine '%s' is now %s.strategy; engine names the CLI: use engine = \"claude\""
                             % (role, cfg.engine, role))
         elif cfg.engine not in engines:
@@ -344,6 +364,10 @@ def parse_project_config(text: str, path: str = PROJECT_FILE, defaults: Optional
         problems.append("paths.state_dir must be a single directory name (got %r)" % paths.state_dir)
     if not _single_component(paths.logs_dir):
         problems.append("paths.logs_dir must be a single directory name (got %r)" % paths.logs_dir)
+    if not _single_component(paths.history_file):
+        problems.append("paths.history_file must be a single file name (got %r)" % paths.history_file)
+    if "history_file" in data.get("paths", {}):
+        problems.append("paths.history_file is a user-level key (~/.revali/config.toml), not a project one")
     if repo_root:
         for key, value in (("review.prompt", review.prompt), ("review.schema", review.schema),
                            ("review.checklist_builtin", review.checklist_builtin),
@@ -399,16 +423,45 @@ def load_user_config() -> UserConfig:
 
 
 def paths_for(repo_root: str) -> PathsCfg:
-    """The [paths] table for a repo, from its config when it loads, else from the defaults.
-    Used by commands that must find the state directory before a full config is required."""
+    """The [paths] table for a repo: from its config when it loads; else the raw [paths]
+    table of revali.toml (so a broken config still points at the right state dir) over
+    the defaults. Used by commands that must find the state directory before a full
+    config is required."""
     try:
         return load_project_config(repo_root).paths
     except ConfigError:
         pass
-    return _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
+    paths = _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
+    for file in (os.path.join(user_home(), "config.toml"), os.path.join(repo_root, PROJECT_FILE)):
+        for key, value in _raw_paths(file).items():
+            if key in ("state_dir", "logs_dir") and isinstance(value, str) and _single_component(value):
+                setattr(paths, key, value)
+    return paths
+
+
+def _raw_paths(file: str) -> dict:
+    """The [paths] table of a TOML file as written, {} when absent or unreadable."""
+    if not os.path.isfile(file):
+        return {}
+    try:
+        with open(file, "r", encoding="utf-8", newline="") as fh:
+            table = tomllib.loads(fh.read()).get("paths", {})
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    return table if isinstance(table, dict) else {}
 
 
 def history_path(user_cfg: Optional[UserConfig] = None) -> str:
+    """history_path from the user file wins; else [paths] history_file from the user file
+    or defaults.toml, under the user directory. The project file has no say (history is
+    per machine)."""
     if user_cfg and user_cfg.history_path:
         return user_cfg.history_path
-    return os.path.join(user_home(), "history.jsonl")
+    paths = _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
+    if user_cfg:
+        name = user_cfg.sections.get("paths", {}).get("history_file")
+        if name is not None:
+            if not isinstance(name, str) or not _single_component(name):
+                raise ConfigError(["user config: paths.history_file must be a single file name (got %r)" % (name,)])
+            paths.history_file = name
+    return os.path.join(user_home(), paths.history_file)

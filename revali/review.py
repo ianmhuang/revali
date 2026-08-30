@@ -8,17 +8,12 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from revali import EXIT_ERROR
-from revali import claude, gitops
+from revali import claude, gitops, models
 from revali.claude import model_family, pick_actual_model  # noqa: F401  (re-exported)
 from revali.preflight import Context, Stop
 from revali.procs import resolve, run
 from revali.runners import RunnerError, get_runner, steps_for
 from revali.state import State, RunLog, now_iso, read_text, write_json_atomic, write_text
-
-TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROMPT_PATH = os.path.join(TOOL_ROOT, "prompts", "review.md")
-SCHEMA_PATH = os.path.join(TOOL_ROOT, "schemas", "review.schema.json")
-BUILTIN_CHECKLIST = os.path.join(TOOL_ROOT, "checklists", "default.md")
 
 APPROVE, CHANGES_REQUESTED, NEEDS_INFO = "APPROVE", "CHANGES_REQUESTED", "NEEDS_INFO"
 MANIFEST_PATTERNS = [
@@ -42,6 +37,7 @@ class ReviewerRun:
     cost: float
     denials: list
     duration_ms: int
+    model_reason: str = ""
 
 
 @dataclass
@@ -65,8 +61,8 @@ class RoundOutcome:
 
 def assemble_checklist(ctx: Context) -> str:
     parts = []
-    if os.path.isfile(BUILTIN_CHECKLIST):
-        parts.append("### Built-in\n\n" + read_text(BUILTIN_CHECKLIST).strip())
+    if ctx.builtin_checklist and os.path.isfile(ctx.builtin_checklist):
+        parts.append("### Built-in\n\n" + read_text(ctx.builtin_checklist).strip())
     user_path = ctx.user_cfg.checklist if ctx.user_cfg else ""
     if user_path and os.path.isfile(user_path):
         parts.append("### User\n\n" + read_text(user_path).strip())
@@ -178,7 +174,7 @@ def build_prompt(ctx: Context, state: State, rdir: str, round_no: int, bounce_no
         "prior_tests_section": _prior_tests_section(state),
         "checklist": assemble_checklist(ctx),
     }
-    template = string.Template(read_text(PROMPT_PATH))
+    template = string.Template(read_text(ctx.review_prompt))
     return template.safe_substitute(values)
 
 
@@ -205,17 +201,27 @@ def validate_shape(data) -> List[str]:
     return problems
 
 
+def planned_reviewer(ctx: Context) -> models.Resolved:
+    """Which model the Reviewer would run on, and why (explicit or auto)."""
+    cfg = ctx.cfg.review
+    engine_cfg = ctx.cfg.engine_for("review")
+    return models.resolve(models.REVIEWER, cfg.model, cfg.fallback_model, ctx.doc.author_model if ctx.doc else "",
+                          engine_cfg.tiers, ctx.cfg.foreign_ladders(engine_cfg.name))
+
+
 def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt: int,
                    log: Optional[RunLog]) -> ReviewerRun:
     cfg = ctx.cfg.review
-    requested = cfg.model
-    raw_path = os.path.join(rdir, "logs", "review-r%d-%d.raw.json" % (round_no, attempt))
+    chosen = planned_reviewer(ctx)
+    requested = chosen.model
+    raw_path = os.path.join(ctx.logs, "review-r%d-%d.raw.json" % (round_no, attempt))
     if log:
-        log.stage("review", "round %d attempt %d: reviewer %s (budget $%.2f, timeout %d min)"
-                  % (round_no, attempt, requested, cfg.budget_usd, cfg.timeout_min))
+        log.stage("review", "round %d attempt %d: reviewer %s%s (budget $%.2f, timeout %d min)"
+                  % (round_no, attempt, requested, " (%s)" % chosen.reason if chosen.reason else "",
+                     cfg.budget_usd, cfg.timeout_min))
     result = claude.invoke(
-        role="reviewer", model=requested, fallback_model=cfg.fallback_model, effort=cfg.effort,
-        schema_text=read_text(SCHEMA_PATH), budget_usd=cfg.budget_usd,
+        role="reviewer", model=requested, fallback_model=chosen.fallback, effort=cfg.effort,
+        schema_text=read_text(ctx.review_schema), budget_usd=cfg.budget_usd,
         extra_args=["--permission-mode", "acceptEdits", "--allowedTools", ALLOWED_TOOLS],
         prompt=prompt, cwd=ctx.repo_root, timeout_s=cfg.timeout_min * 60, raw_path=raw_path, log=log)
     problems = validate_shape(result.data)
@@ -225,6 +231,7 @@ def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt:
     return ReviewerRun(
         data=result.data, raw=result.raw, model_requested=requested, model_actual=result.model_actual,
         fallback=result.fallback, cost=result.cost, denials=result.denials, duration_ms=result.duration_ms,
+        model_reason=chosen.reason,
     )
 
 
@@ -240,7 +247,7 @@ def guard_worktree(ctx: Context, log: Optional[RunLog]) -> List[str]:
     """Revert anything the reviewer touched outside test_dir. Returns the offending paths."""
     root = ctx.repo_root
     offenders = []
-    for entry in gitops.dirty_paths(root):
+    for entry in gitops.dirty_paths(root, (ctx.cfg.paths.state_dir + '/',)):
         code, path = entry.split(" ", 1)
         if _under_test_dir(path, ctx.cfg.project.test_dir):
             continue
@@ -262,7 +269,7 @@ def guard_worktree(ctx: Context, log: Optional[RunLog]) -> List[str]:
 
 def new_test_files(ctx: Context) -> List[str]:
     files = []
-    for entry in gitops.dirty_paths(ctx.repo_root):
+    for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + '/',)):
         _, path = entry.split(" ", 1)
         if _under_test_dir(path, ctx.cfg.project.test_dir):
             files.append(path.replace("\\", "/"))
@@ -325,7 +332,7 @@ def smoke_run(ctx: Context, test_files: List[str], rdir: str, round_no: int, att
         log.stage("review", "smoke run of %d new test file(s) on %s" % (len(extra), runner.name))
     try:
         report = runner.run(ctx.repo_root, "HEAD", steps_for(plat, ["setup", "build", "new_test"]), extra,
-                            os.path.join(rdir, "logs"), label, log.detail if log else None)
+                            ctx.logs, label, log.detail if log else None)
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc)
     failed = report.failed
@@ -359,7 +366,7 @@ def commit_tests(ctx: Context, files: List[str], round_no: int, log: Optional[Ru
 
 def _header(meta: dict) -> str:
     lines = ["<!-- generated by revali -->"]
-    for key in ("tool", "round", "model_requested", "model_actual", "fallback", "prompt_version",
+    for key in ("tool", "round", "model_requested", "model_reason", "model_actual", "fallback", "prompt_version",
                 "cost_usd", "duration_s", "at"):
         if key in meta:
             lines.append("%s: %s" % (key, meta[key]))
@@ -471,7 +478,7 @@ def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> R
     while True:
         attempt += 1
         prompt = build_prompt(ctx, state, rdir, round_no, bounce_notes)
-        write_text(os.path.join(rdir, "logs", "prompt-r%d-%d.md" % (round_no, attempt)), prompt)
+        write_text(os.path.join(ctx.logs, "prompt-r%d-%d.md" % (round_no, attempt)), prompt)
         rr = spawn_reviewer(ctx, prompt, rdir, round_no, attempt, log)
         total_cost += rr.cost
         if rr.denials and log:
@@ -519,6 +526,7 @@ def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> R
         pass
 
     meta = {"tool": "revali", "round": round_no, "model_requested": rr.model_requested,
+            "model_reason": rr.model_reason or "explicit",
             "model_actual": rr.model_actual, "fallback": rr.fallback, "prompt_version": state.prompt_version,
             "cost_usd": "%.4f" % total_cost, "duration_s": rr.duration_ms // 1000, "at": now_iso()}
     review_md = render_review_md(rr.data, verdict, reasons, meta, ctx.doc.ac_ids)

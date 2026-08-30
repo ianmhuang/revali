@@ -75,6 +75,10 @@ class LayeringTests(unittest.TestCase):
                               {"validate": {"linux": {"setup": "s"}, "other": {}}})
         self.assertEqual(merged["_platforms"]["linux"], {"runner": "wsl", "distro": "V", "setup": "s"})
         self.assertEqual(merged["_platforms"]["other"], {"runner": "wsl", "distro": "U"})
+        later = merge_layers({"validate": {"platform": {"runner": "wsl", "distro": "U"}}},
+                             {"validate": {"linux": {"setup": "s"}}},
+                             {"validate": {"platform": {"distro": "W"}}})
+        self.assertEqual(later["_platforms"]["linux"], {"runner": "wsl", "distro": "W", "setup": "s"})
 
 
 class EngineAndPathChecks(unittest.TestCase):
@@ -88,6 +92,33 @@ class EngineAndPathChecks(unittest.TestCase):
             parse_project_config(MINIMAL + '\n[validate]\nengine = "codex"\n')
         self.assertTrue(any("validate.engine 'codex' is unknown (available: claude)" in p
                             for p in cm.exception.problems))
+
+    def test_retired_engine_value_only_for_review(self):
+        with self.assertRaises(ConfigError) as cm:
+            parse_project_config(MINIMAL + '\n[validate]\nengine = "prompt"\n')
+        self.assertTrue(any("validate.engine 'prompt' is unknown" in p for p in cm.exception.problems))
+        self.assertFalse(any("strategy" in p for p in cm.exception.problems))
+
+    def test_type_error_is_reported_once(self):
+        with self.assertRaises(ConfigError) as cm:
+            parse_project_config(MINIMAL + '\n[merge]\nmethod = 5\n')
+        self.assertEqual(cm.exception.problems, ["revali.toml: merge.method must be a string"])
+
+    def test_platform_defaults_from_a_later_layer(self):
+        user = {"validate": {"linux": {"distro": "V"}}}
+        cfg = parse_project_config(MINIMAL + '\n[validate.platform]\ncommand_timeout_min = 42\n',
+                                   user_sections=user)
+        self.assertEqual(cfg.validate.platforms["linux"].command_timeout_min, 42)
+        self.assertEqual(cfg.validate.platforms["linux"].distro, "V")
+
+    def test_history_file_from_defaults(self):
+        from revali.config import UserConfig, history_path
+        self.assertTrue(history_path().endswith("history.jsonl"))
+        user = UserConfig(sections={"paths": {"history_file": "runs.jsonl"}})
+        self.assertTrue(history_path(user).endswith("runs.jsonl"))
+        with self.assertRaises(ConfigError) as cm:
+            parse_project_config(MINIMAL + '\n[paths]\nhistory_file = "x.jsonl"\n')
+        self.assertTrue(any("user-level key" in p for p in cm.exception.problems))
 
     def test_empty_tiers_rejected(self):
         with self.assertRaises(ConfigError) as cm:
@@ -147,6 +178,22 @@ class UserFileTests(unittest.TestCase):
 
     def test_paths_for_without_project_config(self):
         self.assertEqual(paths_for(self.home).state_dir, ".revali")
+
+    def test_paths_for_overlays_user_then_project_when_config_is_broken(self):
+        self.write('[paths]\nstate_dir = ".user"\nlogs_dir = "ulogs"\n')
+        repo = tempfile.mkdtemp(prefix="revali repo ")
+        self.addCleanup(rmtree_force, repo)
+        with open(os.path.join(repo, "revali.toml"), "w", encoding="utf-8") as fh:
+            fh.write('[project]\nconfig_version = 1\n[review]\nengine = "nope"\n[paths]\nstate_dir = ".proj"\n')
+        paths = paths_for(repo)
+        self.assertEqual((paths.state_dir, paths.logs_dir), (".proj", "ulogs"))
+
+    def test_history_file_in_user_file_is_validated(self):
+        from revali.config import history_path
+        self.write('[paths]\nhistory_file = "a/b.jsonl"\n')
+        with self.assertRaises(ConfigError) as cm:
+            history_path(load_user_config())
+        self.assertIn("single file name", cm.exception.problems[0])
 
 
 if __name__ == "__main__":
