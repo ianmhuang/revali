@@ -138,6 +138,47 @@ class UserLayerStateDir(RepoCase):
         self.assertTrue(self.exists(".ubox/feature__mul/logs/revali.log"))
         self.assertFalse(self.exists(".revali/feature__mul/state.json"))
 
+    def test_user_state_dir_survives_a_broken_project_config(self):
+        # round-2 F7: with a project config that does not validate, the change.md lookup
+        # still follows the user layer's [paths] state_dir
+        with open(os.path.join(self.home, "config.toml"), "w", encoding="utf-8") as fh:
+            fh.write('[paths]\nstate_dir = ".ubox"\nlogs_dir = "ulogs"\n')
+        self.write(".ubox/feature__mul/change.md", self.read(CHANGE))
+        self.write("revali.toml", self.read("revali.toml").replace("budget_usd = 1.0", 'budget_usd = "lots"'))
+        self.commit_all("broken config")
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("review.budget_usd must be a number", out)
+        self.assertNotIn("change.md", out)
+        # status and clean look in the same directory
+        code, out = run_cli(["run", "--dry-run"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertTrue(self.exists(".ubox/feature__mul/state.json"))
+        self.assertTrue(self.exists(".ubox/feature__mul/ulogs"))
+        self.assertFalse(self.exists(".ubox/feature__mul/logs"))
+        self.assertFalse(self.exists(".revali/feature__mul/state.json"))
+        code, out = run_cli(["clean", "feature/mul"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(".ubox/feature__mul"))
+
+    def test_project_paths_win_over_user_paths_when_the_config_is_broken(self):
+        with open(os.path.join(self.home, "config.toml"), "w", encoding="utf-8") as fh:
+            fh.write('[paths]\nstate_dir = ".ubox"\n')
+        self.write(".pbox/feature__mul/change.md", self.read(CHANGE))
+        self.write("revali.toml", self.read("revali.toml").replace("budget_usd = 1.0", 'budget_usd = "lots"')
+                   + '\n[paths]\nstate_dir = ".pbox"\n')
+        self.commit_all("broken config with paths")
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("review.budget_usd must be a number", out)
+        self.assertNotIn("change.md", out)
+        os.remove(os.path.join(self.repo, ".pbox", "feature__mul", "change.md"))
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("change.md not found", out)
+        self.assertIn(".pbox", out)
+        self.assertNotIn(".ubox", out)
+
 
 class SandboxDir(RepoCase):
     runner = "wsl"

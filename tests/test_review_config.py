@@ -114,6 +114,17 @@ class ConfigFollowUps(unittest.TestCase):
         self.assertTrue(any("paths.history_file is a user-level key" in p for p in cm.exception.problems),
                         cm.exception.problems)
 
+    def test_history_path_itself_refuses_a_nested_user_name(self):
+        # round-2 F6: the check must not depend on a project config loading first
+        for bad in ("a/b.jsonl", "..", "", 5):
+            with self.assertRaises(ConfigError, msg=repr(bad)) as cm:
+                history_path(UserConfig(sections={"paths": {"history_file": bad}}))
+            self.assertIn("paths.history_file", cm.exception.problems[0])
+        # a nested name never wins over an explicit history_path either
+        both = UserConfig(history_path=os.path.join("elsewhere", "h.jsonl"),
+                          sections={"paths": {"history_file": "a/b.jsonl"}})
+        self.assertEqual(history_path(both), os.path.join("elsewhere", "h.jsonl"))
+
 
 class HistoryFileEndToEnd(RepoCase):
     def test_run_records_history_under_the_configured_name(self):
@@ -132,6 +143,23 @@ class HistoryFileEndToEnd(RepoCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("history: " + os.path.join(self.home, "runs.jsonl"), out)
         self.assertIn("history rows: 1", out)
+
+    def test_nested_user_history_file_never_creates_a_nested_file(self):
+        # round-2 F6 end to end: preflight refuses the name, and neither the run's history
+        # append nor `stats` writes under ~/.revali/a/
+        with open(os.path.join(self.home, "config.toml"), "w", encoding="utf-8") as fh:
+            fh.write('[paths]\nhistory_file = "a/b.jsonl"\n')
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, 1, out)
+        self.assertIn("paths.history_file must be a single file name", out)
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, 1, out)
+        self.assertFalse(os.path.exists(os.path.join(self.home, "a")))
+        code, out = run_cli(["stats"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(os.path.exists(os.path.join(self.home, "a")))
+        self.assertNotIn(os.path.join("a", "b.jsonl"), out)
 
     def test_documented_keys_exist(self):
         d = load_defaults()
@@ -165,6 +193,27 @@ class ReadmeAdditions(unittest.TestCase):
         self.assertIn("one tier below", conf)
         self.assertIn('`fallback_model = "auto"`', conf)
         self.assertIn("author_model", conf)
+
+
+class TemplatesFollowTheKeys(unittest.TestCase):
+    """CONVENTIONS: a change that touches a key updates templates/ too (round-2 F8)."""
+
+    def template(self, name):
+        with open(os.path.join(ROOT, "templates", name), "r", encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_user_config_template_names_history_file(self):
+        text = self.template("user-config.toml")
+        self.assertIn("[paths]", text)
+        self.assertIn("history_file", text)
+        self.assertIn("history_path", text)
+
+    def test_project_template_defaults_to_auto(self):
+        text = self.template("revali.toml")
+        self.assertIn('model = "auto"', text)
+        self.assertIn('fallback_model = "auto"', text)
+        self.assertNotIn('model = "fable"', text)
+        self.assertNotIn("history_file", text)   # user-level key, not a project one
 
 
 if __name__ == "__main__":
