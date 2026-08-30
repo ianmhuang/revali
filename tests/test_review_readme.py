@@ -79,7 +79,7 @@ class NoteUnderDiagram(unittest.TestCase):
         table_start = text.index("| Role |")
         note = " ".join(text[end_of_diagram:table_start].split())  # the note wraps across lines
         self.assertIn("baseline", note)
-        self.assertIn("once per branch", note)
+        self.assertIn("until the first review round is recorded", note)
         self.assertIn("`kind: docs`", note)
         self.assertRegex(note, r"`setup`.*`build`", "the note names both sandbox steps")
         self.assertIn("exit 1", note)

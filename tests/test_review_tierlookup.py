@@ -25,15 +25,10 @@ class ModelFamilyDelegates(unittest.TestCase):
         # tier_index is consulted with the model id and the engine's ladder, and its
         # index picks the family; a lookup that does not go through it fails here
         eng = engine()
-        calls = []
-
-        def recording(model, tiers):
-            calls.append((model, list(tiers)))
-            return models.tier_index(model, tiers)
-
-        with mock.patch.object(models, "tier_index", side_effect=recording):
+        with mock.patch.object(models, "tier_index", wraps=models.tier_index) as lookup:
             self.assertEqual(eng.model_family("claude-opus-5"), "opus")
-        self.assertEqual(calls, [("claude-opus-5", LADDER)])
+        self.assertEqual([(c.args[0], list(c.args[1])) for c in lookup.call_args_list],
+                         [("claude-opus-5", LADDER)])
 
     def test_tier_index_answer_wins_over_substring_matching(self):
         # if the shared lookup says "index 0", the family is tiers[0], whatever the id looks like

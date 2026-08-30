@@ -81,7 +81,8 @@ def has_remote(remote: str, cwd: str) -> bool:
 
 
 def remote_repo(remote: str, cwd: str) -> str:
-    """'owner/name' from a hosted remote URL (https, ssh, scp-like); '' for a local path or no remote."""
+    """'owner/name' (lowercased, the last two path components) from a hosted remote URL
+    (https, ssh, scp-like); '' for a local path or no remote."""
     res = _git(["remote", "get-url", remote], cwd)
     if not res.ok:
         return ""
@@ -101,7 +102,7 @@ def remote_repo(remote: str, cwd: str) -> str:
     name = parts[-1]
     if name.lower().endswith(".git"):
         name = name[:-4]
-    return "%s/%s" % (parts[-2], name)
+    return ("%s/%s" % (parts[-2], name)).lower()
 
 
 def is_ancestor(ancestor: str, descendant: str, cwd: str) -> bool:

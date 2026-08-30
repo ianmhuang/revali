@@ -33,9 +33,10 @@ flowchart TD
     U3 --> G[wait for CI, squash merge,<br/>delete branch, clean state dir]
 ```
 
-The preflight baseline (the existing suite in the sandbox) runs once per
-branch, on the first pass, and not for `kind: docs`. A sandbox `setup` or
-`build` failure is exit 1 (environment), not a FAIL verdict.
+The preflight baseline (the existing suite in the sandbox) runs on every
+`revali run` until the first review round is recorded, and not for
+`kind: docs`. A sandbox `setup` or `build` failure is exit 1 (environment),
+not a FAIL verdict.
 
 | Role | Started by | Reads | Writes | Model |
 |---|---|---|---|---|
