@@ -116,6 +116,10 @@ failure), then READY TO MERGE. Every result lands in `.revali/<branch>/`
 After exit code 2 the author fixes or answers in
 `.revali/<branch>/response-<n>.md` (`- F1: fixed` / `- F1: wontfix: <reason>`),
 commits, and runs again; each such cycle counts against `review.max_fixes`.
+The exit 2 message (and the `revali wait` line) lists what blocks and also
+the findings that did not block, with the blocking / non-blocking counts and
+the path of `review-<n>.md`: a `low` or `medium convention` finding left
+unanswered comes back as unresolved in the next round.
 
 ## Configuration
 
@@ -239,7 +243,12 @@ stated.
 - appends the state directory (`.revali/`) to `.gitignore` if missing
 - `git push -u origin <branch>` and `gh pr create --draft`
 - commits the reviewer's test files into `test_dir`, with a
-  `Co-Authored-By: Claude` trailer
+  `Co-Authored-By: Claude` trailer; only new files and the files the
+  reviewer wrote in an earlier round of the same pipeline. Any other
+  tracked file under `test_dir` the reviewer modified or deleted is
+  restored from HEAD before the commit, the reviewer is sent back once
+  with the names already taken, and a second offence ends the run with
+  exit 1 and no test commit
 - posts review and validation results as PR comments; on a repository that
   is not private the comments are summaries (verdict, model, cost, finding
   ids with severity and location, test files, AC coverage, validation exit
@@ -257,7 +266,8 @@ stated.
   `revali stop` and Ctrl-C do not clean up, so a run interrupted that way
   may leave such files for you to delete
 
-It never modifies files outside `test_dir` and the state directory, never merges on
+It never modifies files outside `test_dir` and the state directory, never
+commits a change to a test file the reviewer did not write, never merges on
 its own, and never runs on a repo you do not own.
 
 ## Development

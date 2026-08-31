@@ -208,24 +208,27 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
                                                ctx.cfg.paths.state_dir)
     prstage.post_comment(ctx, state, rdir, "review-%d" % outcome.round_no, comment, log)
 
+    counts = review.counts_label(outcome.data, outcome.review_path)
+    others = review.non_blocking_note(outcome.data, outcome.round_no, outcome.review_path, rdir)
     if outcome.verdict == review.NEEDS_INFO:
         questions = "\n".join("  - " + q for q in outcome.data.get("questions", []))
-        state.set_stage(rdir, "needs_action", "reviewer needs information", EXIT_ACTION)
+        state.set_stage(rdir, "needs_action", "reviewer needs information (%s)" % counts, EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION)
         print("ACTION NEEDED: the reviewer has questions (round %d). Answer them in %s, adjust "
-              "change.md if the acceptance criteria were unclear, then run again.\n%s"
-              % (outcome.round_no, os.path.join(rdir, "response-%d.md" % outcome.round_no), questions))
+              "change.md if the acceptance criteria were unclear, then run again.\n%s%s"
+              % (outcome.round_no, os.path.join(rdir, "response-%d.md" % outcome.round_no), questions, others))
         return EXIT_ACTION
     if outcome.verdict == review.CHANGES_REQUESTED:
         reasons = "\n".join("  - " + r for r in outcome.reasons)
-        state.set_stage(rdir, "needs_action", "changes requested in round %d" % outcome.round_no, EXIT_ACTION)
+        state.set_stage(rdir, "needs_action", "changes requested in round %d (%s)" % (outcome.round_no, counts),
+                        EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION)
         print("ACTION NEEDED: changes requested (round %d, fix cycle %d of %d). Full review: %s\n"
-              "Fix what blocks, or answer each finding in %s (fixed / wontfix: <reason>), commit, run again.\n%s"
+              "Fix what blocks, or answer each finding in %s (fixed / wontfix: <reason>), commit, run again.\n%s%s"
               % (outcome.round_no, state.fixes, ctx.cfg.review.max_fixes, outcome.review_path,
-                 os.path.join(rdir, "response-%d.md" % outcome.round_no), reasons))
+                 os.path.join(rdir, "response-%d.md" % outcome.round_no), reasons, others))
         return EXIT_ACTION
 
     state.set_stage(rdir, "validate", "review approved in round %d; validating" % outcome.round_no)
@@ -238,11 +241,13 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
 
     if vout.result == validate.FAIL:
         summary = validate.summary_for_author(vout, rdir)
-        state.set_stage(rdir, "needs_action", "validation %d failed at %s" % (vout.number, vout.failed_step), EXIT_ACTION)
+        state.set_stage(rdir, "needs_action", "validation %d failed at %s (%s)"
+                        % (vout.number, vout.failed_step, counts), EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION)
         print("ACTION NEEDED: %s\nFix (or correct the test if the diagnosis says the test is wrong, and say so "
-              "in %s), commit, run again." % (summary, os.path.join(rdir, "response-%d.md" % outcome.round_no)))
+              "in %s), commit, run again.%s"
+              % (summary, os.path.join(rdir, "response-%d.md" % outcome.round_no), others))
         return EXIT_ACTION
 
     state.set_stage(rdir, "ready_to_merge", "validation %d passed" % vout.number, EXIT_OK)

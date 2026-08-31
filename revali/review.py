@@ -134,6 +134,29 @@ def _prior_tests_section(state: State) -> str:
             + "\n".join("- " + p for p in state.test_files) + "\n")
 
 
+def tracked_test_files(ctx: Context) -> List[str]:
+    """Files under test_dir that HEAD tracks, forward slashes."""
+    res = gitops._git(["ls-files", "--", ctx.cfg.project.test_dir], ctx.repo_root)
+    return [p.strip().replace("\\", "/") for p in res.stdout.splitlines() if p.strip()]
+
+
+def existing_test_names(ctx: Context, state: State) -> List[str]:
+    """Tracked files matching test_file_pattern that this pipeline did not write:
+    names the reviewer must not use or modify."""
+    pattern = test_pattern_glob(ctx)
+    return sorted(p for p in tracked_test_files(ctx)
+                  if gitops.matches_any(p, [pattern]) and p not in state.test_files)
+
+
+def _existing_tests_section(ctx: Context, state: State) -> str:
+    names = existing_test_names(ctx, state)
+    if not names:
+        return ""
+    return ("Test files that already exist in `%s/` and are not yours (do not modify, delete, or\n"
+            "overwrite them; choose a topic that gives a different file name):\n"
+            % ctx.cfg.project.test_dir + "\n".join("- " + p for p in names) + "\n")
+
+
 def _bounce_section(notes: str) -> str:
     if not notes:
         return ""
@@ -172,6 +195,7 @@ def build_prompt(ctx: Context, state: State, rdir: str, round_no: int, bounce_no
         "tests_required": tests_required,
         "test_guide_section": guide,
         "prior_tests_section": _prior_tests_section(state),
+        "existing_tests_section": _existing_tests_section(ctx, state),
         "checklist": assemble_checklist(ctx),
     }
     template = string.Template(read_text(ctx.review_prompt))
@@ -294,6 +318,27 @@ def guard_worktree(ctx: Context, log: Optional[RunLog]) -> List[str]:
     return offenders
 
 
+def restore_protected_tests(ctx: Context, state: State, log: Optional[RunLog]) -> List[str]:
+    """Restore from HEAD every tracked file under test_dir the reviewer modified or deleted
+    that this pipeline did not write in an earlier round. Returns the restored paths."""
+    root = ctx.repo_root
+    restored = []
+    for entry in gitops.dirty_paths(root, (ctx.cfg.paths.state_dir + '/',)):
+        code, path = entry.split(" ", 1)
+        path = path.replace("\\", "/")
+        if code == "??" or not _under_test_dir(path, ctx.cfg.project.test_dir):
+            continue
+        if path in state.test_files:
+            continue
+        gitops._git(["checkout", "--", path], root)
+        restored.append(path)
+    restored.sort()
+    if restored and log:
+        log.stage("review", "reviewer modified existing test file(s) it did not write; restored: %s"
+                  % ", ".join(restored))
+    return restored
+
+
 def new_test_files(ctx: Context) -> List[str]:
     files = []
     for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + '/',)):
@@ -313,15 +358,51 @@ def ac_gaps(data: dict, ac_ids: List[str]) -> List[str]:
     return [ac for ac in ac_ids if ac not in covered]
 
 
+def is_blocking(f: dict) -> bool:
+    sev, kind = f.get("severity"), f.get("kind")
+    return (kind in ("correctness", "security") and sev in ("high", "medium")) or \
+           (kind == "convention" and sev == "high")
+
+
+def format_finding(f: dict) -> str:
+    return "%s [%s %s] %s:%s %s" % (f.get("id", "F?"), f.get("severity"), f.get("kind"), f.get("file", "?"),
+                                    f.get("line", 0), f.get("text", ""))
+
+
+def non_blocking_findings(data: dict) -> List[dict]:
+    return [f for f in data.get("findings", []) if not is_blocking(f)]
+
+
+def finding_counts(data: dict) -> Tuple[int, int]:
+    """(blocking, non-blocking) finding counts of one reviewer answer."""
+    findings = data.get("findings", [])
+    blocking = sum(1 for f in findings if is_blocking(f))
+    return blocking, len(findings) - blocking
+
+
+def counts_label(data: dict, review_path: str) -> str:
+    """Suffix for the needs_action stage message: counts and where the full review is."""
+    blocking, other = finding_counts(data)
+    return "%d blocking, %d non-blocking finding(s); full review: %s" % (blocking, other, review_path)
+
+
+def non_blocking_note(data: dict, round_no: int, review_path: str, rdir: str) -> str:
+    """Lines appended to an ACTION NEEDED message: the findings that did not block,
+    which the author must still answer. Empty when there are none."""
+    others = non_blocking_findings(data)
+    if not others:
+        return ""
+    lines = ["Also %d non-blocking finding(s) in %s; fix or answer each in %s or they come back as unresolved:"
+             % (len(others), review_path, os.path.join(rdir, "response-%d.md" % round_no))]
+    lines += ["  - " + format_finding(f) for f in others]
+    return "\n" + "\n".join(lines)
+
+
 def compute_verdict(data: dict, gaps: List[str], needs_info_allowed: bool) -> Tuple[str, List[str]]:
     reasons = []
     for f in data.get("findings", []):
-        sev, kind = f.get("severity"), f.get("kind")
-        blocking = (kind in ("correctness", "security") and sev in ("high", "medium")) or \
-                   (kind == "convention" and sev == "high")
-        if blocking:
-            reasons.append("%s [%s %s] %s:%s %s" % (f.get("id", "F?"), sev, kind, f.get("file", "?"),
-                                                    f.get("line", 0), f.get("text", "")))
+        if is_blocking(f):
+            reasons.append(format_finding(f))
     for tc in data.get("test_changes", []):
         if not tc.get("justified"):
             reasons.append("existing test %s changed without justification: %s"
@@ -572,12 +653,18 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
         if offenders:
             raise Stop(EXIT_ERROR, "the reviewer modified files outside %s (reverted): %s"
                        % (ctx.cfg.project.test_dir, ", ".join(offenders)))
+        restored = restore_protected_tests(ctx, state, log)
         files = new_test_files(ctx)
         gaps = ac_gaps(rr.data, ctx.doc.ac_ids)
         smoke_problem = None
         if files and ctx.doc.kind in ("feature", "fix") and rr.data.get("verdict") != NEEDS_INFO:
             smoke_problem = smoke_run(ctx, files, rdir, round_no, attempt, log)
         problems = []
+        if restored:
+            problems.append("You modified or deleted existing test file(s) that are not yours; they were "
+                            "restored: %s. Do not touch them. Write your tests into new files under a "
+                            "different topic; names already taken: %s."
+                            % (", ".join(restored), ", ".join(existing_test_names(ctx, state)) or "(none)"))
         if gaps and rr.data.get("verdict") != NEEDS_INFO:
             problems.append("These acceptance criteria are neither covered by a test nor listed in "
                             "`not_testable` with a reason: %s. Cover them or explain." % ", ".join(gaps))
@@ -591,6 +678,9 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
             continue
         break
 
+    if restored:
+        raise Stop(EXIT_ERROR, "the reviewer modified existing test file(s) it did not write, after the "
+                               "retry allowed for it; restored, no tests committed: %s" % ", ".join(restored))
     if smoke_problem:
         raise Stop(EXIT_ERROR, "the reviewer's tests still cannot run after a retry; " + smoke_problem)
     asked = rr.data.get("verdict") == NEEDS_INFO
