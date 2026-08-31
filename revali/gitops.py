@@ -51,12 +51,22 @@ def rev_parse(ref: str, cwd: str) -> Optional[str]:
 
 
 def status_porcelain(cwd: str) -> List[Tuple[str, str]]:
-    res = git_ok(["status", "--porcelain", "--untracked-files=all"], cwd)
+    """(XY, path) per entry of `git status --porcelain -z`: NUL-separated, so paths with
+    spaces or non-ASCII characters arrive unquoted. A rename or copy carries the
+    original path in a second field, which is skipped."""
+    res = git_ok(["status", "--porcelain", "-z", "--untracked-files=all"], cwd)
+    fields = res.stdout.split("\0")
     entries = []
-    for line in res.stdout.splitlines():
-        if len(line) < 4:
+    i = 0
+    while i < len(fields):
+        entry = fields[i]
+        i += 1
+        if len(entry) < 4:
             continue
-        entries.append((line[:2], line[3:].strip()))
+        code, path = entry[:2], entry[3:]
+        if code[0] in "RC":
+            i += 1  # the path it was renamed or copied from
+        entries.append((code, path))
     return entries
 
 
