@@ -28,7 +28,7 @@ def _interrupted(state: State) -> bool:
 
 def _cleanup_after_interruption(ctx, state: State, rdir: str, log: RunLog) -> None:
     from revali import review
-    review.discard_unfinished_tests(ctx, log, "the interrupted run")
+    review.discard_unfinished_tests(ctx, log, "the interrupted run", stage="run")
     state.reviewer_running = False
     state.save(rdir)
 

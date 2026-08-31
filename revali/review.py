@@ -260,11 +260,13 @@ def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt:
     )
 
 
-def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str = "the reviewer") -> List[str]:
+def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str = "the reviewer",
+                             stage: str = "review") -> List[str]:
     """Delete untracked files matching test_file_pattern under test_dir after a review round
     stopped before its tests were committed: they are half-written and would make the next
     run refuse a dirty tree. This is the only deletion inside test_dir revali ever performs.
-    `left_by` names the culprit in the log line ("the reviewer", "the interrupted run")."""
+    `left_by` names the culprit in the log line ("the reviewer", "the interrupted run");
+    `stage` is the log label, `run` when the cleanup happens before preflight's tree check."""
     pattern = test_pattern_glob(ctx)
     removed = []
     stuck = []
@@ -279,10 +281,10 @@ def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str =
             except OSError as exc:
                 stuck.append("%s (%s)" % (path, exc))
     if removed and log:
-        log.stage("review", "removed %d unfinished test file(s) %s left behind: %s"
+        log.stage(stage, "removed %d unfinished test file(s) %s left behind: %s"
                   % (len(removed), left_by, ", ".join(removed)))
     if stuck and log:
-        log.stage("review", "could not remove %d unfinished test file(s); delete them by hand: %s"
+        log.stage(stage, "could not remove %d unfinished test file(s); delete them by hand: %s"
                   % (len(stuck), ", ".join(stuck)))
     return removed
 
@@ -304,9 +306,13 @@ def _restore_from_head(path: str, root: str) -> None:
 
 
 def _remove_new(path: str, code: str, root: str) -> None:
-    """Delete a file that is not in HEAD; a staged addition is unstaged first."""
+    """Delete a file that is not in HEAD; a staged addition is unstaged first.
+    A git failure ends the run (exit 1), as in _restore_from_head."""
     if code[0] == "A":
-        gitops._git(["rm", "-q", "--cached", "--", path], root)
+        try:
+            gitops.git_ok(["rm", "-q", "--cached", "--", path], root)
+        except gitops.GitError as exc:
+            raise Stop(EXIT_ERROR, "could not unstage %s: %s" % (path, exc))
     full = os.path.join(root, path)
     if os.path.isdir(full):
         import shutil

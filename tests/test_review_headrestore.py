@@ -28,7 +28,9 @@ def error_line(out):
 
 
 def status(repo):
-    return git(["-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all"], repo).strip()
+    # Through gitops.status_porcelain (porcelain -z): porcelain v1 quotes a path with a space
+    # even under core.quotepath=false, which is git's formatting, not the behaviour AC-3 describes.
+    return "\n".join("%s %s" % (code, path) for code, path in status_porcelain(repo))
 
 
 class RestoreFromHead(RepoCase):

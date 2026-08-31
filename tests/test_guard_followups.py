@@ -104,6 +104,7 @@ class InterruptedRunTests(RepoCase):
         self.assertEqual(code, EXIT_OK, out)                                               # AC-4
         self.assertIn("tests/test_review_left.py", out)
         self.assertIn("interrupted", out)
+        self.assertIn("] run: removed", out)                      # round 2, F2: logged under `run`, not `review`
         self.assertFalse(self.exists("tests/test_review_left.py"))
         self.assertFalse(State.load(self.rdir()).reviewer_running)
 
