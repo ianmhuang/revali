@@ -67,6 +67,26 @@ class RestoreFromHead(RepoCase):
         self.assertTrue(self.exists("src/__init__.py"))                                    # AC-1
         self.assertEqual(status(self.repo), "")
 
+    def test_staged_addition_outside_test_dir_leaves_index_and_tree_at_head(self):
+        # Round 1, F3: a path absent from HEAD cannot be restored from it; the guard must
+        # unstage and delete it instead of reporting a revert that did not happen.
+        ctx = preflight(self.repo)
+        self.write("src/new module.py", "x = 1\n")
+        git(["add", "src/new module.py"], self.repo)
+        self.assertEqual(guard_worktree(ctx, None), ["src/new module.py"])                 # AC-1
+        self.assertFalse(self.exists("src/new module.py"))
+        self.assertEqual(git(["diff", "--cached", "--name-only"], self.repo).strip(), "")
+        self.assertEqual(status(self.repo), "")
+
+    def test_staged_addition_under_test_dir_is_the_reviewers_own_file(self):
+        ctx = preflight(self.repo)
+        self.write(NEW_SPACED, "a = 1\n")
+        git(["add", NEW_SPACED], self.repo)
+        self.assertEqual(restore_protected_tests(ctx, State(), None), [])                  # AC-1: not a protected file
+        self.assertTrue(self.exists(NEW_SPACED))
+        self.assertEqual(new_test_files(ctx), [NEW_SPACED])
+        self.assertEqual(status(self.repo), "A  " + NEW_SPACED)
+
 
 class SecondOffenceMessage(RepoCase):
     def test_exit1_names_the_files_and_round_without_claiming_a_retry(self):

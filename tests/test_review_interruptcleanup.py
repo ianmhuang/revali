@@ -1,11 +1,18 @@
 """AC-4..AC-6 of fix/guard-followups: the run after an interrupted one (`revali stop`,
 Ctrl-C, a killed process) deletes only the untracked files on test_file_pattern under
-test_dir, names them, and goes on; a run that ended with a verdict, a first run, and
-`revali preflight` never delete; README describes the cleanup and the restore source."""
+test_dir, names them, and goes on; a run that ended with a verdict, a finished dry run,
+a first run, `revali preflight` and `run --dry-run` never delete; the state file keeps
+`reviewer_running: true` from the moment a session starts until a cleanup has run;
+README describes the cleanup and the restore source."""
+import json
 import os
+import subprocess
+import sys
+import time
 import unittest
 
-from tests.helpers import ROOT, RepoCase, TEST_REVIEW_MUL, claude_entry, git, run_cli
+from tests.helpers import (CLAUDE_STUB, ROOT, RepoCase, TEST_REVIEW_MUL, _quote, claude_entry, git,
+                          run_cli)
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK
 from revali.config import paths_for
 from revali.state import State
@@ -13,6 +20,19 @@ from revali.state import State
 LEFTOVER = "tests/test_review_left.py"
 LEFTOVER_SPACED = "tests/test_review_my topic.py"
 LEFTOVER_NON_ASCII = "tests/test_review_中文.py"
+
+# A stand-in for `claude` that first copies the branch's state.json to a snapshot (so the
+# test can see what the state file said while the session was running), then either
+# behaves like the normal stub or writes a half-finished test file and hangs until killed.
+WRAPPER = '''import runpy, shutil, sys, time
+shutil.copyfile(%(state)r, %(snapshot)r)
+if %(hang)r:
+    with open(%(half)r, "w", encoding="utf-8", newline="\\n") as fh:
+        fh.write("# half written by the reviewer\\n")
+    time.sleep(120)
+sys.argv = [%(stub)r] + sys.argv[1:]
+runpy.run_path(%(stub)r, run_name="__main__")
+'''
 
 
 def error_line(out):
@@ -32,6 +52,28 @@ class InterruptedCase(RepoCase):
         path = os.path.join(self.rdir(), paths_for(self.repo).logs_dir, "revali.log")
         with open(path, "r", encoding="utf-8", newline="") as fh:
             return fh.read()
+
+    def state_json(self):
+        with open(State.path(self.rdir()), "r", encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def wrap_claude(self, hang=False):
+        """Point REVALI_CLAUDE_CMD at WRAPPER; returns the snapshot path."""
+        snapshot = os.path.join(self.tmp, "state-during-session.json")
+        script = os.path.join(self.tmp, "claude wrapper.py")
+        with open(script, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(WRAPPER % {"state": State.path(self.rdir()), "snapshot": snapshot, "hang": hang,
+                                "half": os.path.join(self.repo, LEFTOVER), "stub": CLAUDE_STUB})
+        os.environ["REVALI_CLAUDE_CMD"] = "%s %s" % (_quote(sys.executable), _quote(script))
+        return snapshot
+
+    def wait_for(self, relpath, seconds=60):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if self.exists(relpath):
+                return
+            time.sleep(0.1)
+        self.fail("%s did not appear within %ds" % (relpath, seconds))
 
 
 class CleanupAfterInterruption(InterruptedCase):
@@ -156,6 +198,135 @@ class NoCleanupWithoutInterruption(InterruptedCase):
         self.assertEqual(git(["status", "--porcelain"], self.repo).strip(), "")
 
 
+class FlagFollowsTheSession(InterruptedCase):
+    """Round 2: the state file, not the stage, says whether a session was cut short. The flag
+    goes on disk before the session starts, stays through `stop`, a dry run and a failed
+    preflight, and is cleared by any round that finished or discarded its own files."""
+
+    def test_state_file_says_reviewer_running_during_the_session_and_not_after(self):
+        snapshot = self.wrap_claude()
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        with open(snapshot, "r", encoding="utf-8") as fh:
+            during = json.load(fh)
+        self.assertIs(during.get("reviewer_running"), True)                                # AC-4: set before the session
+        self.assertEqual(during.get("stage"), "review")
+        self.assertIs(self.state_json().get("reviewer_running"), False)                    # AC-5: cleared by the verdict
+        self.assertFalse(State.load(self.rdir()).reviewer_running)
+
+    def test_stop_during_a_session_then_the_next_run_removes_what_it_left(self):
+        self.wrap_claude(hang=True)
+        self.claude(claude_entry())
+        extra = {"start_new_session": True} if os.name != "nt" else {}
+        child = subprocess.Popen([sys.executable, os.path.join(ROOT, "revali.py"), "run", "--foreground"],
+                                 cwd=self.repo, env=dict(os.environ), stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **extra)
+        self.addCleanup(lambda: child.poll() is None and child.kill())
+        self.wait_for(LEFTOVER)                       # the session is running and has written its half file
+        code, out = run_cli(["stop"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("stopped pid", out)
+        child.wait(timeout=60)
+        loaded = State.load(self.rdir())
+        self.assertEqual(loaded.stage, "stopped")
+        self.assertTrue(loaded.reviewer_running)                                           # AC-4: survives `stop`
+        self.assertTrue(self.exists(LEFTOVER))                                             # `stop` itself deletes nothing
+        os.environ["REVALI_CLAUDE_CMD"] = "%s %s" % (_quote(sys.executable), _quote(CLAUDE_STUB))
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)                                               # AC-4: cleaned, then proceeds
+        self.assertFalse(self.exists(LEFTOVER))
+        self.assertIn(LEFTOVER, out)
+        self.assertIn("interrupted", out)
+        self.assertFalse(State.load(self.rdir()).reviewer_running)
+        self.assertEqual(State.load(self.rdir()).stage, "ready_to_merge")
+
+    def test_dry_run_after_an_interruption_neither_deletes_nor_forgets(self):
+        self.previous_run("stopped")
+        self.write(LEFTOVER, "# half written\n")
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--dry-run"])
+        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5: a dry run never deletes
+        self.assertIn("not clean", error_line(out))
+        self.assertTrue(self.exists(LEFTOVER))
+        self.assertNotIn("removed", out)
+        self.assertTrue(State.load(self.rdir()).reviewer_running)                          # AC-4: the flag is kept
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)                                               # AC-4: the next real run cleans
+        self.assertFalse(self.exists(LEFTOVER))
+        self.assertIn(LEFTOVER, out)
+
+    def test_a_finished_dry_run_is_not_an_interrupted_run(self):
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--dry-run"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(State.load(self.rdir()).reviewer_running)
+        self.write("tests/test_review_mine.py", "# the author's own file\n")
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5 (round 1, F1)
+        self.assertIn("not clean", error_line(out))
+        self.assertTrue(self.exists("tests/test_review_mine.py"))
+        self.assertNotIn("removed", out)
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_a_preflight_failure_before_the_tree_check_keeps_the_pending_cleanup(self):
+        self.previous_run("review")
+        self.write(LEFTOVER, "# half written\n")
+        with open(self.change_md(), "r", encoding="utf-8", newline="") as fh:
+            doc = fh.read()
+        with open(self.change_md(), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(doc.replace("author_model: fixture\n", "author_model: fixture\nstatus: draft\n", 1))
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("draft", out)
+        self.assertTrue(self.exists(LEFTOVER))                                             # stopped before the tree check
+        loaded = State.load(self.rdir())
+        self.assertEqual(loaded.stage, "error")
+        self.assertTrue(loaded.reviewer_running)                                           # AC-4: whatever the stage says
+        with open(self.change_md(), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(doc)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)                                               # AC-4: still cleaned
+        self.assertFalse(self.exists(LEFTOVER))
+        self.assertIn(LEFTOVER, out)
+
+    def test_a_session_failure_that_discarded_its_files_clears_the_flag(self):
+        entry = claude_entry()
+        entry["is_error"] = True
+        entry["exit"] = 1
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertFalse(self.exists("tests/test_review_mul.py"))                          # discarded by the round
+        self.assertFalse(State.load(self.rdir()).reviewer_running)                         # AC-5
+        self.write("tests/test_review_mine.py", "# the author's own file\n")
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5: nothing to clean
+        self.assertIn("not clean", error_line(out))
+        self.assertTrue(self.exists("tests/test_review_mine.py"))
+        self.assertNotIn("removed", out)
+
+    def test_a_needs_info_round_keeps_its_files_and_clears_the_flag(self):
+        asking = claude_entry({"verdict": "NEEDS_INFO", "summary": "unclear", "questions": ["Which integers?"],
+                               "findings": [], "previous_findings": [], "scope_mismatch": [],
+                               "dependencies_changed": [], "test_changes": [], "tests": [], "not_testable": [],
+                               "suggestions": []})
+        self.claude(asking)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assertTrue(self.exists("tests/test_review_mul.py"))                           # kept on purpose
+        self.assertFalse(State.load(self.rdir()).reviewer_running)                         # AC-5: the round finished
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5: not deleted
+        self.assertIn("not clean", error_line(out))
+        self.assertTrue(self.exists("tests/test_review_mul.py"))
+        self.assertNotIn("removed", out)
+
+
 class ReadmeDescribesIt(unittest.TestCase):
     def test_section_mentions_restore_source_and_interrupted_cleanup(self):
         with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8") as fh:
@@ -169,6 +340,7 @@ class ReadmeDescribesIt(unittest.TestCase):
         self.assertIn("revali stop", section)
         self.assertIn("Ctrl-C", section)
         self.assertIn("revali preflight", section)
+        self.assertIn("run --dry-run", section)                                            # AC-5 as documented
 
 
 if __name__ == "__main__":
