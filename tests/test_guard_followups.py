@@ -3,12 +3,16 @@ interrupted round cleans the Reviewer's leftovers (AC-1..AC-6 of fix/guard-follo
 import os
 import unittest
 
+import subprocess
+import sys
+
 from tests.helpers import ROOT, RepoCase, TEST_REVIEW_MUL, approve_response, claude_entry, git, run_cli
-from revali import EXIT_ERROR, EXIT_OK
+from revali import EXIT_ERROR, EXIT_OK, STATE_VERSION
 from revali.gitops import status_porcelain
+from revali.pipeline import _interrupted
 from revali.preflight import preflight
 from revali.review import guard_worktree, restore_protected_tests
-from revali.state import State
+from revali.state import State, acquire_lock
 
 WEAKENED = "import unittest\n\n\nclass Nothing(unittest.TestCase):\n    def test_nothing(self):\n        pass\n"
 SPACED = "tests/test with space.py"
@@ -85,8 +89,11 @@ class PathTests(RepoCase):
 
 
 class InterruptedRunTests(RepoCase):
-    def _previous(self, stage):
+    def _previous(self, stage, reviewer_running=None):
+        """The state file a previous run left. The flag is what an interrupted reviewer
+        session leaves behind: set for `stopped` / `review` unless told otherwise."""
         state = State()
+        state.reviewer_running = stage in ("stopped", "review") if reviewer_running is None else reviewer_running
         state.set_stage(self.rdir(), stage, "previous run", EXIT_ERROR)
 
     def test_leftover_removed_after_stop(self):
@@ -98,6 +105,7 @@ class InterruptedRunTests(RepoCase):
         self.assertIn("tests/test_review_left.py", out)
         self.assertIn("interrupted", out)
         self.assertFalse(self.exists("tests/test_review_left.py"))
+        self.assertFalse(State.load(self.rdir()).reviewer_running)
 
     def test_leftover_removed_after_kill_mid_review(self):
         self._previous("review")
@@ -142,6 +150,120 @@ class InterruptedRunTests(RepoCase):
         code, out = run_cli(["preflight"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertTrue(self.exists("tests/test_review_left.py"))
+        self.assertTrue(State.load(self.rdir()).reviewer_running)
+
+
+class ReviewerFlagTests(RepoCase):
+    """F1 / F2 of round 1: the flag, not the stage, says whether a session was cut short."""
+
+    def test_state_version_bumped_for_the_flag(self):
+        self.assertEqual(STATE_VERSION, 2)
+        self.assertFalse(State().reviewer_running)
+
+    def test_interrupted_rule_ignores_the_stage(self):
+        for stage in ("preflight", "pr", "review", "validate", "stopped", "needs_action", "ready_to_merge", "error"):
+            for flag in (True, False):
+                st = State()
+                st.stage, st.reviewer_running = stage, flag
+                self.assertEqual(_interrupted(st), flag, (stage, flag))
+
+    def test_flag_cleared_after_a_finished_round(self):
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(State.load(self.rdir()).reviewer_running)
+
+    def test_flag_cleared_after_a_failed_session(self):
+        entry = claude_entry()
+        entry["is_error"] = True
+        entry["exit"] = 1
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertFalse(self.exists("tests/test_review_mul.py"))       # discarded by the round itself
+        self.assertFalse(State.load(self.rdir()).reviewer_running)      # AC-5: nothing left to clean
+
+    def test_run_after_dry_run_keeps_the_authors_file(self):
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--dry-run"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(State.load(self.rdir()).stage, "preflight")
+        self.write("tests/test_review_mine.py", "# the author's own file\n")
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5 (F1)
+        self.assertIn("not clean", out)
+        self.assertTrue(self.exists("tests/test_review_mine.py"))
+
+    def test_dry_run_after_interruption_does_not_clean_and_the_flag_survives(self):
+        state = State()
+        state.reviewer_running = True
+        state.set_stage(self.rdir(), "review", "reviewer round 1")
+        self.write("tests/test_review_left.py", "# half written\n")
+        code, out = run_cli(["run", "--dry-run"])
+        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5 (F2)
+        self.assertIn("not clean", out)
+        self.assertTrue(self.exists("tests/test_review_left.py"))
+        self.assertNotIn("left behind", out)
+        loaded = State.load(self.rdir())
+        self.assertEqual(loaded.stage, "error")                                            # the dry run failed
+        self.assertTrue(loaded.reviewer_running)                                           # but the flag is kept
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)                                               # AC-4: still cleaned
+        self.assertFalse(self.exists("tests/test_review_left.py"))
+
+    def test_stop_keeps_the_flag_and_the_next_run_cleans(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
+                                 start_new_session=True)   # own group: kill_tree uses killpg on POSIX
+        self.addCleanup(lambda: child.poll() is None and child.kill())
+        state = State()
+        state.reviewer_running = True
+        state.set_stage(self.rdir(), "review", "reviewer round 1")
+        acquire_lock(self.rdir(), pid=child.pid)
+        code, out = run_cli(["stop"])
+        self.assertEqual(code, EXIT_OK, out)
+        loaded = State.load(self.rdir())
+        self.assertEqual(loaded.stage, "stopped")
+        self.assertTrue(_interrupted(loaded))
+        self.write("tests/test_review_left.py", "# half written\n")
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)                                               # AC-4
+        self.assertFalse(self.exists("tests/test_review_left.py"))
+
+    def test_stop_outside_a_session_does_not_clean(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
+                                 start_new_session=True)   # own group: kill_tree uses killpg on POSIX
+        self.addCleanup(lambda: child.poll() is None and child.kill())
+        state = State()
+        state.set_stage(self.rdir(), "preflight", "preflight passed")
+        acquire_lock(self.rdir(), pid=child.pid)
+        run_cli(["stop"])
+        self.assertFalse(_interrupted(State.load(self.rdir())))
+        self.write("tests/test_review_mine.py", "# the author's own file\n")
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5
+        self.assertTrue(self.exists("tests/test_review_mine.py"))
+
+
+class StagedAdditionTests(RepoCase):
+    """F3 of round 1: the checkout result is checked and staged additions are handled."""
+
+    def test_staged_addition_outside_test_dir_is_removed(self):
+        ctx = preflight(self.repo)
+        self.write("src/new.py", "x = 1\n")
+        git(["add", "src/new.py"], self.repo)
+        self.assertEqual(guard_worktree(ctx, None), ["src/new.py"])                      # AC-1
+        self.assertFalse(self.exists("src/new.py"))
+        self.assertEqual(git(["status", "--porcelain"], self.repo).strip(), "")
+
+    def test_staged_addition_under_test_dir_is_the_reviewers_own(self):
+        ctx = preflight(self.repo)
+        self.write("tests/test_review_new.py", "x = 1\n")
+        git(["add", "tests/test_review_new.py"], self.repo)
+        self.assertEqual(restore_protected_tests(ctx, State(), None), [])
+        self.assertTrue(self.exists("tests/test_review_new.py"))
 
 
 class ReadmeTests(unittest.TestCase):
@@ -152,6 +274,7 @@ class ReadmeTests(unittest.TestCase):
         self.assertNotIn("do not clean up", section)                                       # AC-6
         self.assertIn("interrupted", section)
         self.assertIn("from HEAD", section)
+        self.assertIn("dry-run", section)
 
 
 if __name__ == "__main__":

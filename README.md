@@ -264,11 +264,13 @@ stated.
   or timed-out Reviewer session, unusable output, a smoke run that fails
   twice), deletes the untracked files matching `test_file_pattern` under
   `test_dir` that the session left behind, and names them in the log. The
-  same cleanup runs at the start of the next `run` when the previous one
-  was interrupted (`revali stop`, Ctrl-C, a killed process): the state file
-  then shows stage `stopped` or a stage before any verdict. A run that
+  same cleanup runs at the start of the next `run` when a reviewer session
+  was started and its round never finished (`revali stop`, Ctrl-C, a killed
+  process); the state file remembers that until the cleanup has run, so a
+  dry run or a failed preflight in between does not lose it. A run that
   ended with a verdict never triggers it (a NEEDS_INFO round keeps its
-  files uncommitted on purpose), and `revali preflight` never deletes.
+  files uncommitted on purpose), a finished `run --dry-run` is not an
+  interrupted run, and neither `revali preflight` nor `run --dry-run` deletes.
   This is the only deletion inside `test_dir` revali performs, so keep
   your own files off `test_file_pattern`
 

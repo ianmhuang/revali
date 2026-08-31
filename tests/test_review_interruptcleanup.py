@@ -22,8 +22,11 @@ def error_line(out):
 class InterruptedCase(RepoCase):
     def previous_run(self, stage, exit_code=EXIT_ERROR):
         """Leave the state file a previous run would have left: `revali stop` writes
-        `stopped`; Ctrl-C or a kill leaves the stage the run was in, with no lock."""
-        State().set_stage(self.rdir(), stage, "previous run at %s" % stage, exit_code)
+        `stopped`; Ctrl-C or a kill leaves the stage the run was in, with no lock.
+        A session that was cut short also leaves `reviewer_running` set (round 1, F1)."""
+        state = State()
+        state.reviewer_running = stage in ("stopped", "review")
+        state.set_stage(self.rdir(), stage, "previous run at %s" % stage, exit_code)
 
     def log_text(self):
         path = os.path.join(self.rdir(), paths_for(self.repo).logs_dir, "revali.log")
@@ -59,12 +62,15 @@ class CleanupAfterInterruption(InterruptedCase):
         self.assertIn(LEFTOVER, out)
 
     def test_after_a_kill_in_the_pr_stage(self):
+        # No session had started, so nothing can be a leftover: the file is the author's
+        # and the tree is simply dirty (round 1, F1: the rule follows the flag, not the stage).
         self.previous_run("pr")
         self.write(LEFTOVER, "# half written\n")
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-4
-        self.assertFalse(self.exists(LEFTOVER))
+        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5
+        self.assertIn("not clean", out)
+        self.assertTrue(self.exists(LEFTOVER))
 
     def test_only_pattern_files_under_test_dir_go_and_the_rest_still_stops_the_run(self):
         self.write("tests/test_review_old.py", TEST_REVIEW_MUL.replace("MulTests", "OldTests"))

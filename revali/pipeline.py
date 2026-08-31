@@ -19,9 +19,18 @@ from revali.state import (LockHeld, RunLog, State, TERMINAL_STAGES, acquire_lock
 
 
 def _interrupted(state: State) -> bool:
-    """The previous run on this branch was stopped or died before a result: `revali stop`
-    (stage `stopped`) or a non-terminal stage left in a state file that exists."""
-    return bool(state.updated_at) and (state.stage == "stopped" or state.stage not in TERMINAL_STAGES)
+    """A reviewer session was started and its round never finished: the flag is set before
+    the session is spawned and cleared when the round records its result or discards its
+    files, so it survives `revali stop`, Ctrl-C, a kill, and any later run that stops in
+    preflight. Nothing else leaves files under test_dir."""
+    return state.reviewer_running
+
+
+def _cleanup_after_interruption(ctx, state: State, rdir: str, log: RunLog) -> None:
+    from revali import review
+    review.discard_unfinished_tests(ctx, log, "the interrupted run")
+    state.reviewer_running = False
+    state.save(rdir)
 
 
 STAGE_FOR_EXIT = {EXIT_ACTION: "needs_action", EXIT_HUMAN: "needs_human", EXIT_ERROR: "error"}
@@ -177,8 +186,8 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         state.repo = gitops.remote_repo("origin", cwd)
     first_pass = not state.rounds and not args.dry_run
     baseline_hook = (lambda ctx: validate.baseline(ctx, rdir, log)) if first_pass else None
-    cleanup_hook = (lambda ctx: review.discard_unfinished_tests(ctx, log, "the interrupted run")) \
-        if _interrupted(state) else None
+    cleanup_hook = (lambda ctx: _cleanup_after_interruption(ctx, state, rdir, log)) \
+        if _interrupted(state) and not args.dry_run else None
     ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log, baseline=baseline_hook,
                     before_tree=cleanup_hook)
     _rerun_bookkeeping(ctx, state, rdir, log)

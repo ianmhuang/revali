@@ -58,6 +58,7 @@ class State:
     needs_info_used: bool = False
     force_push: bool = False     # set after a detected history rewrite; cleared by the next push
     last_verdict: str = ""       # APPROVE | CHANGES_REQUESTED | NEEDS_INFO | PASS | FAIL
+    reviewer_running: bool = False  # a reviewer session may have left files in test_dir (STATE_VERSION 2)
     last_exit: int = -1
     message: str = ""
     started_at: str = ""

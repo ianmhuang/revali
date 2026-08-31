@@ -295,6 +295,26 @@ def _under_test_dir(path: str, test_dir: str) -> bool:
     return p.startswith(d)
 
 
+def _restore_from_head(path: str, root: str) -> None:
+    """Index and working tree of `path` back to HEAD; a git failure ends the run (exit 1)."""
+    try:
+        gitops.git_ok(["checkout", "HEAD", "--", path], root)
+    except gitops.GitError as exc:
+        raise Stop(EXIT_ERROR, "could not restore %s from HEAD: %s" % (path, exc))
+
+
+def _remove_new(path: str, code: str, root: str) -> None:
+    """Delete a file that is not in HEAD; a staged addition is unstaged first."""
+    if code[0] == "A":
+        gitops._git(["rm", "-q", "--cached", "--", path], root)
+    full = os.path.join(root, path)
+    if os.path.isdir(full):
+        import shutil
+        shutil.rmtree(full, ignore_errors=True)
+    elif os.path.exists(full):
+        os.remove(full)
+
+
 def guard_worktree(ctx: Context, log: Optional[RunLog]) -> List[str]:
     """Restore from HEAD anything the reviewer touched outside test_dir. Returns the offending paths."""
     root = ctx.repo_root
@@ -304,15 +324,10 @@ def guard_worktree(ctx: Context, log: Optional[RunLog]) -> List[str]:
         if _under_test_dir(path, ctx.cfg.project.test_dir):
             continue
         offenders.append(path)
-        if code == "??":
-            full = os.path.join(root, path)
-            if os.path.isdir(full):
-                import shutil
-                shutil.rmtree(full, ignore_errors=True)
-            elif os.path.exists(full):
-                os.remove(full)
+        if code == "??" or code[0] == "A":
+            _remove_new(path, code, root)
         else:
-            gitops._git(["checkout", "HEAD", "--", path], root)
+            _restore_from_head(path, root)
     if offenders and log:
         log.stage("review", "reviewer touched files outside %s; reverted: %s"
                   % (ctx.cfg.project.test_dir, ", ".join(offenders)))
@@ -327,11 +342,11 @@ def restore_protected_tests(ctx: Context, state: State, log: Optional[RunLog]) -
     for entry in gitops.dirty_paths(root, (ctx.cfg.paths.state_dir + '/',)):
         code, path = entry.split(" ", 1)
         path = path.replace("\\", "/")
-        if code == "??" or not _under_test_dir(path, ctx.cfg.project.test_dir):
-            continue
+        if code == "??" or code[0] == "A" or not _under_test_dir(path, ctx.cfg.project.test_dir):
+            continue  # new files are the reviewer's own
         if path in state.test_files:
             continue
-        gitops._git(["checkout", "HEAD", "--", path], root)
+        _restore_from_head(path, root)
         restored.append(path)
     restored.sort()
     if restored and log:
@@ -632,6 +647,8 @@ def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> R
         return _run_round(ctx, state, rdir, log)
     except Stop:
         discard_unfinished_tests(ctx, log)
+        state.reviewer_running = False
+        state.save(rdir)
         raise
 
 
@@ -646,6 +663,8 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
         attempt += 1
         prompt = build_prompt(ctx, state, rdir, round_no, bounce_notes)
         write_text(os.path.join(ctx.logs, "prompt-r%d-%d.md" % (round_no, attempt)), prompt)
+        state.reviewer_running = True   # cleared when this round ends; a later run cleans up otherwise
+        state.save(rdir)
         rr = spawn_reviewer(ctx, prompt, rdir, round_no, attempt, log)
         total_cost += rr.cost
         if rr.denials and log:
@@ -724,6 +743,7 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
     if verdict == NEEDS_INFO:
         state.needs_info_used = True
     write_text(os.path.join(rdir, "tests.md"), render_tests_md(ctx, state, state.rounds))
+    state.reviewer_running = False
     state.save(rdir)
     if log:
         log.stage("review", "round %d verdict %s (reviewer said %s; model %s%s; $%.2f)"
