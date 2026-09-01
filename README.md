@@ -249,7 +249,11 @@ stated.
   restored from HEAD (`git checkout HEAD -- <path>`, index and working
   tree) before the commit, the reviewer is sent back once
   with the names already taken, and a second offence ends the run with
-  exit 1 and no test commit
+  exit 1 and no test commit. A NEEDS_INFO round keeps its test files
+  uncommitted in `test_dir`: the state file lists them, the clean-tree check
+  tolerates exactly those paths, and the next round commits or removes
+  them. Do not commit them by hand; a file you commit becomes one the
+  reviewer did not write and is protected like any other
 - posts review and validation results as PR comments; on a repository that
   is not private the comments are summaries (verdict, model, cost, finding
   ids with severity and location, test files, AC coverage, validation exit
@@ -268,9 +272,10 @@ stated.
   was started and its round never finished (`revali stop`, Ctrl-C, a killed
   process); the state file remembers that until the cleanup has run, so a
   dry run or a failed preflight in between does not lose it. A run that
-  ended with a verdict never triggers it (a NEEDS_INFO round keeps its
-  files uncommitted on purpose), a finished `run --dry-run` is not an
-  interrupted run, and neither `revali preflight` nor `run --dry-run` deletes.
+  ended with a verdict never triggers it (a NEEDS_INFO round's uncommitted
+  files are pending, not leftovers; they go only when the round after it
+  is interrupted), a finished `run --dry-run` is not an interrupted run,
+  and neither `revali preflight` nor `run --dry-run` deletes.
   This is the only deletion inside `test_dir` revali performs, so keep
   your own files off `test_file_pattern`
 

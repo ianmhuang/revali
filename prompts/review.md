@@ -81,6 +81,7 @@ Every AC must appear in some `covers` list or in `not_testable` with a
 reason. Do not run the tests; the script runs them in a sandbox.
 $test_guide_section
 $prior_tests_section
+$pending_tests_section
 $existing_tests_section
 ## Checklist
 

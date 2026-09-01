@@ -26,13 +26,6 @@ def _interrupted(state: State) -> bool:
     return state.reviewer_running
 
 
-def _cleanup_after_interruption(ctx, state: State, rdir: str, log: RunLog) -> None:
-    from revali import review
-    review.discard_unfinished_tests(ctx, log, "the interrupted run", stage="run")
-    state.reviewer_running = False
-    state.save(rdir)
-
-
 STAGE_FOR_EXIT = {EXIT_ACTION: "needs_action", EXIT_HUMAN: "needs_human", EXIT_ERROR: "error"}
 
 
@@ -186,10 +179,9 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         state.repo = gitops.remote_repo("origin", cwd)
     first_pass = not state.rounds and not args.dry_run
     baseline_hook = (lambda ctx: validate.baseline(ctx, rdir, log)) if first_pass else None
-    cleanup_hook = (lambda ctx: _cleanup_after_interruption(ctx, state, rdir, log)) \
-        if _interrupted(state) and not args.dry_run else None
+    cleanup_hook = review.interruption_cleanup(state, rdir, log) if not args.dry_run else None
     ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log, baseline=baseline_hook,
-                    before_tree=cleanup_hook)
+                    before_tree=cleanup_hook, tolerate=state.pending_test_files)
     _rerun_bookkeeping(ctx, state, rdir, log)
     state.branch, state.base = ctx.branch, ctx.base
     # lowercased like gitops.remote_repo, so stats groups both sources under one row
@@ -231,12 +223,18 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     others = review.non_blocking_note(outcome.data, outcome.round_no, outcome.review_path, rdir)
     if outcome.verdict == review.NEEDS_INFO:
         questions = "\n".join("  - " + q for q in outcome.data.get("questions", []))
+        pending = ""
+        if state.pending_test_files:
+            pending = ("\nThe reviewer's draft test files stay uncommitted in %s until the next round; "
+                       "leave them alone and do not commit them:\n%s"
+                       % (ctx.cfg.project.test_dir, "\n".join("  - " + p for p in state.pending_test_files)))
         state.set_stage(rdir, "needs_action", "reviewer needs information (%s)" % counts, EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION)
         print("ACTION NEEDED: the reviewer has questions (round %d). Answer them in %s, adjust "
-              "change.md if the acceptance criteria were unclear, then run again.\n%s%s"
-              % (outcome.round_no, os.path.join(rdir, "response-%d.md" % outcome.round_no), questions, others))
+              "change.md if the acceptance criteria were unclear, then run again.\n%s%s%s"
+              % (outcome.round_no, os.path.join(rdir, "response-%d.md" % outcome.round_no), questions,
+                 pending, others))
         return EXIT_ACTION
     if outcome.verdict == review.CHANGES_REQUESTED:
         reasons = "\n".join("  - " + r for r in outcome.reasons)
@@ -296,8 +294,10 @@ def cmd_preflight(args) -> int:
     root = gitops.repo_root(cwd)
     log = RunLog(rdir if rdir and os.path.isdir(rdir) else None, verbose=args.verbose,
                  logs_dir=paths_for(root).logs_dir if root else "")
+    state = (State.load(rdir) if rdir else None) or State()
     try:
-        preflight(cwd, base_override=args.base or "", dry_run=True, log=log)
+        # the same view of the tree as `run`: a NEEDS_INFO round's files may be dirty
+        preflight(cwd, base_override=args.base or "", dry_run=True, log=log, tolerate=state.pending_test_files)
     except Stop as stop:
         _print_stop(stop)
         return stop.exit_code

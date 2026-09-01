@@ -111,7 +111,7 @@ class PromptTests(RepoCase):
         self.assertNotIn("already exist", build_prompt(ctx, State(), self.rdir(), 1))
 
     def test_prompt_version_bumped(self):
-        self.assertEqual(PROMPT_VERSION, "4")
+        self.assertGreaterEqual(int(PROMPT_VERSION), 4)
 
 
 if __name__ == "__main__":

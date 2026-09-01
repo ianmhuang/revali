@@ -158,7 +158,7 @@ class ReviewerFlagTests(RepoCase):
     """F1 / F2 of round 1: the flag, not the stage, says whether a session was cut short."""
 
     def test_state_version_bumped_for_the_flag(self):
-        self.assertEqual(STATE_VERSION, 2)
+        self.assertGreaterEqual(STATE_VERSION, 2)
         self.assertFalse(State().reviewer_running)
 
     def test_interrupted_rule_ignores_the_stage(self):

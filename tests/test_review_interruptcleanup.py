@@ -330,8 +330,9 @@ class FlagFollowsTheSession(InterruptedCase):
         self.assertFalse(State.load(self.rdir()).reviewer_running)                         # AC-5: the round finished
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5: not deleted
-        self.assertIn("not clean", error_line(out))
+        # Since fix/needs-info-files the pending file is tolerated and committed by this round
+        # instead of stopping it; still not deleted by the interruption cleanup.
+        self.assertEqual(code, EXIT_OK, out)                                               # AC-5: not deleted
         self.assertTrue(self.exists("tests/test_review_mul.py"))
         self.assertNotIn("removed", out)
 

@@ -6,7 +6,7 @@ them in one pass instead of one per run.
 """
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from revali import EXIT_ACTION, EXIT_ERROR, V1_KINDS
 from revali import changedoc, gitops
@@ -133,8 +133,13 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
     return ctx
 
 
-def check_tree(ctx: Context) -> None:
-    dirty = gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",))
+def check_tree(ctx: Context, tolerate: Sequence[str] = ()) -> None:
+    """Refuse a dirty working tree. `tolerate` lists paths that may be dirty: the
+    reviewer's own uncommitted files from a NEEDS_INFO round (state.pending_test_files),
+    which the next round commits or removes."""
+    allowed = {p.replace("\\", "/") for p in tolerate}
+    dirty = [entry for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",))
+             if entry.split(" ", 1)[1].replace("\\", "/") not in allowed]
     if dirty:
         raise Stop(EXIT_ERROR, "working tree is not clean; commit or stash first:\n  "
                    + "\n  ".join(dirty[:20]))
@@ -237,20 +242,22 @@ def check_lint(ctx: Context) -> None:
 
 
 def preflight(cwd: str, base_override: str = "", dry_run: bool = False,
-              log: Optional[RunLog] = None, baseline=None, before_tree=None) -> Context:
+              log: Optional[RunLog] = None, baseline=None, before_tree=None,
+              tolerate: Sequence[str] = ()) -> Context:
     """Run every check. Returns a populated Context or raises Stop.
 
     `baseline` is an optional callable(ctx) supplied by the validate stage (it
     runs the existing suite in the sandbox); None skips it. `before_tree` is an
     optional callable(ctx) run before the clean-tree check (the run stage uses
-    it to discard what an interrupted review round left behind).
+    it to discard what an interrupted review round left behind). `tolerate`
+    lists the paths the clean-tree check accepts dirty (see check_tree).
     """
     ctx = locate(cwd, base_override, log)
     ctx.dry_run = dry_run
     ctx.say("repo %s, branch %s" % (ctx.repo_root, ctx.branch))
     if before_tree is not None:
         before_tree(ctx)
-    check_tree(ctx)
+    check_tree(ctx, tolerate)
     check_github(ctx)
     ctx.say("GitHub: %s/%s (%s), base %s" % (ctx.repo.owner, ctx.repo.name, ctx.repo.visibility.lower(), ctx.base))
     if ctx.repo.visibility != "PRIVATE":
