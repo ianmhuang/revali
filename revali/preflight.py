@@ -237,15 +237,19 @@ def check_lint(ctx: Context) -> None:
 
 
 def preflight(cwd: str, base_override: str = "", dry_run: bool = False,
-              log: Optional[RunLog] = None, baseline=None) -> Context:
+              log: Optional[RunLog] = None, baseline=None, before_tree=None) -> Context:
     """Run every check. Returns a populated Context or raises Stop.
 
     `baseline` is an optional callable(ctx) supplied by the validate stage (it
-    runs the existing suite in the sandbox); None skips it.
+    runs the existing suite in the sandbox); None skips it. `before_tree` is an
+    optional callable(ctx) run before the clean-tree check (the run stage uses
+    it to discard what an interrupted review round left behind).
     """
     ctx = locate(cwd, base_override, log)
     ctx.dry_run = dry_run
     ctx.say("repo %s, branch %s" % (ctx.repo_root, ctx.branch))
+    if before_tree is not None:
+        before_tree(ctx)
     check_tree(ctx)
     check_github(ctx)
     ctx.say("GitHub: %s/%s (%s), base %s" % (ctx.repo.owner, ctx.repo.name, ctx.repo.visibility.lower(), ctx.base))

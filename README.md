@@ -246,7 +246,8 @@ stated.
   `Co-Authored-By: Claude` trailer; only new files and the files the
   reviewer wrote in an earlier round of the same pipeline. Any other
   tracked file under `test_dir` the reviewer modified or deleted is
-  restored from HEAD before the commit, the reviewer is sent back once
+  restored from HEAD (`git checkout HEAD -- <path>`, index and working
+  tree) before the commit, the reviewer is sent back once
   with the names already taken, and a second offence ends the run with
   exit 1 and no test commit
 - posts review and validation results as PR comments; on a repository that
@@ -262,9 +263,16 @@ stated.
 - after a review round that stops before its tests are committed (a failed
   or timed-out Reviewer session, unusable output, a smoke run that fails
   twice), deletes the untracked files matching `test_file_pattern` under
-  `test_dir` that the session left behind, and names them in the log;
-  `revali stop` and Ctrl-C do not clean up, so a run interrupted that way
-  may leave such files for you to delete
+  `test_dir` that the session left behind, and names them in the log. The
+  same cleanup runs at the start of the next `run` when a reviewer session
+  was started and its round never finished (`revali stop`, Ctrl-C, a killed
+  process); the state file remembers that until the cleanup has run, so a
+  dry run or a failed preflight in between does not lose it. A run that
+  ended with a verdict never triggers it (a NEEDS_INFO round keeps its
+  files uncommitted on purpose), a finished `run --dry-run` is not an
+  interrupted run, and neither `revali preflight` nor `run --dry-run` deletes.
+  This is the only deletion inside `test_dir` revali performs, so keep
+  your own files off `test_file_pattern`
 
 It never modifies files outside `test_dir` and the state directory, never
 commits a change to a test file the reviewer did not write, never merges on
