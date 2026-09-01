@@ -93,7 +93,7 @@ class Recorded(PendingCase):
 
     def test_needs_info_records_its_files_and_tells_the_author(self):
         out = self.needs_info_round({MUL: TEST_REVIEW_MUL, SPACED: SPACED_TEXT})
-        self.assertEqual(sorted(self.state().pending_test_files), [SPACED, MUL])           # AC-1: recorded
+        self.assertEqual(sorted(self.state().pending_test_files), sorted([SPACED, MUL]))           # AC-1: recorded
         self.assertIn("pending_test_files", self.state_json())
         self.assertIn("?? " + MUL, self.status())                                          # still uncommitted
         self.assertIn(SPACED.split("/", 1)[1], self.status())
@@ -126,7 +126,7 @@ class Tolerated(PendingCase):
         self.assertEqual(code, EXIT_OK, out)                                               # AC-2: dry run
         self.assertNotIn("removed", out)
         self.assertTrue(self.exists(MUL) and self.exists(SPACED))
-        self.assertEqual(sorted(self.state().pending_test_files), [SPACED, MUL])           # untouched
+        self.assertEqual(sorted(self.state().pending_test_files), sorted([SPACED, MUL]))           # untouched
         self.claude(approving({MUL: TEST_REVIEW_MUL, SPACED: SPACED_TEXT}))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)                                               # AC-2: run

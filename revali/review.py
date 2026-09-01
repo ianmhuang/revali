@@ -301,17 +301,34 @@ def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str =
 
 # ---- checks after the reviewer --------------------------------------------
 
+def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage: str = "review") -> None:
+    """Forget a NEEDS_INFO round's pending files once a round that was meant to commit them
+    stopped: the untracked ones are gone with discard_unfinished_tests, and a tracked one the
+    reviewer had modified (its own file from an earlier round) goes back to HEAD, so the next
+    run does not refuse a file the author was told to leave alone."""
+    restored = []
+    for path in state.pending_test_files:
+        if path in tracked_test_files(ctx) and os.path.exists(os.path.join(ctx.repo_root, path)):
+            _restore_from_head(path, ctx.repo_root)
+            restored.append(path)
+    if restored and log:
+        log.stage(stage, "restored %d pending test file(s) of the reviewer's own from HEAD: %s"
+                  % (len(restored), ", ".join(restored)))
+    state.pending_test_files = []
+
+
 def interruption_cleanup(state: State, rdir: str, log: Optional[RunLog]):
     """The `before_tree` hook for a run that follows an interrupted round: delete what the
-    unfinished session left under test_dir, forget the pending files (they were among them),
-    clear the flag. None when no round was interrupted."""
+    unfinished session left under test_dir, drop the pending files (untracked ones were among
+    them; a modified tracked one goes back to HEAD), clear the flag. None when no round was
+    interrupted."""
     if not state.reviewer_running:
         return None
 
     def hook(ctx: Context) -> None:
         discard_unfinished_tests(ctx, log, "the interrupted run", stage="run")
+        drop_pending_tests(ctx, state, log, stage="run")
         state.reviewer_running = False
-        state.pending_test_files = []
         state.save(rdir)
     return hook
 
@@ -678,8 +695,8 @@ def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> R
         return _run_round(ctx, state, rdir, log)
     except Stop:
         discard_unfinished_tests(ctx, log)
+        drop_pending_tests(ctx, state, log)
         state.reviewer_running = False
-        state.pending_test_files = []   # a NEEDS_INFO round's files were among the untracked ones
         state.save(rdir)
         raise
 

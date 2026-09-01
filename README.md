@@ -274,8 +274,10 @@ stated.
   dry run or a failed preflight in between does not lose it. A run that
   ended with a verdict never triggers it (a NEEDS_INFO round's uncommitted
   files are pending, not leftovers; they go only when the round after it
-  is interrupted), a finished `run --dry-run` is not an interrupted run,
-  and neither `revali preflight` nor `run --dry-run` deletes.
+  is interrupted, and a pending file that is a tracked file of the
+  reviewer's own is then restored from HEAD instead), a finished
+  `run --dry-run` is not an interrupted run, and neither `revali preflight`
+  nor `run --dry-run` deletes.
   This is the only deletion inside `test_dir` revali performs, so keep
   your own files off `test_file_pattern`
 
