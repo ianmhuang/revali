@@ -2,14 +2,27 @@
 tree alike), the second-offence message names the files and the round without claiming
 a retry, and `git status` paths with spaces or non-ASCII characters arrive unquoted so
 every guard handles them."""
+import os
+import shutil
+import sys
 import unittest
 
-from tests.helpers import RepoCase, TEST_REVIEW_MUL, approve_response, claude_entry, git, run_cli
+from tests.helpers import RepoCase, TEST_REVIEW_MUL, _quote, approve_response, claude_entry, git, run_cli
 from revali import EXIT_ERROR, EXIT_OK
 from revali.gitops import dirty_paths, status_porcelain
-from revali.preflight import preflight
+from revali.preflight import Stop, preflight
 from revali.review import guard_worktree, new_test_files, restore_protected_tests
 from revali.state import State
+
+# A stand-in for `git` (through REVALI_GIT_CMD) that refuses one subcommand and forwards
+# everything else to the real git, so a guard's git failure can be provoked on demand.
+FAILING_GIT = '''import subprocess, sys
+args = sys.argv[1:]
+if all(tok in args for tok in %(refuse)r):
+    sys.stderr.write("fatal: refused by the test\\n")
+    sys.exit(128)
+sys.exit(subprocess.call([%(git)r] + args))
+'''
 
 HOLLOW = "import unittest\n\n\nclass Hollow(unittest.TestCase):\n    def test_nothing(self):\n        pass\n"
 TRACKED_SPACED = "tests/test_calc extra.py"      # tracked, not the reviewer's, not on test_file_pattern
@@ -88,6 +101,52 @@ class RestoreFromHead(RepoCase):
         self.assertTrue(self.exists(NEW_SPACED))
         self.assertEqual(new_test_files(ctx), [NEW_SPACED])
         self.assertEqual(status(self.repo), "A  " + NEW_SPACED)
+
+
+class GitFailureEndsTheRun(RepoCase):
+    """Round 1 F3 and round 2 F1: a guard whose git command fails stops the run with exit 1
+    instead of reporting a revert that did not happen, and leaves the path as it found it."""
+
+    def refuse(self, *tokens):
+        real_git = shutil.which("git")
+        script = os.path.join(self.tmp, "failing git.py")
+        with open(script, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(FAILING_GIT % {"refuse": tuple(tokens), "git": real_git})
+        os.environ["REVALI_GIT_CMD"] = "%s %s" % (_quote(sys.executable), _quote(script))
+        self.addCleanup(os.environ.pop, "REVALI_GIT_CMD", None)
+
+    def test_unstage_failure_on_a_staged_addition_is_exit_1_and_keeps_the_file(self):
+        ctx = preflight(self.repo)
+        self.write("src/new.py", "x = 1\n")
+        git(["add", "src/new.py"], self.repo)
+        self.refuse("rm", "--cached")
+        with self.assertRaises(Stop) as cm:
+            guard_worktree(ctx, None)
+        self.assertEqual(cm.exception.exit_code, EXIT_ERROR)                                # AC-1: a git failure is exit 1
+        self.assertIn("could not unstage", cm.exception.message)
+        self.assertIn("src/new.py", cm.exception.message)
+        self.assertTrue(self.exists("src/new.py"))                                         # not deleted behind git's back
+        self.assertEqual(git(["diff", "--cached", "--name-only"], self.repo).strip(), "src/new.py")
+
+    def test_checkout_failure_outside_test_dir_is_exit_1(self):
+        ctx = preflight(self.repo)
+        original = self.read("src/calc.py")
+        self.write("src/calc.py", original + "\n# touched\n")
+        self.refuse("checkout", "HEAD")
+        with self.assertRaises(Stop) as cm:
+            guard_worktree(ctx, None)
+        self.assertEqual(cm.exception.exit_code, EXIT_ERROR)                                # AC-1
+        self.assertIn("could not restore src/calc.py from HEAD", cm.exception.message)
+
+    def test_checkout_failure_on_a_protected_test_is_exit_1(self):
+        ctx = preflight(self.repo)
+        self.write("tests/test_calc.py", HOLLOW)
+        self.refuse("checkout", "HEAD")
+        with self.assertRaises(Stop) as cm:
+            restore_protected_tests(ctx, State(), None)
+        self.assertEqual(cm.exception.exit_code, EXIT_ERROR)                                # AC-1
+        self.assertIn("could not restore tests/test_calc.py from HEAD", cm.exception.message)
+        self.assertEqual(self.read("tests/test_calc.py"), HOLLOW)                          # left as found
 
 
 class SecondOffenceMessage(RepoCase):

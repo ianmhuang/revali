@@ -90,6 +90,15 @@ class CleanupAfterInterruption(InterruptedCase):
             self.assertIn(path, out)                                                       # AC-4: named in output
             self.assertIn(path, self.log_text())                                           # AC-4: named in the log
         self.assertNotIn("not clean", out)
+        # Round 2, F2: the cleanup runs during preflight of a run that has not reached the
+        # review stage, so its line carries the `run` label and precedes every `review:` line.
+        log = self.log_text()
+        cleanup = [l for l in log.splitlines() if "removed 3 unfinished test file(s)" in l]
+        self.assertEqual(len(cleanup), 1, log)
+        self.assertIn("] run: removed", cleanup[0])
+        self.assertIn("the interrupted run left behind", cleanup[0])
+        self.assertNotIn("] review: removed", log)
+        self.assertLess(log.index(cleanup[0]), log.index("] review:"))
         state = State.load(self.rdir())
         self.assertEqual(state.stage, "ready_to_merge")
         self.assertEqual(state.test_files, ["tests/test_review_mul.py"])
