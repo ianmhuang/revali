@@ -174,12 +174,13 @@ def _record_history(state: State, exit_code: int) -> None:
 
 
 def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
-    """Count fix cycles, detect rewritten history, refuse a rerun with no change. After a
-    rewrite, and on a state that has no round yet, the reviewer's earlier test commits and
-    files are read back from the branch (the `Revali-Round` trailer), so the reviewer may
-    update its own files whatever SHAs they now sit under."""
+    """Count fix cycles, detect rewritten history, refuse a rerun with no change. On every run
+    the reviewer's test commits on the branch (the `Revali-Round` trailer) and their files are
+    read back into the state, so the reviewer may update its own files whatever SHAs they now
+    sit under: after a rewrite, after `revali reset`, or with a state that forgot them."""
     from revali import review
     cfg = ctx.cfg.review
+    rewritten = False
     if state.rounds:
         missing = [c for c in state.test_commits if c and not gitops.head_contains(c, ctx.repo_root)]
         if missing:
@@ -188,11 +189,7 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
             state.rounds, state.test_commits, state.test_files = [], [], []
             state.fixes, state.needs_info_used, state.last_verdict = 0, False, ""
             state.force_push = True  # the remote still has the dropped commits
-            commits, _ = review.recover_test_ownership(ctx, state, log)
-            if not commits:
-                log.stage("run", "no commit between %s and HEAD carries a %s trailer; the reviewer's earlier "
-                                 "test files, if any, now count as existing files it must not modify"
-                          % (ctx.base_ref, review.TRAILER))
+            rewritten = True
         elif state.stage == "needs_action":
             if state.last_verdict in (review.CHANGES_REQUESTED, "FAIL"):
                 if ctx.head_sha == state.head_sha:
@@ -200,9 +197,11 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
                                             "fix, commit, then run again" % ctx.head_sha[:10])
                 state.fixes += 1
                 log.stage("run", "fix cycle %d of %d" % (state.fixes, cfg.max_fixes))
-    else:
-        # a fresh state (first run, `revali reset`) on a branch that may already carry reviewer commits
-        review.recover_test_ownership(ctx, state, log)
+    commits, _ = review.recover_test_ownership(ctx, state, log)
+    if rewritten and not commits:
+        log.stage("run", "no commit between %s and HEAD carries a %s trailer; the reviewer's earlier "
+                         "test files, if any, now count as existing files it must not modify"
+                  % (ctx.base_ref, review.TRAILER))
     if state.fixes > cfg.max_fixes:
         raise Stop(EXIT_HUMAN, "%d fix cycles used (limit %d); a human decides how to proceed. "
                                "Latest review: %s" % (state.fixes, cfg.max_fixes,

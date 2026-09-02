@@ -2,6 +2,7 @@
 state) the reviewer's own test files are recognised again from the commits on the branch
 that carry the `Revali-Round` trailer, so the reviewer may update them; a rewrite that
 drops the trailer leaves them protected."""
+import json
 import os
 import unittest
 
@@ -156,6 +157,42 @@ class FreshStateRecovers(RewriteCase):
         self.assertEqual(state.test_files, ["tests/test_review_mul.py"])
         self.assertEqual(state.test_commits[0], self.first_commit)
         self.assertEqual(len(state.test_commits), 2)
+
+    def test_state_that_forgot_the_files_heals_on_the_next_run(self):
+        """A state whose rounds are intact but whose lists lost the file (written before this
+        rule existed) is repaired on the next run, without a rewrite."""
+        self.first_round()
+        path = State.path(self.rdir())
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            data = json.load(fh)
+        data["test_files"] = []
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(data, fh)
+        self.fix_and_commit()
+        entry = claude_entry(approve_response())
+        entry["write_files"]["tests/test_review_mul.py"] = UPDATED
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("starts over", out)
+        self.assertIn("recovered", out)                                              # AC-7
+        self.assertEqual(len(prompts(self)), 1)
+        self.assertIn("tests/test_review_mul.py", section(prompts(self)[0], EARLIER))
+        self.assertEqual(self.read("tests/test_review_mul.py"), UPDATED)
+        state = State.load(self.rdir())
+        self.assertEqual(state.test_files, ["tests/test_review_mul.py"])
+        self.assertEqual(len(state.rounds), 2)
+
+    def test_unchanged_state_logs_nothing(self):
+        """Round 2 of an ordinary branch: the recovery finds what the state already holds."""
+        self.first_round()
+        self.fix_and_commit()
+        self.claude(claude_entry(approve_response()))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("recovered", out)                                           # AC-7
+        self.assertNotIn("Revali-Round", out)
+        self.assertEqual(State.load(self.rdir()).test_files, ["tests/test_review_mul.py"])
 
     def test_new_branch_without_reviewer_commits_is_quiet(self):
         self.claude(claude_entry(approve_response()))

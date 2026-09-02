@@ -176,24 +176,26 @@ def branch_test_commits(ctx: Context) -> List[Tuple[str, List[str]]]:
 
 def recover_test_ownership(ctx: Context, state: State, log: Optional[RunLog]) -> Tuple[List[str], List[str]]:
     """Add the branch's trailer commits and their surviving test files to the state (front of
-    the lists, no duplicates) so the reviewer may update its own earlier files after a rewrite
-    or on a fresh state. Returns (commits, files) found; logs only when a commit was found,
-    since a branch with none is the normal case."""
+    the lists, no duplicates). Runs on every run, so the state heals whatever forgot the files:
+    a rewrite, `revali reset`, a state written before this rule existed. Idempotent; returns
+    (commits, files) found on the branch and logs only what was missing from the state, so a
+    run where nothing changed stays quiet."""
     found = branch_test_commits(ctx)
     commits = [sha for sha, _ in found]
     files = sorted({p for _, paths in found for p in paths})
+    new_commits = [c for c in commits if c not in state.test_commits]
+    new_files = [f for f in files if f not in state.test_files]
     state.test_commits = commits + [c for c in state.test_commits if c not in commits]
     state.test_files = files + [f for f in state.test_files if f not in files]
-    if log and commits:
-        if files:
-            log.stage("run", "recovered the reviewer's %d test file(s) from %d earlier test commit(s) on the "
-                             "branch (%s trailer): %s; commits %s"
-                      % (len(files), len(commits), TRAILER, ", ".join(files),
-                         ", ".join(c[:10] for c in commits)))
-        else:
-            log.stage("run", "found %d earlier reviewer test commit(s) on the branch (%s trailer) but none of "
-                             "their test files is still in HEAD: %s"
-                      % (len(commits), TRAILER, ", ".join(c[:10] for c in commits)))
+    if log and new_files:
+        log.stage("run", "recovered the reviewer's %d test file(s) from %d earlier test commit(s) on the "
+                         "branch (%s trailer): %s; commits %s"
+                  % (len(new_files), len(commits), TRAILER, ", ".join(new_files),
+                     ", ".join(c[:10] for c in commits)))
+    elif log and new_commits and not files:
+        log.stage("run", "found %d earlier reviewer test commit(s) on the branch (%s trailer) but none of "
+                         "their test files is still in HEAD: %s"
+                  % (len(commits), TRAILER, ", ".join(c[:10] for c in commits)))
     return commits, files
 
 
