@@ -292,6 +292,64 @@ class Interrupted(PendingCase):
         self.assertEqual(state.test_files, [OTHER])
         self.assertEqual(self.committed_in(state.test_commits[-1]), [OTHER])
 
+    def modified_own_tracked_pending_file(self):
+        """Round 1 (CHANGES_REQUESTED) commits MUL; round 2 (NEEDS_INFO) modifies it. Returns
+        the committed text."""
+        self.claude(claude_entry(approve_response(verdict="CHANGES_REQUESTED", findings=[blocking_finding()])))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        committed = self.read(MUL)
+        self.write("src/calc.py", self.read("src/calc.py") + "\n# negatives handled\n")
+        self.commit_all("fix: handle negatives")
+        self.needs_info_round({MUL: TEST_REVIEW_MUL + "\n# updated by round 2\n"})
+        self.assertIn(" M " + MUL, self.status())
+        self.assertEqual(self.state().pending_test_files, [MUL])
+        return committed
+
+    def test_a_killed_round_after_needs_info_puts_a_modified_own_tracked_file_back_to_head(self):
+        # Round 1 F1: the cleanup deletes only untracked files, so a tracked pending file that the
+        # NEEDS_INFO round modified must go back to HEAD, or the next run refuses a file the author
+        # was told to leave alone. The hook path: a killed round 3, cleaned by the run after it.
+        committed = self.modified_own_tracked_pending_file()
+        state = self.state()
+        state.reviewer_running = True
+        state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
+        self.write(LEFT, "# half written by the killed session\n")
+        self.claude(approving({OTHER: OTHER_TEXT}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)                                               # AC-4: not refused
+        self.assertIn("restored 1 pending test file", out)                                 # named in the log
+        self.assertIn(MUL, out)
+        self.assertEqual(self.read(MUL), committed)                                        # back to HEAD
+        self.assertFalse(self.exists(LEFT))
+        state = self.state()
+        self.assertEqual(state.pending_test_files, [])                                     # AC-4: cleared
+        self.assertFalse(state.reviewer_running)
+        self.assertEqual(sorted(state.test_files), [MUL, OTHER])
+        self.assertEqual(self.committed_in(state.test_commits[-1]), [OTHER])               # MUL unchanged, not recommitted
+        self.assertEqual(self.status().strip(), "")
+
+    def test_a_round_stopped_by_the_worktree_guard_puts_a_modified_own_tracked_file_back_to_head(self):
+        # The in-round Stop path: round 3's reviewer touches a file outside test_dir, the guard
+        # ends the round; the pending tracked file is restored and the following run proceeds.
+        committed = self.modified_own_tracked_pending_file()
+        entry = approving({OTHER: OTHER_TEXT})
+        entry["write_files"]["src/calc.py"] = "def mul(a, b):\n    return 0\n"
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("outside", out)                                                      # the guard stopped it
+        self.assertEqual(self.read(MUL), committed)                                        # AC-4: back to HEAD
+        self.assertFalse(self.exists(OTHER))                                               # the round's own file went too
+        self.assertEqual(self.status().strip(), "")
+        state = self.state()
+        self.assertEqual(state.pending_test_files, [])                                     # AC-4: cleared
+        self.assertFalse(state.reviewer_running)
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)                                               # not refused afterwards
+        self.assertNotIn("not clean", out)
+
 
 class HookLivesInReview(PendingCase):
     """AC-6: review.py builds the interruption cleanup; pipeline.py no longer has its own copy;
