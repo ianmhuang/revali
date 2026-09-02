@@ -3,7 +3,9 @@
 path and by the cleanup at the start of the next run; the log names it and says the next
 run tolerates it; that run's tree check passes and its prompt lists the file for the
 reviewer. `os.remove` is patched in-process to refuse one path, which is the only way to
-produce an undeletable file portably."""
+produce an undeletable file portably.
+Round 3 adds: `reset` on a stuck file says by hand and never "tolerate" (round 2 F1), the
+next preflight is then refused, and the stop path still says "tolerate"."""
 import os
 import unittest
 from unittest import mock
@@ -197,8 +199,25 @@ class ResetWithAStuckFile(StuckCase):
         self.assertIn("could not remove", out)                                             # named
         self.assertIn("by hand", out)                                                      # told what to do
         self.assertIn(LEFT, out.split("by hand", 1)[1])
+        self.assertNotIn("tolerate", out)                                                  # round 2 F1: no false promise
+        self.assertNotIn(MUL, out.split("by hand", 1)[1])                                  # only the stuck one
         self.assertIn("state removed", out)
         self.assertIsNone(self.state())
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_ERROR, out)                                            # nothing tolerates it now
+        self.assertIn("not clean", out)
+
+    def test_run_path_still_promises_tolerance_after_reset_changed_nothing_there(self):
+        """The round 2 fix must not silence the line on the stop path: there the state
+        survives and the promise is true."""
+        self.needs_info_round()
+        self.claude(claude_entry(is_error=True, exit=1))
+        with mock.patch("os.remove", refusing(MUL)):
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("tolerate", out)                                                     # AC-5: still said here
+        self.assertNotIn("by hand", out)
+        self.assertEqual(self.state().pending_test_files, [MUL])
 
 
 if __name__ == "__main__":
