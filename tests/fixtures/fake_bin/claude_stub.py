@@ -2,7 +2,8 @@
 
 Each invocation consumes the next entry:
   {"exit": 0, "structured_output": {...}, "model": "claude-fable-5", "cost": 0.5,
-   "write_files": {"tests/test_review_x.py": "..."}, "raw_stdout": "<override>",
+   "write_files": {"tests/test_review_x.py": "..."}, "delete_files": ["tests/test_review_y.py"],
+   "raw_stdout": "<override>",
    "is_error": false}
 The prompt (last argv element) and argv are appended to REVALI_FAKE_LOG.
 Use via REVALI_CLAUDE_CMD="<python> <this file>".
@@ -47,6 +48,10 @@ def main(argv):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(content)
+    for rel in entry.get("delete_files") or []:   # a reviewer dropping one of its own earlier files
+        path = os.path.join(os.getcwd(), rel)
+        if os.path.isfile(path):
+            os.remove(path)
     if "raw_stdout" in entry:
         sys.stdout.write(entry["raw_stdout"])
         return int(entry.get("exit", 0))

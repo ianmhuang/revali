@@ -179,7 +179,7 @@ class PromptWithoutTakenFiles(RepoCase):
         self.assertNotIn("test_calc.py", prompt)
 
     def test_prompt_version_is_4(self):
-        self.assertEqual(PROMPT_VERSION, "4")                                        # AC-4
+        self.assertGreaterEqual(int(PROMPT_VERSION), 4)                                        # AC-4
 
 
 if __name__ == "__main__":

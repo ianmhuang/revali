@@ -59,6 +59,8 @@ class State:
     force_push: bool = False     # set after a detected history rewrite; cleared by the next push
     last_verdict: str = ""       # APPROVE | CHANGES_REQUESTED | NEEDS_INFO | PASS | FAIL
     reviewer_running: bool = False  # a reviewer session may have left files in test_dir (STATE_VERSION 2)
+    pending_test_files: List[str] = field(default_factory=list)  # left uncommitted by a NEEDS_INFO round;
+    # the clean-tree check tolerates exactly these until the next round commits or removes them (STATE_VERSION 3)
     last_exit: int = -1
     message: str = ""
     started_at: str = ""

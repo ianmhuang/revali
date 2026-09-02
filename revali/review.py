@@ -134,6 +134,15 @@ def _prior_tests_section(state: State) -> str:
             + "\n".join("- " + p for p in state.test_files) + "\n")
 
 
+def _pending_tests_section(state: State) -> str:
+    if not state.pending_test_files:
+        return ""
+    return ("Files you wrote in the previous round (NEEDS_INFO) that are not committed yet; they are\n"
+            "in the working tree. Update or delete them; whatever remains is committed with this\n"
+            "round's tests:\n"
+            + "\n".join("- " + p for p in state.pending_test_files) + "\n")
+
+
 def tracked_test_files(ctx: Context) -> List[str]:
     """Files under test_dir that HEAD tracks, forward slashes."""
     res = gitops._git(["ls-files", "--", ctx.cfg.project.test_dir], ctx.repo_root)
@@ -195,6 +204,7 @@ def build_prompt(ctx: Context, state: State, rdir: str, round_no: int, bounce_no
         "tests_required": tests_required,
         "test_guide_section": guide,
         "prior_tests_section": _prior_tests_section(state),
+        "pending_tests_section": _pending_tests_section(state),
         "existing_tests_section": _existing_tests_section(ctx, state),
         "checklist": assemble_checklist(ctx),
     }
@@ -290,6 +300,38 @@ def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str =
 
 
 # ---- checks after the reviewer --------------------------------------------
+
+def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage: str = "review") -> None:
+    """Forget a NEEDS_INFO round's pending files once a round that was meant to commit them
+    stopped: the untracked ones are gone with discard_unfinished_tests, and a tracked one the
+    reviewer had modified (its own file from an earlier round) goes back to HEAD, so the next
+    run does not refuse a file the author was told to leave alone."""
+    restored = []
+    for path in state.pending_test_files:
+        if path in tracked_test_files(ctx) and os.path.exists(os.path.join(ctx.repo_root, path)):
+            _restore_from_head(path, ctx.repo_root)
+            restored.append(path)
+    if restored and log:
+        log.stage(stage, "restored %d pending test file(s) of the reviewer's own from HEAD: %s"
+                  % (len(restored), ", ".join(restored)))
+    state.pending_test_files = []
+
+
+def interruption_cleanup(state: State, rdir: str, log: Optional[RunLog]):
+    """The `before_tree` hook for a run that follows an interrupted round: delete what the
+    unfinished session left under test_dir, drop the pending files (untracked ones were among
+    them; a modified tracked one goes back to HEAD), clear the flag. None when no round was
+    interrupted."""
+    if not state.reviewer_running:
+        return None
+
+    def hook(ctx: Context) -> None:
+        discard_unfinished_tests(ctx, log, "the interrupted run", stage="run")
+        drop_pending_tests(ctx, state, log, stage="run")
+        state.reviewer_running = False
+        state.save(rdir)
+    return hook
+
 
 def _under_test_dir(path: str, test_dir: str) -> bool:
     p = path.replace("\\", "/").rstrip("/")
@@ -653,6 +695,7 @@ def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> R
         return _run_round(ctx, state, rdir, log)
     except Stop:
         discard_unfinished_tests(ctx, log)
+        drop_pending_tests(ctx, state, log)
         state.reviewer_running = False
         state.save(rdir)
         raise
@@ -723,9 +766,9 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
         for f in files:
             if f not in state.test_files:
                 state.test_files.append(f)
-    elif files:
-        # NEEDS_INFO: keep the files uncommitted; the next round updates them.
-        pass
+    # NEEDS_INFO keeps its files uncommitted for the next round to update; the state remembers
+    # them so preflight tolerates exactly those. Any other verdict has committed or lost them.
+    state.pending_test_files = list(files) if verdict == NEEDS_INFO else []
 
     meta = {"tool": "revali", "round": round_no, "model_requested": rr.model_requested,
             "model_reason": rr.model_reason or "explicit",
