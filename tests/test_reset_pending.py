@@ -94,6 +94,52 @@ class ResetWithPendingFiles(PendingCase):
         self.assertEqual(self.status_of_tests(), "")
 
 
+class ResetDeletesOnlyThePendingList(PendingCase):
+    def test_authors_untracked_draft_survives_next_to_a_pending_file(self):
+        """Round 1 F1: with pending files and no interrupted round the reviewer's files are
+        known exactly, so an author's own untracked draft on the pattern is left alone."""
+        self.needs_info_round()
+        self.write(MINE, "# the author's draft\n")
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(PENDING))
+        self.assertTrue(self.exists(MINE))                                                 # AC-1: only pending
+        self.assertNotIn(MINE, out)
+
+
+class ResetSurvivesAFailingCleanup(PendingCase):
+    def test_restore_failure_prints_the_paths_and_still_removes_the_state(self):
+        """Round 1 F2: a Stop from the HEAD restore (or a GitError) does not escape reset."""
+        self.claude(claude_entry(approve_response(verdict="CHANGES_REQUESTED", findings=[HIGH])))
+        self.assertEqual(run_cli(["run", "--foreground"])[0], EXIT_ACTION)
+        self.write("src/calc.py", self.read("src/calc.py") + "\n# negatives handled\n")
+        self.commit_all("fix")
+        entry = asking(write_tests=False)
+        entry["write_files"] = {PENDING: TEST_REVIEW_MUL + "\n# updated by round 2\n"}
+        self.claude(entry)
+        self.assertEqual(run_cli(["run", "--foreground"])[0], EXIT_ACTION)
+        from revali.preflight import Stop
+        with mock.patch("revali.review._restore_from_head", side_effect=Stop(EXIT_ERROR, "git checkout failed")):
+            code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("Traceback", out)
+        self.assertIn("by hand", out)                                                      # AC-4
+        self.assertIn(PENDING, out)
+        self.assertIn("git checkout failed", out)
+        self.assertIsNone(self.state())                                                    # state gone
+        self.assertIn("updated by round 2", self.read(PENDING))                            # untouched
+
+    def test_git_error_is_reported_the_same_way(self):
+        from revali.gitops import GitError
+        self.needs_info_round()
+        with mock.patch("revali.gitops.dirty_paths", side_effect=GitError("git status failed")):
+            code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("by hand", out)
+        self.assertIn(PENDING, out)
+        self.assertIsNone(self.state())
+
+
 class ResetAfterInterruption(PendingCase):
     def test_leftovers_of_a_killed_session_are_removed(self):
         self.needs_info_round()
