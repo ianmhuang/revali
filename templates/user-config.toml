@@ -11,6 +11,7 @@ checklist = ""
 history_path = ""
 # [paths]
 # history_file = "history.jsonl"   # user-level only; a project file may not set it
+# write_retry_s = 2.0              # how long a state-file write waits for a reader to let go
 
 # Any [section] from revali.toml / defaults.toml may appear here, e.g.:
 # [review]

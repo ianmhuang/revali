@@ -38,6 +38,7 @@ class PathsCfg:
     state_dir: str = ""
     logs_dir: str = ""
     history_file: str = ""
+    write_retry_s: float = 0.0
 
 
 @dataclass

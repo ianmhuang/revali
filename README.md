@@ -121,6 +121,17 @@ the findings that did not block, with the blocking / non-blocking counts and
 the path of `review-<n>.md`: a `low` or `medium convention` finding left
 unanswered comes back as unresolved in the next round.
 
+A run that stops without a result (the process was killed, the machine went
+down, an unexpected error) is reported as such: an unexpected error is
+recorded as stage `error` with exit 1 and the traceback in `logs/run.log`;
+when nothing could record anything, `wait` prints `died at stage '<stage>'
+without a result` and returns 1, and `status` says the same after its
+`stage:` line. The next `run` continues where the last one stopped when it
+can: if the last reviewer round was APPROVE, no validation is recorded for it,
+and HEAD is still the commit that round left (the reviewer's test commit),
+the run skips the reviewer and goes to validation, so the review is not paid
+twice. Any other state gets a normal new round.
+
 ## Configuration
 
 Three layers, the most specific wins, and every key may appear in any of
@@ -162,6 +173,7 @@ time and recorded in the review and diagnosis headers.
 | `review-n.md` / `.json` | revali, from the Reviewer's answer | you, the PR | same | same |
 | `tests.md` | revali, from the Reviewer's answer; validation results appended | you, diagnosis session | same | same |
 | `diagnose-n.json` | revali, from the diagnosis session | you | same | same |
+| `state.json` (stage, rounds, validations, exit) | revali | `wait`, `status`, the next `run` | same | same; `[paths] write_retry_s` is how long a write waits for a reader to release the file (Windows) |
 | logs, prompts, raw answers | revali | you | `.revali/<branch>/logs/` | `[paths] logs_dir` |
 | acceptance tests | Reviewer | Validator; merged into `main` | `tests/test_review_<topic>.py` | `[project] test_dir`, `test_file_pattern` |
 | checklist, built-in layer | revali | Reviewer | `checklists/default.md` in revali | `[review] checklist_builtin` |

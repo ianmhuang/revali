@@ -99,7 +99,16 @@ class State:
         self.save(rdir)
 
 
-def write_json_atomic(path: str, data) -> None:
+def write_retry_s() -> float:
+    """[paths] write_retry_s from defaults.toml (imported lazily: config does not know state)."""
+    from revali.config import load_defaults
+    return float(load_defaults()["paths"]["write_retry_s"])
+
+
+def write_json_atomic(path: str, data, retry_s: Optional[float] = None) -> None:
+    """Write to a temp file in the same directory, then rename over `path`. On Windows the
+    rename fails with PermissionError while another process (`wait`, `status`) has the file
+    open for reading, so it is retried for up to `retry_s` seconds; other errors are not."""
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=directory)
@@ -107,11 +116,31 @@ def write_json_atomic(path: str, data) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
             fh.write("\n")
-        os.replace(tmp, path)
+        deadline = time.monotonic() + (write_retry_s() if retry_s is None else retry_s)
+        pause = 0.02
+        while True:
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if time.monotonic() >= deadline:
+                    raise
+            time.sleep(pause)
+            pause = min(pause * 2, 0.2)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+def run_died(state: "State") -> bool:
+    """With no live process: the recorded stage has no result. A finished `run --dry-run`
+    leaves stage `preflight` with exit 0 and is the one non-terminal stage that is a result;
+    a run resets `last_exit` to -1 when it starts, so a kill during preflight is not mistaken
+    for it."""
+    if state.stage in TERMINAL_STAGES:
+        return False
+    return not (state.stage == "preflight" and state.last_exit >= 0)
 
 
 def write_text(path: str, text: str) -> None:
