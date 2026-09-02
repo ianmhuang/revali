@@ -557,9 +557,10 @@ def cmd_stop(args) -> int:
             # and `status` stop reporting a death. Only the outcome fields change; what the
             # next run needs (reviewer_running, pending files, rounds, head_sha) stays.
             died_at = state.stage
-            state.set_stage(rdir, "stopped",
-                            "found dead at stage '%s' with no result recorded; marked stopped by `revali stop`"
-                            % died_at, EXIT_ERROR)
+            if not _close_stopped(state, rdir,
+                                  "found dead at stage '%s' with no result recorded; marked stopped "
+                                  "by `revali stop`" % died_at):
+                return EXIT_ERROR
             print("no live process; the run found dead at stage '%s' is now recorded as stopped" % died_at)
             return EXIT_OK
         print("no run in progress")
@@ -571,10 +572,26 @@ def cmd_stop(args) -> int:
         time.sleep(0.1)
     release_lock(rdir)
     state = State.load(rdir)
-    if state is not None:
-        state.set_stage(rdir, "stopped", "stopped by user at stage '%s'" % state.stage, EXIT_ERROR)
+    if state is not None and not _close_stopped(state, rdir, "stopped by user at stage '%s'" % state.stage):
+        print("stopped pid %d" % pid)
+        return EXIT_ERROR
     print("stopped pid %d" % pid)
     return EXIT_OK
+
+
+def _close_stopped(state: State, rdir: str, message: str) -> bool:
+    """Record a run closed by `stop`: stage `stopped`, exit 1, a history row so `stats` sees
+    the episode. A state file that cannot be written (a reader holding it on Windows past the
+    retry window) is reported on one line, not as a traceback; the run then still reads as
+    dead, which is what it is."""
+    try:
+        state.set_stage(rdir, "stopped", message, EXIT_ERROR)
+    except OSError as exc:
+        print("ERROR: the state file could not be updated (%s); `wait` and `status` will report "
+              "the run as dead; run `revali stop` again once the file is free" % exc)
+        return False
+    _record_history(state, EXIT_ERROR)
+    return True
 
 
 def cmd_merge(args) -> int:

@@ -129,7 +129,13 @@ without a result` and returns 1, and `status` says the same after its
 `stage:` line. `revali stop` acknowledges such a run: with no live process
 and no result recorded it sets stage `stopped` (exit 1) and removes the
 stale lock, after which `wait` and `status` report a stopped run; a state
-that already holds a result is left alone (`no run in progress`). The next
+that already holds a result is left alone (`no run in progress`). Every
+`stop` that records a run as stopped, killed or found dead, also appends a
+history row (stage `stopped`, exit 1) so `stats` counts the episode; when
+the state file cannot be written (a reader holding it on Windows past the
+retry window) `stop` says so on one `ERROR:` line and returns 1, the process
+is still killed, and the run keeps reading as dead until `stop` is run
+again. The next
 `run` continues where the last one stopped when it
 can: if the last reviewer round was APPROVE, no validation is recorded for it,
 and HEAD is still the commit that round left (the reviewer's test commit),

@@ -39,7 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument("branch")
     p_clean.set_defaults(func=pipeline.cmd_clean)
 
-    p_stop = sub.add_parser("stop", help="kill the running pipeline for the current branch")
+    p_stop = sub.add_parser("stop", help="kill the running pipeline for the current branch, or record a run "
+                                         "that died without a result as stopped")
     p_stop.set_defaults(func=pipeline.cmd_stop)
 
     p_merge = sub.add_parser("merge", help="merge the PR of the current branch (only after READY TO MERGE)")
