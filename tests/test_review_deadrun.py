@@ -1,7 +1,10 @@
 """AC-2 and AC-3 of fix/state-write-race: an unexpected exception inside the pipeline is
 recorded as stage `error` (exit 1, a history line, the lock released, the traceback in the
 logs), while a run that vanished before recording anything is reported by `wait` and
-`status` as dead at its stage, with the log path, instead of a stale exit code."""
+`status` as dead at its stage, with the log path, instead of a stale exit code. When the
+state file itself is what cannot be written, the crash handler records the error as soon
+as the file is released, and still ends the run with `ERROR:` lines and exit 1 when it
+never is (round 1, F2)."""
 import contextlib
 import io
 import os
@@ -57,6 +60,84 @@ class UnexpectedErrorIsRecorded(DeadRunCase):
         code, out = run_cli(["status"])
         self.assertEqual(code, EXIT_OK)
         self.assertNotIn("without a result", out)
+
+
+class DenyStateJson:
+    """os.replace that refuses to rename over state.json: every attempt of the first such
+    write only (`first_write_only`, the reader lets go before the crash handler writes), or
+    every attempt of every write (the reader never lets go)."""
+
+    def __init__(self, first_write_only):
+        self.first_write_only = first_write_only
+        self.real = os.replace
+        self.first_src = None
+        self.denied = 0
+
+    def __call__(self, src, dst):
+        if os.path.basename(dst) == "state.json":
+            if self.first_src is None:
+                self.first_src = src
+            if not self.first_write_only or src == self.first_src:
+                self.denied += 1
+                raise PermissionError(13, "Access is denied")
+        self.real(src, dst)
+
+
+class StateFileCannotBeWritten(DeadRunCase):
+    """The failure that motivated the change, at its worst: the write that fails is the state
+    file's own, so the crash handler has nothing safe to write to either."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("revali.toml", self.read("revali.toml") + "\n[paths]\nwrite_retry_s = 0.05\n")
+        self.commit_all("short state write window")
+
+    def run_with(self, replace):
+        self.claude(claude_entry())
+        err = io.StringIO()
+        with mock.patch("revali.state.os.replace", replace):
+            with contextlib.redirect_stderr(err):
+                code, out = run_cli(["run", "--foreground"])                 # returns: nothing escapes to the caller
+        return code, out, err.getvalue()
+
+    def test_the_handler_records_the_error_once_the_reader_lets_go(self):
+        replace = DenyStateJson(first_write_only=True)
+        code, out, err = self.run_with(replace)
+        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-2: exits 1
+        self.assertIn("ERROR: the run stopped", out)                                           # AC-2: ERROR printed
+        self.assertIn("PermissionError", out)
+        self.assertNotIn("could not be updated", out)                                          # the handler's write landed
+        self.assertGreater(replace.denied, 1)                                                  # AC-1: retried before giving up
+        state = State.load(self.rdir())
+        self.assertEqual(state.stage, "error")                                                 # AC-2: stage error recorded
+        self.assertEqual(state.last_exit, EXIT_ERROR)
+        self.assertIn("PermissionError", state.message)                                        # AC-2: exception text
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))                               # AC-2: lock released
+        rows = read_history(os.path.join(self.home, "history.jsonl"))
+        self.assertEqual(rows[-1]["exit"], EXIT_ERROR)                                         # AC-2: history line
+        self.assertEqual(rows[-1]["stage"], "error")
+        self.assertIn("PermissionError", err)                                                  # AC-2: traceback kept
+        self.assertIn("PermissionError", self.revali_log())
+        self.assertEqual(self.fake_calls("claude"), [])                                        # no reviewer was paid for
+        code, out = run_cli(["wait", "--timeout", "1s"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertTrue(out.startswith("error:"), out)                                         # the recorded result, not a death
+        self.assertNotIn("died", out)
+
+    def test_a_state_file_that_never_frees_still_ends_with_error_lines_and_exit_1(self):
+        replace = DenyStateJson(first_write_only=False)
+        code, out, err = self.run_with(replace)
+        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-2: exits 1, no raw traceback escapes
+        self.assertIn("ERROR: the run stopped", out)                                           # AC-2: ERROR printed
+        self.assertIn("ERROR:", out.split("ERROR: the run stopped", 1)[1])                     # ... and the failed record is said, too
+        self.assertIn("could not be updated", out)
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))                               # AC-2: lock released
+        self.assertIsNone(State.load(self.rdir()))                                             # nothing could be recorded
+        self.assertIn("PermissionError", err)                                                  # AC-2: traceback to the run log
+        self.assertIn("could not be updated", self.revali_log())
+        self.assertEqual(self.fake_calls("claude"), [])
+        code, out = run_cli(["wait", "--timeout", "1s"])
+        self.assertEqual(code, EXIT_ERROR, out)                                                # no stale success either way
 
 
 class VanishedRunIsReported(DeadRunCase):
