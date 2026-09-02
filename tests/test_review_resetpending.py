@@ -3,9 +3,13 @@ of a NEEDS_INFO round's pending test files and an interrupted round's leftovers 
 next `run` would have (untracked drafts deleted, a modified tracked file of the reviewer's
 own restored from HEAD), says what it did, and then removes the state; with nothing pending
 and nothing interrupted it leaves `test_dir` alone; without a loadable project it prints the
-paths for the author. Black-box through the CLI, the working tree and the state file."""
+paths for the author. Black-box through the CLI, the working tree and the state file.
+Round 2 adds: with pending files and no interrupted round only the pending list goes and an
+author's own draft on the pattern survives (round 1 F1); a `Stop` from the HEAD restore or a
+`GitError` from the status call does not escape `reset` (round 1 F2)."""
 import os
 import unittest
+from unittest import mock
 
 from tests.helpers import ROOT, RepoCase, TEST_REVIEW_MUL, approve_response, claude_entry, git, run_cli
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
@@ -213,6 +217,112 @@ class WithoutALoadableProject(ResetCase):
         self.assertIn("by hand", out)
         self.assertIn(MUL, out)
         self.assertTrue(self.exists(MUL))
+
+
+class OnlyThePendingListGoesWhenNothingWasInterrupted(ResetCase):
+    """Round 1 F1 / AC-1: with pending files and no interrupted round the reviewer's files
+    are known exactly, so `reset` deletes 'the untracked ones' of the pending list and an
+    author's own untracked file on test_file_pattern survives, unlogged."""
+
+    def test_authors_draft_next_to_a_pending_file_survives(self):
+        self.needs_info_round({MUL: TEST_REVIEW_MUL, SPACED: SPACED_TEXT})
+        self.write(MINE, "# the author's draft\n")
+        out = self.reset()
+        self.assertFalse(self.exists(MUL))                                                 # pending: deleted
+        self.assertFalse(self.exists(SPACED))
+        self.assertTrue(self.exists(MINE))                                                 # F1: not pending, kept
+        self.assertEqual(self.read(MINE), "# the author's draft\n")
+        self.assertNotIn(MINE, out)
+        self.assertIn("removed 2 unfinished test file", out)
+        self.assertIsNone(self.state())
+        self.assertEqual(self.tests_status(), "?? " + MINE)                                # only the author's file left
+
+    def test_authors_draft_next_to_a_restored_tracked_pending_file_survives(self):
+        self.changes_requested_round()
+        committed = self.read(MUL)
+        self.write("src/calc.py", self.read("src/calc.py") + "\n# negatives handled\n")
+        self.commit_all("fix: handle negatives")
+        self.needs_info_round({MUL: TEST_REVIEW_MUL + "\n# updated by round 2\n"})
+        self.assertEqual(self.state().pending_test_files, [MUL])
+        self.write(MINE, "# the author's draft\n")
+        out = self.reset()
+        self.assertEqual(self.read(MUL), committed)                                        # restored
+        self.assertTrue(self.exists(MINE))                                                 # F1: kept
+        self.assertNotIn("unfinished test file", out)                                      # nothing deleted
+        self.assertIn("restored", out)
+        self.assertIsNone(self.state())
+
+    def test_interrupted_round_still_sweeps_the_whole_pattern(self):
+        """AC-2 keeps its documented behaviour: after a kill the session's files are unknown,
+        so every untracked file on the pattern goes, as the next `run` would have done."""
+        self.needs_info_round()
+        state = self.state()
+        state.reviewer_running = True
+        state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
+        self.write(LEFT, "# half written by the killed session\n")
+        out = self.reset()
+        self.assertFalse(self.exists(MUL))
+        self.assertFalse(self.exists(LEFT))                                                # AC-2: not pending, swept
+        self.assertIn(LEFT, out)
+        self.assertEqual(self.tests_status(), "")
+
+
+class AFailingCleanupDoesNotEscapeReset(ResetCase):
+    """Round 1 F2 / AC-4: a `Stop` from the HEAD restore or a `GitError` from the status call
+    is reported like an unloadable project: the pending paths are printed with the by-hand
+    advice, no traceback, and the state is still removed."""
+
+    def _tracked_pending_file(self):
+        self.changes_requested_round()
+        self.write("src/calc.py", self.read("src/calc.py") + "\n# negatives handled\n")
+        self.commit_all("fix: handle negatives")
+        self.needs_info_round({MUL: TEST_REVIEW_MUL + "\n# updated by round 2\n", SPACED: SPACED_TEXT})
+        self.assertEqual(sorted(self.state().pending_test_files), sorted([MUL, SPACED]))
+
+    def test_stop_from_the_head_restore(self):
+        from revali.preflight import Stop
+        self._tracked_pending_file()
+        boom = Stop(EXIT_ERROR, "could not restore %s from HEAD: git checkout failed" % MUL)
+        with mock.patch("revali.review._restore_from_head", side_effect=boom):
+            code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)                                               # F2: reset finishes
+        self.assertNotIn("Traceback", out)
+        self.assertIn("by hand", out)                                                      # AC-4 wording
+        self.assertIn("git checkout failed", out)                                          # the reason
+        self.assertIn(MUL, out)                                                            # both pending paths
+        self.assertIn(SPACED, out)
+        self.assertIn("state removed", out)
+        self.assertIsNone(self.state())                                                    # state gone
+        self.assertIn("updated by round 2", self.read(MUL))                                # left as it was
+
+    def test_git_error_from_the_status_call(self):
+        from revali.gitops import GitError
+        self.needs_info_round({MUL: TEST_REVIEW_MUL, SPACED: SPACED_TEXT})
+        with mock.patch("revali.gitops.dirty_paths", side_effect=GitError("git status: exit 128")):
+            code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)                                               # F2
+        self.assertNotIn("Traceback", out)
+        self.assertIn("by hand", out)
+        self.assertIn("git status: exit 128", out)
+        self.assertIn(MUL, out)
+        self.assertIn(SPACED, out)
+        self.assertIsNone(self.state())
+        self.assertTrue(self.exists(MUL))                                                  # nothing deleted
+        self.assertTrue(self.exists(SPACED))
+
+    def test_interrupted_round_with_no_pending_list_names_the_pattern(self):
+        from revali.gitops import GitError
+        state = State()
+        state.reviewer_running = True
+        state.set_stage(self.rdir(), "stopped", "stopped by user", EXIT_ERROR)
+        self.write(LEFT, "# half written\n")
+        with mock.patch("revali.gitops.dirty_paths", side_effect=GitError("git status: exit 128")):
+            code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("by hand", out)
+        self.assertIn("test_file_pattern", out)                                            # no paths to name
+        self.assertIsNone(self.state())
+        self.assertTrue(self.exists(LEFT))
 
 
 class ReadmeDescribesIt(unittest.TestCase):

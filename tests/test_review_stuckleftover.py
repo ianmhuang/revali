@@ -88,9 +88,11 @@ class StopPathKeepsTheStuckFile(StuckCase):
         self.assertIn("could not remove", out)                                             # AC-5: named
         self.assertIn(MUL, out)
         self.assertIn("tolerate", out)                                                     # AC-5: says so
+        self.assertNotIn("by hand", out)                                                   # round 1 F3: no contradiction
         log = self.log_text()
         self.assertIn(MUL, log)
         self.assertIn("tolerate", log)
+        self.assertNotIn("by hand", log)
         state = self.state()
         self.assertEqual(state.pending_test_files, [MUL])                                  # AC-5: kept
         self.assertFalse(state.reviewer_running)
@@ -156,6 +158,7 @@ class StartOfRunCleanupKeepsTheStuckFile(StuckCase):
         self.assertIn("could not remove", out)                                             # AC-5: named
         self.assertIn(LEFT, out)
         self.assertIn("tolerate", out)
+        self.assertNotIn("by hand", out)                                                   # round 1 F3
         self.assertIn("] run:", out)
         self.assertIn("- " + LEFT, self.pending_section(self.last_prompt()))               # AC-5: listed
         self.assertNotIn("- " + MUL, self.last_prompt())
@@ -176,6 +179,26 @@ class StartOfRunCleanupKeepsTheStuckFile(StuckCase):
         self.assertEqual(code, EXIT_OK, out)                                               # AC-5: tolerated
         self.assertTrue(self.exists(MUL))                                                  # a dry run deletes nothing
         self.assertEqual(self.state().pending_test_files, [MUL])
+
+
+class ResetWithAStuckFile(StuckCase):
+    """AC-1 with AC-5's failure: `reset` drops the state, so a file it could not delete has
+    no list left to tolerate it; reset names it for the author to delete by hand and still
+    removes the state and the deletable pending file."""
+
+    def test_stuck_pending_file_is_named_for_the_author_and_the_state_goes(self):
+        self.needs_info_round({MUL: TEST_REVIEW_MUL, LEFT: LEFT_TEXT})
+        with mock.patch("os.remove", refusing(LEFT)):
+            code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("Traceback", out)
+        self.assertFalse(self.exists(MUL))                                                 # deletable one went
+        self.assertTrue(self.exists(LEFT))
+        self.assertIn("could not remove", out)                                             # named
+        self.assertIn("by hand", out)                                                      # told what to do
+        self.assertIn(LEFT, out.split("by hand", 1)[1])
+        self.assertIn("state removed", out)
+        self.assertIsNone(self.state())
 
 
 if __name__ == "__main__":
