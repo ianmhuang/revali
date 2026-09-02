@@ -104,10 +104,6 @@ def _run_foreground(args) -> int:
         return EXIT_ERROR
     log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(gitops.repo_root(cwd)).logs_dir)
     state = State.load(rdir) or State()
-    # No result yet: `wait` / `status` read -1 as "died" when the process is gone and the
-    # stage is not terminal (see state.run_died), instead of the previous run's exit code.
-    state.last_exit = -1
-    state.save(rdir)
     code = EXIT_ERROR
     try:
         code = _pipeline(args, cwd, rdir, state, log)
@@ -118,6 +114,10 @@ def _run_foreground(args) -> int:
 
 def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     try:
+        # No result yet: `wait` / `status` read -1 as "died" when the process is gone and the
+        # stage is not terminal (see state.run_died), instead of the previous run's exit code.
+        state.last_exit = -1
+        state.save(rdir)
         return _stages(args, cwd, rdir, state, log)
     except ConfigError as exc:
         stop = Stop(EXIT_ERROR, "configuration: " + "; ".join(exc.problems))
@@ -137,8 +137,13 @@ def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
             log.detail(line)
         stop = Stop(EXIT_ERROR, "the run stopped at stage '%s' with %s: %s" % (state.stage, type(exc).__name__, exc))
         _print_stop(stop)
-        state.set_stage(rdir, "error", stop.message, EXIT_ERROR)
-        _record_history(state, EXIT_ERROR)
+        try:
+            state.set_stage(rdir, "error", stop.message, EXIT_ERROR)
+            _record_history(state, EXIT_ERROR)
+        except OSError as write_exc:  # the state file itself is what cannot be written
+            note = "the state file could not be updated either (%s); `wait` will report the run as dead" % write_exc
+            log.detail(note)
+            print("ERROR: " + note)
         return EXIT_ERROR
 
 

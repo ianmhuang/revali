@@ -273,5 +273,58 @@ class ResumeAtValidation(RepoCase):
         self.assertEqual(State.load(self.rdir()).validations, [])
 
 
+class ConfiguredWindow(RepoCase):
+    """[paths] write_retry_s from the layered config of the repository that holds the file."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("revali.toml", self.read("revali.toml") + "\n[paths]\nwrite_retry_s = 0.05\n")
+        self.commit_all("shorten the state write window")
+
+    @staticmethod
+    def _deny_state_json(src, dst):
+        if os.path.basename(dst) == "state.json":
+            raise PermissionError(13, "Access is denied")
+        return _REAL_REPLACE(src, dst)
+
+    def test_project_config_sets_the_window(self):
+        started = time.monotonic()
+        with mock.patch("revali.state.os.replace", side_effect=self._deny_state_json):
+            with self.assertRaises(PermissionError):
+                State(branch="feature/mul", stage="review").save(self.rdir())
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 0.05)
+        self.assertLess(elapsed, 1.0)  # the 2.0 s default would still be retrying
+        # the same write outside any repository keeps the default
+        from revali.config import load_defaults
+        outside = tempfile.mkdtemp(prefix="revali outside ")
+        from tests.helpers import rmtree_force
+        self.addCleanup(rmtree_force, outside)
+        started = time.monotonic()
+        with mock.patch("revali.state.os.replace", side_effect=self._deny_state_json):
+            with self.assertRaises(PermissionError):
+                write_json_atomic(os.path.join(outside, "state.json"), {"a": 1})
+        self.assertGreaterEqual(time.monotonic() - started, load_defaults()["paths"]["write_retry_s"])
+
+    def test_state_write_failure_in_the_crash_handler_is_contained(self):
+        self.claude(claude_entry())
+        err = io.StringIO()
+        with mock.patch("revali.state.os.replace", side_effect=self._deny_state_json):
+            with contextlib.redirect_stderr(err):
+                code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("ERROR: the run stopped at stage", out)
+        self.assertIn("ERROR: the state file could not be updated either", out)
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))
+        self.assertIn("PermissionError", err.getvalue())
+        # nothing was recorded, so the run reads as dead
+        self.assertIsNone(State.load(self.rdir()))
+        with open(os.path.join(self.rdir(), "logs", "revali.log"), "r", encoding="utf-8") as fh:
+            self.assertIn("could not be updated", fh.read())
+
+
+_REAL_REPLACE = os.replace
+
+
 if __name__ == "__main__":
     unittest.main()

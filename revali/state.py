@@ -99,10 +99,20 @@ class State:
         self.save(rdir)
 
 
-def write_retry_s() -> float:
-    """[paths] write_retry_s from defaults.toml (imported lazily: config does not know state)."""
-    from revali.config import load_defaults
-    return float(load_defaults()["paths"]["write_retry_s"])
+def write_retry_s(path: str) -> float:
+    """[paths] write_retry_s for the repository that holds `path`: the layered config of the
+    repository whose `.git` entry is found walking up from the file (so the user and project
+    files can change it), the defaults.toml value for a file outside any repository. Imported
+    lazily: config does not know state."""
+    from revali.config import load_defaults, paths_for
+    directory = os.path.dirname(os.path.abspath(path))
+    while True:
+        if os.path.exists(os.path.join(directory, ".git")):
+            return float(paths_for(directory).write_retry_s)
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return float(load_defaults()["paths"]["write_retry_s"])
+        directory = parent
 
 
 def write_json_atomic(path: str, data, retry_s: Optional[float] = None) -> None:
@@ -116,7 +126,7 @@ def write_json_atomic(path: str, data, retry_s: Optional[float] = None) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
             fh.write("\n")
-        deadline = time.monotonic() + (write_retry_s() if retry_s is None else retry_s)
+        deadline = time.monotonic() + (write_retry_s(path) if retry_s is None else retry_s)
         pause = 0.02
         while True:
             try:

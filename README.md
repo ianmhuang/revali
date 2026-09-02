@@ -130,7 +130,8 @@ without a result` and returns 1, and `status` says the same after its
 can: if the last reviewer round was APPROVE, no validation is recorded for it,
 and HEAD is still the commit that round left (the reviewer's test commit),
 the run skips the reviewer and goes to validation, so the review is not paid
-twice. Any other state gets a normal new round.
+twice. The rule keys on that commit: amend or rebase it and the next run is a
+normal new round.
 
 ## Configuration
 
