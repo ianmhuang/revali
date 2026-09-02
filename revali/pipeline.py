@@ -550,7 +550,18 @@ def cmd_stop(args) -> int:
         return EXIT_ERROR
     pid = lock_owner_alive(rdir)
     if not pid:
-        release_lock(rdir)
+        release_lock(rdir)  # stale when present: nobody alive owns it
+        state = State.load(rdir)
+        if state is not None and run_died(state):
+            # The process is gone and nothing recorded a result: close the episode so `wait`
+            # and `status` stop reporting a death. Only the outcome fields change; what the
+            # next run needs (reviewer_running, pending files, rounds, head_sha) stays.
+            died_at = state.stage
+            state.set_stage(rdir, "stopped",
+                            "found dead at stage '%s' with no result recorded; marked stopped by `revali stop`"
+                            % died_at, EXIT_ERROR)
+            print("no live process; the run found dead at stage '%s' is now recorded as stopped" % died_at)
+            return EXIT_OK
         print("no run in progress")
         return EXIT_OK
     kill_tree(pid)

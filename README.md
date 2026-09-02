@@ -126,7 +126,11 @@ down, an unexpected error) is reported as such: an unexpected error is
 recorded as stage `error` with exit 1 and the traceback in `logs/run.log`;
 when nothing could record anything, `wait` prints `died at stage '<stage>'
 without a result` and returns 1, and `status` says the same after its
-`stage:` line. The next `run` continues where the last one stopped when it
+`stage:` line. `revali stop` acknowledges such a run: with no live process
+and no result recorded it sets stage `stopped` (exit 1) and removes the
+stale lock, after which `wait` and `status` report a stopped run; a state
+that already holds a result is left alone (`no run in progress`). The next
+`run` continues where the last one stopped when it
 can: if the last reviewer round was APPROVE, no validation is recorded for it,
 and HEAD is still the commit that round left (the reviewer's test commit),
 the run skips the reviewer and goes to validation, so the review is not paid
