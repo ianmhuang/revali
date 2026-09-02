@@ -479,6 +479,9 @@ def cmd_reset(args) -> int:
         print("ERROR: a run is in progress; `revali stop` first")
         return EXIT_ERROR
     path = State.path(rdir)
+    state = State.load(rdir)
+    if state is not None and (state.pending_test_files or state.reviewer_running):
+        _reset_test_dir(state, rdir)
     if os.path.isfile(path):
         os.unlink(path)
         print("state removed: %s (review files kept)" % path)
@@ -486,6 +489,26 @@ def cmd_reset(args) -> int:
         print("no state to remove")
     release_lock(rdir)
     return EXIT_OK
+
+
+def _reset_test_dir(state: State, rdir: str) -> None:
+    """The reviewer's uncommitted test files would outlive the state as a dirty tree the next
+    run refuses, so `reset` disposes of them the way the run after an interrupted round does:
+    untracked drafts deleted, a modified tracked file of the reviewer's own restored from HEAD.
+    Without a usable project (config, change.md) the paths are printed for the author instead."""
+    from revali import review
+    cwd = os.getcwd()
+    try:
+        ctx = locate(cwd)
+    except Stop as stop:
+        pending = state.pending_test_files or ["(unknown: the interrupted session's files under test_dir)"]
+        print("could not clean up the reviewer's uncommitted test files (%s); delete them by hand "
+              "before the next run:\n  %s" % (stop.message.splitlines()[0], "\n  ".join(pending)))
+        return
+    log = RunLog(rdir, logs_dir=paths_for(gitops.repo_root(cwd)).logs_dir)
+    review.discard_round_leftovers(ctx, state, log, "the reviewer", stage="reset")
+    if state.pending_test_files:
+        print("delete by hand before the next run: %s" % ", ".join(state.pending_test_files))
 
 
 def cmd_clean(args) -> int:

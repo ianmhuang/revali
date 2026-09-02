@@ -5,7 +5,7 @@ import json
 import os
 import string
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from revali import EXIT_ERROR
 from revali import engines, gitops, models
@@ -313,15 +313,18 @@ def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt:
 
 
 def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str = "the reviewer",
-                             stage: str = "review") -> List[str]:
+                             stage: str = "review") -> Tuple[List[str], List[str]]:
     """Delete untracked files matching test_file_pattern under test_dir after a review round
     stopped before its tests were committed: they are half-written and would make the next
     run refuse a dirty tree. This is the only deletion inside test_dir revali ever performs.
     `left_by` names the culprit in the log line ("the reviewer", "the interrupted run");
-    `stage` is the log label, `run` when the cleanup happens before preflight's tree check."""
+    `stage` is the log label, `run` when the cleanup happens before preflight's tree check.
+    Returns (removed, stuck): the paths deleted, and those the OS refused to delete (an open
+    file on Windows), which the caller keeps in the tolerated list."""
     pattern = test_pattern_glob(ctx)
     removed = []
     stuck = []
+    reasons = []
     for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + '/',)):
         code, path = entry.split(" ", 1)
         path = path.replace("\\", "/")
@@ -331,23 +334,27 @@ def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str =
                 os.remove(os.path.join(ctx.repo_root, path))
                 removed.append(path)
             except OSError as exc:
-                stuck.append("%s (%s)" % (path, exc))
+                stuck.append(path)
+                reasons.append("%s (%s)" % (path, exc))
     if removed and log:
         log.stage(stage, "removed %d unfinished test file(s) %s left behind: %s"
                   % (len(removed), left_by, ", ".join(removed)))
     if stuck and log:
         log.stage(stage, "could not remove %d unfinished test file(s); delete them by hand: %s"
-                  % (len(stuck), ", ".join(stuck)))
-    return removed
+                  % (len(stuck), ", ".join(reasons)))
+    return removed, stuck
 
 
 # ---- checks after the reviewer --------------------------------------------
 
-def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage: str = "review") -> None:
+def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage: str = "review",
+                       keep: Sequence[str] = ()) -> None:
     """Forget a NEEDS_INFO round's pending files once a round that was meant to commit them
     stopped: the untracked ones are gone with discard_unfinished_tests, and a tracked one the
     reviewer had modified (its own file from an earlier round) goes back to HEAD, so the next
-    run does not refuse a file the author was told to leave alone."""
+    run does not refuse a file the author was told to leave alone. `keep` lists the files
+    the cleanup could not delete: they stay in (or join) the list, so the next run tolerates
+    them and hands them to the reviewer instead of refusing the tree."""
     restored = []
     for path in state.pending_test_files:
         if path in tracked_test_files(ctx) and os.path.exists(os.path.join(ctx.repo_root, path)):
@@ -356,7 +363,22 @@ def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage:
     if restored and log:
         log.stage(stage, "restored %d pending test file(s) of the reviewer's own from HEAD: %s"
                   % (len(restored), ", ".join(restored)))
-    state.pending_test_files = []
+    kept = sorted(set(p.replace("\\", "/") for p in keep))
+    if kept and log:
+        log.stage(stage, "the next run will tolerate the %d file(s) it could not remove and list them "
+                         "for the reviewer to update or delete: %s" % (len(kept), ", ".join(kept)))
+    # in place: the run passed this very list to preflight as `tolerate` before the cleanup hook ran
+    state.pending_test_files[:] = kept
+
+
+def discard_round_leftovers(ctx: Context, state: State, log: Optional[RunLog], left_by: str,
+                            stage: str) -> None:
+    """Everything a round that did not reach its commit leaves behind, in one call: delete
+    the untracked drafts, restore a modified tracked pending file, keep the undeletable ones
+    tolerated. Shared by the stop path of a round, the cleanup before the next run, and
+    `revali reset`."""
+    _, stuck = discard_unfinished_tests(ctx, log, left_by, stage=stage)
+    drop_pending_tests(ctx, state, log, stage=stage, keep=stuck)
 
 
 def interruption_cleanup(state: State, rdir: str, log: Optional[RunLog]):
@@ -368,8 +390,7 @@ def interruption_cleanup(state: State, rdir: str, log: Optional[RunLog]):
         return None
 
     def hook(ctx: Context) -> None:
-        discard_unfinished_tests(ctx, log, "the interrupted run", stage="run")
-        drop_pending_tests(ctx, state, log, stage="run")
+        discard_round_leftovers(ctx, state, log, "the interrupted run", stage="run")
         state.reviewer_running = False
         state.save(rdir)
     return hook
@@ -736,8 +757,7 @@ def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> R
     try:
         return _run_round(ctx, state, rdir, log)
     except Stop:
-        discard_unfinished_tests(ctx, log)
-        drop_pending_tests(ctx, state, log)
+        discard_round_leftovers(ctx, state, log, "the reviewer", stage="review")
         state.reviewer_running = False
         state.save(rdir)
         raise

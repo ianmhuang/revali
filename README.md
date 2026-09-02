@@ -296,7 +296,15 @@ stated.
   ended with a verdict never triggers it (a NEEDS_INFO round's uncommitted
   files are pending, not leftovers; they go only when the round after it
   is interrupted, and a pending file that is a tracked file of the
-  reviewer's own is then restored from HEAD instead), a finished
+  reviewer's own is then restored from HEAD instead). A leftover that
+  cannot be deleted (a file another program holds open) stays in the
+  tolerated list: the next run accepts it in the tree and lists it for the
+  reviewer to update or delete, the log names it for you. `revali reset`
+  runs the same cleanup before it drops the state, since the drafts would
+  otherwise outlive the list that tolerates them; with no pending files
+  and no interrupted round it touches nothing under `test_dir`, and when
+  the project does not load it prints the paths for you to delete by hand.
+  A finished
   `run --dry-run` is not an interrupted run, and neither `revali preflight`
   nor `run --dry-run` deletes.
   This is the only deletion inside `test_dir` revali performs, so keep
