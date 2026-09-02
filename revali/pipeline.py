@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import time
+import traceback
 from typing import Optional
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION
@@ -13,9 +14,8 @@ from revali import gitops
 from revali.config import history_path, load_user_config, paths_for, ConfigError
 from revali.preflight import Stop, locate, preflight
 from revali.procs import kill_tree, pid_alive, python_exe, spawn_detached
-from revali.state import (LockHeld, RunLog, State, TERMINAL_STAGES, acquire_lock,
-                          append_history, lock_owner_alive, read_lock, release_lock,
-                          review_dir, safe_branch)
+from revali.state import (LockHeld, RunLog, State, acquire_lock, append_history, lock_owner_alive,
+                          read_lock, release_lock, review_dir, run_died, safe_branch)
 
 
 def _interrupted(state: State) -> bool:
@@ -43,6 +43,10 @@ def _rdir_for(cwd: str, branch: str = "") -> Optional[str]:
     except gitops.GitError:
         return None
     return review_dir(root, branch, paths_for(root).state_dir)
+
+
+def _run_log_path(rdir: str) -> str:
+    return os.path.join(rdir, paths_for(gitops.repo_root(os.getcwd())).logs_dir, "run.log")
 
 
 def _print_stop(stop: Stop) -> None:
@@ -109,19 +113,48 @@ def _run_foreground(args) -> int:
 
 
 def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
+    started = False  # the "no result yet" mark is on disk
     try:
+        # No result yet: with the process gone, `wait` / `status` read -1 as "died" (see
+        # state.run_died) instead of the previous run's exit code.
+        state.last_exit = -1
+        state.save(rdir)
+        started = True
         return _stages(args, cwd, rdir, state, log)
     except ConfigError as exc:
         stop = Stop(EXIT_ERROR, "configuration: " + "; ".join(exc.problems))
         _print_stop(stop)
-        state.set_stage(rdir, "error", stop.message, EXIT_ERROR)
-        _record_history(state, EXIT_ERROR)
-        return EXIT_ERROR
+        return _record_stop(state, rdir, log, "error", stop, started)
     except Stop as stop:
         _print_stop(stop)
-        state.set_stage(rdir, STAGE_FOR_EXIT.get(stop.exit_code, "error"), stop.message, stop.exit_code)
+        return _record_stop(state, rdir, log, STAGE_FOR_EXIT.get(stop.exit_code, "error"), stop, started)
+    except Exception as exc:  # a bug or an OS error: record it so the next run can continue
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr, end="")  # the detached child's stderr is run.log
+        for line in tb.rstrip("\n").split("\n"):
+            log.detail(line)
+        # until _stages records its first stage, state.stage is still the previous run's
+        where = "last recorded stage '%s'" % state.stage if started else "before its first stage"
+        stop = Stop(EXIT_ERROR, "the run stopped with %s: %s (%s)" % (type(exc).__name__, exc, where))
+        _print_stop(stop)
+        return _record_stop(state, rdir, log, "error", stop, started)
+
+
+def _record_stop(state: State, rdir: str, log: RunLog, stage: str, stop: Stop, started: bool) -> int:
+    """Persist a run's outcome. When the state file itself cannot be written, say what `wait`
+    will show instead of escaping with a traceback; the exit code stands either way."""
+    try:
+        state.set_stage(rdir, stage, stop.message, stop.exit_code)
         _record_history(state, stop.exit_code)
-        return stop.exit_code
+    except OSError as exc:
+        if started:
+            shows = "`wait` and `status` will report the run as dead"
+        else:
+            shows = "`wait` and `status` still show the previous run's result"
+        note = "the state file could not be updated either (%s); %s; see run.log" % (exc, shows)
+        log.detail(note)
+        print("ERROR: " + note)
+    return stop.exit_code
 
 
 def _record_history(state: State, exit_code: int) -> None:
@@ -165,6 +198,25 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
                                                        os.path.join(rdir, "review-%d.md" % len(state.rounds))))
 
 
+def _approved_round_awaiting_validation(ctx, state: State) -> int:
+    """The round whose APPROVE was recorded but never validated (the previous run died in
+    between), when HEAD is still where that round left it: the reviewer's test commit, or
+    the reviewed HEAD when it committed none. 0 otherwise. Called before the state takes the
+    new HEAD."""
+    from revali.review import APPROVE
+    if not state.rounds:
+        return 0
+    last = state.rounds[-1]
+    round_no = len(state.rounds)
+    if last.get("verdict") != APPROVE:
+        return 0
+    if any(v.get("round") == round_no for v in state.validations):
+        return 0
+    if ctx.head_sha != (last.get("test_commit") or last.get("head_sha")):
+        return 0
+    return round_no
+
+
 def _model_label(chosen) -> str:
     return chosen.model + (" (%s)" % chosen.reason if chosen.reason else "")
 
@@ -183,6 +235,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log, baseline=baseline_hook,
                     before_tree=cleanup_hook, tolerate=state.pending_test_files)
     _rerun_bookkeeping(ctx, state, rdir, log)
+    resume_round = _approved_round_awaiting_validation(ctx, state)
     state.branch, state.base = ctx.branch, ctx.base
     # lowercased like gitops.remote_repo, so stats groups both sources under one row
     state.repo = ("%s/%s" % (ctx.repo.owner, ctx.repo.name)).lower() if ctx.repo else ""
@@ -201,6 +254,13 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     state.set_stage(rdir, "pr", "pushing and opening the PR")
     prstage.ensure_pr(ctx, state, rdir, log)
     state.head_sha = ctx.head_sha
+
+    if resume_round:
+        log.stage("run", "round %d was approved at %s but the previous run stopped before validation; "
+                         "continuing there without a new review" % (resume_round, ctx.head_sha[:10]))
+        record = state.rounds[-1]
+        return _validate_and_finish(ctx, state, rdir, log, resume_round, record.get("data", {}),
+                                    os.path.join(rdir, "review-%d.md" % resume_round))
 
     state.set_stage(rdir, "review", "reviewer round %d" % (len(state.rounds) + 1))
     outcome = review.run_round(ctx, state, rdir, log)
@@ -248,7 +308,19 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
                  os.path.join(rdir, "response-%d.md" % outcome.round_no), reasons, others))
         return EXIT_ACTION
 
-    state.set_stage(rdir, "validate", "review approved in round %d; validating" % outcome.round_no)
+    return _validate_and_finish(ctx, state, rdir, log, outcome.round_no, outcome.data, outcome.review_path)
+
+
+def _validate_and_finish(ctx, state: State, rdir: str, log: RunLog, round_no: int, data: dict,
+                         review_path: str) -> int:
+    """After an APPROVE (this run's, or one a previous run recorded and never validated)."""
+    from revali import pr as prstage
+    from revali import review
+    from revali import validate
+
+    counts = review.counts_label(data, review_path)
+    others = review.non_blocking_note(data, round_no, review_path, rdir)
+    state.set_stage(rdir, "validate", "review approved in round %d; validating" % round_no)
     prstage.update_body(ctx, state, rdir, log)
     vout = validate.run_validation(ctx, state, rdir, log)
     section = vout.section_md
@@ -264,7 +336,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         _record_history(state, EXIT_ACTION)
         print("ACTION NEEDED: %s\nFix (or correct the test if the diagnosis says the test is wrong, and say so "
               "in %s), commit, run again.%s"
-              % (summary, os.path.join(rdir, "response-%d.md" % outcome.round_no), others))
+              % (summary, os.path.join(rdir, "response-%d.md" % round_no), others))
         return EXIT_ACTION
 
     state.set_stage(rdir, "ready_to_merge", "validation %d passed" % vout.number, EXIT_OK)
@@ -331,15 +403,12 @@ def cmd_wait(args) -> int:
             if state is None:
                 print("no revali run recorded for this branch")
                 return EXIT_ERROR
-            if state.stage in TERMINAL_STAGES:
-                print("%s: %s" % (state.stage, state.message))
-                return state.last_exit if state.last_exit >= 0 else EXIT_ERROR
-            lock = read_lock(rdir)
-            if lock and not pid_alive(int(lock.get("pid", 0))):
+            if run_died(state):
+                lock = read_lock(rdir)  # stale when present: nobody alive owns it
                 release_lock(rdir)
-                print("error: the run (pid %s) died at stage '%s' without a result; see %s"
-                      % (lock.get("pid"), state.stage,
-                         os.path.join(rdir, paths_for(gitops.repo_root(os.getcwd())).logs_dir, "run.log")))
+                print("error: the run%s died at stage '%s' without a result; see %s"
+                      % (" (pid %s)" % lock.get("pid") if lock else "", state.stage,
+                         _run_log_path(rdir)))
                 return EXIT_ERROR
             print("%s: %s" % (state.stage, state.message))
             return state.last_exit if state.last_exit >= 0 else EXIT_ERROR
@@ -369,6 +438,9 @@ def cmd_status(args) -> int:
         print("state: none")
     else:
         print("stage: %s" % state.stage)
+        if not pid and run_died(state):
+            print("running: no; the last run stopped at stage '%s' without a result (see %s)"
+                  % (state.stage, _run_log_path(rdir)))
         if state.message:
             print("message: %s" % state.message)
         print("round: %d, fixes: %d, cost: $%.2f" % (state.round, state.fixes, state.cost_usd))

@@ -99,7 +99,26 @@ class State:
         self.save(rdir)
 
 
-def write_json_atomic(path: str, data) -> None:
+def write_retry_s(path: str) -> float:
+    """[paths] write_retry_s for the repository that holds `path`: the layered config of the
+    repository whose `.git` entry is found walking up from the file (so the user and project
+    files can change it), the defaults.toml value for a file outside any repository. Imported
+    lazily: config does not know state."""
+    from revali.config import load_defaults, paths_for
+    directory = os.path.dirname(os.path.abspath(path))
+    while True:
+        if os.path.exists(os.path.join(directory, ".git")):
+            return float(paths_for(directory).write_retry_s)
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return float(load_defaults()["paths"]["write_retry_s"])
+        directory = parent
+
+
+def write_json_atomic(path: str, data, retry_s: Optional[float] = None) -> None:
+    """Write to a temp file in the same directory, then rename over `path`. On Windows the
+    rename fails with PermissionError while another process (`wait`, `status`) has the file
+    open for reading, so it is retried for up to `retry_s` seconds; other errors are not."""
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=directory)
@@ -107,11 +126,35 @@ def write_json_atomic(path: str, data) -> None:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
             fh.write("\n")
-        os.replace(tmp, path)
+        deadline = time.monotonic() + (write_retry_s(path) if retry_s is None else retry_s)
+        pause = 0.02
+        while True:
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if time.monotonic() >= deadline:
+                    raise
+            time.sleep(pause)
+            pause = min(pause * 2, 0.2)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+def run_died(state: "State") -> bool:
+    """With no live process: the state file holds no result. A run writes `last_exit` -1 when
+    it starts and every result (a terminal stage, a finished `run --dry-run`, which leaves
+    stage `preflight`) writes an exit code >= 0, so -1 means a run began and never finished,
+    whatever stage it last recorded (during preflight that is still the previous run's).
+    A state file from before that reset counts as dead at any non-terminal stage but the
+    dry run's."""
+    if state.last_exit < 0:
+        return True
+    if state.stage in TERMINAL_STAGES:
+        return False
+    return state.stage != "preflight"
 
 
 def write_text(path: str, text: str) -> None:
