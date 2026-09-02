@@ -1,7 +1,10 @@
-"""Review tests for fix/rebase-test-ownership, AC-4, AC-5 and AC-6: a fresh state (`revali
-reset`, or a state directory that never saw the branch) on a branch that already carries
-reviewer `Revali-Round` commits recovers the reviewer's files on its first round; a file
-deleted since is not recovered; README states the ownership rule."""
+"""Review tests for fix/rebase-test-ownership, AC-4, AC-5, AC-6 and AC-7: a fresh state
+(`revali reset`, or a state directory that never saw the branch) on a branch that already
+carries reviewer `Revali-Round` commits recovers the reviewer's files on its first round; a
+file deleted since is not recovered; README states the ownership rule; a state whose rounds
+survived but whose lists forgot a trailer file heals on the next run without a rewrite, and a
+run where the state already holds everything logs nothing about it."""
+import json
 import os
 import unittest
 
@@ -124,6 +127,79 @@ class BranchWithoutReviewerCommits(FreshStateCase):
         self.assertEqual(len(state.test_commits), 1)
         body = git(["show", "-s", "--format=%B", state.test_commits[0]], self.repo)
         self.assertIn("Revali-Round: 1", body)                 # what a later recovery reads
+
+
+class StateThatForgotTheFiles(FreshStateCase):
+    """AC-7: the recovery runs on every run, not only after a rewrite or on a fresh state."""
+
+    def edit_state(self, **fields):
+        path = State.path(self.rdir())
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            data = json.load(fh)
+        data.update(fields)
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            json.dump(data, fh)
+
+    def fix(self):
+        self.write("src/calc.py", self.read("src/calc.py") + "\n# fix\n")
+        self.commit_all("fix negatives")
+
+    def test_lost_test_files_are_listed_again_without_a_rewrite(self):
+        self.round_one()
+        self.edit_state(test_files=[])                         # written before the rule existed
+        self.fix()
+        entry = claude_entry(approve_response())
+        entry["write_files"] = {MUL: UPDATED}
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("starts over", out)                                           # AC-7: no rewrite
+        recovered = [line for line in out.splitlines() if "recovered" in line]
+        self.assertEqual(len(recovered), 1, out)                                       # AC-7: listed again
+        self.assertIn(MUL, recovered[0])
+        self.assertIn(self.original_sha[:10], recovered[0])
+        prompts = self.prompts()
+        self.assertEqual(len(prompts), 1, "the reviewer was sent back")
+        self.assertIn(MUL, listed_after(prompts[0], EARLIER))
+        self.assertNotIn(MUL, listed_after(prompts[0], NOT_YOURS))
+        self.assertEqual(self.read(MUL), UPDATED)                                      # not restored
+        state = State.load(self.rdir())
+        self.assertEqual(len(state.rounds), 2)                                         # rounds intact
+        self.assertEqual(state.test_files, [MUL])
+        self.assertEqual(state.test_commits[0], self.original_sha)
+        self.assertEqual(len(state.test_commits), 2)
+
+    def test_lost_test_commits_are_recovered_without_a_rewrite(self):
+        """Only the commit list forgot the SHA; the state still names the file. The commit
+        comes back in front and the log stays quiet about files that were never missing."""
+        self.round_one()
+        self.edit_state(test_commits=[])
+        self.fix()
+        self.claude(claude_entry(approve_response(), write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("starts over", out)
+        state = State.load(self.rdir())
+        self.assertEqual(state.test_commits, [self.original_sha])                      # AC-7: healed
+        self.assertEqual(state.test_files, [MUL])
+        self.assertIn(MUL, listed_after(self.prompts()[0], EARLIER))
+
+    def test_complete_state_logs_nothing_on_an_ordinary_round(self):
+        self.round_one()
+        before = State.load(self.rdir())
+        self.fix()
+        self.claude(claude_entry(approve_response(), write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("recovered", out)                                             # AC-7: quiet
+        self.assertNotIn("Revali-Round", out)
+        self.assertNotIn("trailer", out)
+        self.assertNotIn("starts over", out)
+        state = State.load(self.rdir())
+        self.assertEqual(state.test_commits, before.test_commits)                      # nothing reordered
+        self.assertEqual(state.test_files, before.test_files)
+        self.assertEqual(len(state.rounds), 2)
+        self.assertIn(MUL, listed_after(self.prompts()[0], EARLIER))
 
 
 class ReadmeStatesTheOwnershipRule(unittest.TestCase):
