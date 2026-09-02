@@ -353,7 +353,7 @@ def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str =
 # ---- checks after the reviewer --------------------------------------------
 
 def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage: str = "review",
-                       keep: Sequence[str] = ()) -> None:
+                       keep: Sequence[str] = (), tolerated_next_run: bool = True) -> None:
     """Forget a NEEDS_INFO round's pending files once a round that was meant to commit them
     stopped: the untracked ones are gone with discard_unfinished_tests, and a tracked one the
     reviewer had modified (its own file from an earlier round) goes back to HEAD, so the next
@@ -369,7 +369,7 @@ def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage:
         log.stage(stage, "restored %d pending test file(s) of the reviewer's own from HEAD: %s"
                   % (len(restored), ", ".join(restored)))
     kept = sorted(set(p.replace("\\", "/") for p in keep))
-    if kept and log:
+    if kept and log and tolerated_next_run:
         log.stage(stage, "the next run will tolerate the %d file(s) it could not remove and list them "
                          "for the reviewer to update or delete: %s" % (len(kept), ", ".join(kept)))
     # in place: the run passed this very list to preflight as `tolerate` before the cleanup hook ran
@@ -377,15 +377,17 @@ def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage:
 
 
 def discard_round_leftovers(ctx: Context, state: State, log: Optional[RunLog], left_by: str,
-                            stage: str, only: Optional[Sequence[str]] = None) -> None:
+                            stage: str, only: Optional[Sequence[str]] = None,
+                            tolerated_next_run: bool = True) -> None:
     """Everything a round that did not reach its commit leaves behind, in one call: delete
     the untracked drafts, restore a modified tracked pending file, keep the undeletable ones
     tolerated. Shared by the stop path of a round, the cleanup before the next run, and
     `revali reset`. `only` limits the deletion to the paths named (see
     discard_unfinished_tests); an interrupted session's files are not known, so those callers
-    leave it None."""
+    leave it None. `tolerated_next_run` False skips the "next run will tolerate" line: `reset`
+    drops the state that would carry the list and gives its own advice."""
     _, stuck = discard_unfinished_tests(ctx, log, left_by, stage=stage, only=only)
-    drop_pending_tests(ctx, state, log, stage=stage, keep=stuck)
+    drop_pending_tests(ctx, state, log, stage=stage, keep=stuck, tolerated_next_run=tolerated_next_run)
 
 
 def interruption_cleanup(state: State, rdir: str, log: Optional[RunLog]):

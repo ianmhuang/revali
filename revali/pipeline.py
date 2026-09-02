@@ -512,7 +512,8 @@ def _reset_test_dir(state: State, rdir: str) -> None:
         # an interrupted session's files are not known, so that case sweeps the whole pattern;
         # otherwise only the pending list is the reviewer's, an author's own draft stays
         only = None if state.reviewer_running else pending
-        review.discard_round_leftovers(ctx, state, log, "the reviewer", stage="reset", only=only)
+        review.discard_round_leftovers(ctx, state, log, "the reviewer", stage="reset", only=only,
+                                       tolerated_next_run=False)
     except (Stop, gitops.GitError) as exc:
         message = exc.message if isinstance(exc, Stop) else str(exc)
         by_hand(message.splitlines()[0], pending)

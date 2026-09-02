@@ -229,6 +229,21 @@ class UndeletableLeftoverStaysTolerated(PendingCase):
         self.assertEqual(self.status_of_tests(), "")
 
 
+class ResetNamesAStuckFileWithoutPromisingTolerance(PendingCase):
+    def test_reset_says_by_hand_and_not_next_run_tolerates(self):
+        """Round 2 F1: the state that would tolerate the file is deleted a moment later."""
+        self.needs_info_round()
+        with mock.patch("os.remove", failing_remove(PENDING)):
+            code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertTrue(self.exists(PENDING))
+        self.assertIn("could not remove", out)                                             # AC-5: named
+        self.assertIn("by hand", out)
+        self.assertIn(PENDING, out.split("by hand", 1)[1])
+        self.assertNotIn("tolerate", out)                                                  # AC-5: no false promise
+        self.assertIsNone(self.state())
+
+
 class ReadmeDescribesIt(unittest.TestCase):
     def test_reset_and_stuck_files_are_documented(self):
         with open(os.path.join(os.path.dirname(HERE), "README.md"), "r", encoding="utf-8") as fh:
