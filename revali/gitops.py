@@ -167,6 +167,28 @@ def head_contains(sha: str, cwd: str) -> bool:
     return is_ancestor(sha, "HEAD", cwd)
 
 
+def trailer_commits(base: str, head: str, key: str, cwd: str) -> List[Tuple[str, str]]:
+    """(sha, value) of the commits in base..head whose message carries the trailer `key`,
+    oldest first; several values of one trailer are joined with commas. Needs git 2.22
+    (`%(trailers:key=...)`)."""
+    res = git_ok(["log", "--reverse", "--format=%H%x1f%(trailers:key=" + key + ",valueonly,separator=%x2c)",
+                  "%s..%s" % (base, head)], cwd)
+    out = []
+    for line in res.stdout.splitlines():
+        sha, _, value = line.partition("\x1f")
+        if sha.strip() and value.strip():
+            out.append((sha.strip(), value.strip()))
+    return out
+
+
+def commit_paths(sha: str, cwd: str, diff_filter: str = "AM") -> List[str]:
+    """Paths one commit touches, filtered like `git diff --diff-filter` (default: added or
+    modified), forward slashes, NUL-separated so a path with spaces arrives unquoted."""
+    res = git_ok(["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--root",
+                  "--diff-filter=" + diff_filter, sha], cwd)
+    return [p.replace("\\", "/") for p in res.stdout.split("\0") if p]
+
+
 def push_branch(branch: str, cwd: str, log: Logger = None, force: bool = False) -> Result:
     args = ["push", "--quiet", "-u"]
     if force:

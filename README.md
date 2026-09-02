@@ -255,9 +255,17 @@ stated.
 
 - appends the state directory (`.revali/`) to `.gitignore` if missing
 - `git push -u origin <branch>` and `gh pr create --draft`
-- commits the reviewer's test files into `test_dir`, with a
-  `Co-Authored-By: Claude` trailer; only new files and the files the
-  reviewer wrote in an earlier round of the same pipeline. Any other
+- commits the reviewer's test files into `test_dir`, with
+  `Co-Authored-By: Claude` and `Revali-Round: <n>` trailers; only new files
+  and the files the reviewer wrote in an earlier round. The
+  `Revali-Round` trailer is what marks a file as the reviewer's own: on every
+  run the commits between the base and HEAD that carry it, and the files
+  under `test_dir` they added or modified, are read back into the state, so
+  a rebase or amend that gives those commits new SHAs (the review then
+  starts over from round 1) keeps them the reviewer's. A rewrite that
+  drops the trailer, such as squashing the reviewer's commit into your
+  own, turns those files into existing files the reviewer must not
+  modify. Any other
   tracked file under `test_dir` the reviewer modified or deleted is
   restored from HEAD (`git checkout HEAD -- <path>`, index and working
   tree) before the commit, the reviewer is sent back once
