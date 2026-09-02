@@ -180,10 +180,12 @@ class ConfiguredWindow(RepoCase):
         elapsed = self.blocked_save_window()
         self.assertGreaterEqual(elapsed, self.default)                                # nothing set: defaults.toml
         self.assertLess(elapsed, self.default + 0.5)
-        self.user_config("[paths]\nwrite_retry_s = 0.3\n")
+        # 0.35 is off the 0.02/0.04/0.08/0.16/0.2 pause grid: a window equal to a partial sum
+        # (0.3) lands a rounding error under itself on the fake clock (validation 1)
+        self.user_config("[paths]\nwrite_retry_s = 0.35\n")
         elapsed = self.blocked_save_window()
-        self.assertGreaterEqual(elapsed, 0.3)                                         # AC-1 window, from ~/.revali/config.toml
-        self.assertLess(elapsed, 0.3 + 0.5)
+        self.assertGreaterEqual(elapsed, 0.35)                                        # AC-1 window, from ~/.revali/config.toml
+        self.assertLess(elapsed, 0.35 + 0.5)
         self.assertLess(elapsed, self.default)                                        # the override took effect
 
     def test_the_project_file_wins_over_the_user_file(self):

@@ -113,38 +113,48 @@ def _run_foreground(args) -> int:
 
 
 def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
+    started = False  # the "no result yet" mark is on disk
     try:
-        # No result yet: `wait` / `status` read -1 as "died" when the process is gone and the
-        # stage is not terminal (see state.run_died), instead of the previous run's exit code.
+        # No result yet: with the process gone, `wait` / `status` read -1 as "died" (see
+        # state.run_died) instead of the previous run's exit code.
         state.last_exit = -1
         state.save(rdir)
+        started = True
         return _stages(args, cwd, rdir, state, log)
     except ConfigError as exc:
         stop = Stop(EXIT_ERROR, "configuration: " + "; ".join(exc.problems))
         _print_stop(stop)
-        state.set_stage(rdir, "error", stop.message, EXIT_ERROR)
-        _record_history(state, EXIT_ERROR)
-        return EXIT_ERROR
+        return _record_stop(state, rdir, log, "error", stop, started)
     except Stop as stop:
         _print_stop(stop)
-        state.set_stage(rdir, STAGE_FOR_EXIT.get(stop.exit_code, "error"), stop.message, stop.exit_code)
-        _record_history(state, stop.exit_code)
-        return stop.exit_code
+        return _record_stop(state, rdir, log, STAGE_FOR_EXIT.get(stop.exit_code, "error"), stop, started)
     except Exception as exc:  # a bug or an OS error: record it so the next run can continue
         tb = traceback.format_exc()
         print(tb, file=sys.stderr, end="")  # the detached child's stderr is run.log
         for line in tb.rstrip("\n").split("\n"):
             log.detail(line)
-        stop = Stop(EXIT_ERROR, "the run stopped at stage '%s' with %s: %s" % (state.stage, type(exc).__name__, exc))
+        # until _stages records its first stage, state.stage is still the previous run's
+        where = "last recorded stage '%s'" % state.stage if started else "before its first stage"
+        stop = Stop(EXIT_ERROR, "the run stopped with %s: %s (%s)" % (type(exc).__name__, exc, where))
         _print_stop(stop)
-        try:
-            state.set_stage(rdir, "error", stop.message, EXIT_ERROR)
-            _record_history(state, EXIT_ERROR)
-        except OSError as write_exc:  # the state file itself is what cannot be written
-            note = "the state file could not be updated either (%s); `wait` will report the run as dead" % write_exc
-            log.detail(note)
-            print("ERROR: " + note)
-        return EXIT_ERROR
+        return _record_stop(state, rdir, log, "error", stop, started)
+
+
+def _record_stop(state: State, rdir: str, log: RunLog, stage: str, stop: Stop, started: bool) -> int:
+    """Persist a run's outcome. When the state file itself cannot be written, say what `wait`
+    will show instead of escaping with a traceback; the exit code stands either way."""
+    try:
+        state.set_stage(rdir, stage, stop.message, stop.exit_code)
+        _record_history(state, stop.exit_code)
+    except OSError as exc:
+        if started:
+            shows = "`wait` and `status` will report the run as dead"
+        else:
+            shows = "`wait` and `status` still show the previous run's result"
+        note = "the state file could not be updated either (%s); %s; see run.log" % (exc, shows)
+        log.detail(note)
+        print("ERROR: " + note)
+    return stop.exit_code
 
 
 def _record_history(state: State, exit_code: int) -> None:

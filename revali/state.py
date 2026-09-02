@@ -144,13 +144,17 @@ def write_json_atomic(path: str, data, retry_s: Optional[float] = None) -> None:
 
 
 def run_died(state: "State") -> bool:
-    """With no live process: the recorded stage has no result. A finished `run --dry-run`
-    leaves stage `preflight` with exit 0 and is the one non-terminal stage that is a result;
-    a run resets `last_exit` to -1 when it starts, so a kill during preflight is not mistaken
-    for it."""
+    """With no live process: the state file holds no result. A run writes `last_exit` -1 when
+    it starts and every result (a terminal stage, a finished `run --dry-run`, which leaves
+    stage `preflight`) writes an exit code >= 0, so -1 means a run began and never finished,
+    whatever stage it last recorded (during preflight that is still the previous run's).
+    A state file from before that reset counts as dead at any non-terminal stage but the
+    dry run's."""
+    if state.last_exit < 0:
+        return True
     if state.stage in TERMINAL_STAGES:
         return False
-    return not (state.stage == "preflight" and state.last_exit >= 0)
+    return state.stage != "preflight"
 
 
 def write_text(path: str, text: str) -> None:

@@ -145,6 +145,43 @@ class DeadRunReporting(RepoCase):
         self.assertEqual(code, EXIT_ERROR)
         self.assertIn("died at stage 'review'", out)
 
+    def test_a_kill_during_preflight_after_a_finished_run_is_a_death(self):
+        # the rerun reset last_exit but died before recording its first stage: the stage on
+        # disk is the previous run's terminal one
+        self._dead_state(stage="needs_action", last_exit=-1)
+        code, out = run_cli(["wait", "--timeout", "1s"])
+        self.assertEqual(code, EXIT_ERROR)
+        self.assertIn("died at stage 'needs_action' without a result", out)
+        code, out = run_cli(["status"])
+        self.assertIn("without a result", out)
+
+    def test_a_stop_error_with_a_blocked_state_file_is_contained(self):
+        # the Stop handler shares the guard: a dirty tree is refused, the refusal cannot be
+        # recorded, the exit code still stands
+        self.write("src/calc.py", self.read("src/calc.py") + "\n# dirty\n")
+        writes = []
+
+        def deny_after_the_first(src, dst):  # the "no result yet" save lands, the refusal's does not
+            if os.path.basename(dst) == "state.json":
+                writes.append(dst)
+                if len(writes) > 1:
+                    raise PermissionError(13, "Access is denied")
+            return _REAL_REPLACE(src, dst)
+
+        err = io.StringIO()
+        with mock.patch("revali.state.os.replace", side_effect=deny_after_the_first):
+            with contextlib.redirect_stderr(err):
+                code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("ERROR: working tree is not clean", out)
+        self.assertIn("ERROR: the state file could not be updated either", out)
+        self.assertIn("will report the run as dead", out)
+        self.assertNotIn("Traceback", err.getvalue())  # the Stop path, not the catch-all
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))
+        code, out = run_cli(["wait", "--timeout", "1s"])
+        self.assertEqual(code, EXIT_ERROR)
+        self.assertIn("died", out)
+
     def test_status_reports_a_dead_run(self):
         self._dead_state()
         code, out = run_cli(["status"])
@@ -281,11 +318,7 @@ class ConfiguredWindow(RepoCase):
         self.write("revali.toml", self.read("revali.toml") + "\n[paths]\nwrite_retry_s = 0.05\n")
         self.commit_all("shorten the state write window")
 
-    @staticmethod
-    def _deny_state_json(src, dst):
-        if os.path.basename(dst) == "state.json":
-            raise PermissionError(13, "Access is denied")
-        return _REAL_REPLACE(src, dst)
+    _deny_state_json = staticmethod(lambda src, dst: _deny_state_json(src, dst))
 
     def test_project_config_sets_the_window(self):
         started = time.monotonic()
@@ -313,8 +346,10 @@ class ConfiguredWindow(RepoCase):
             with contextlib.redirect_stderr(err):
                 code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertIn("ERROR: the run stopped at stage", out)
+        self.assertIn("ERROR: the run stopped with PermissionError", out)
+        self.assertIn("before its first stage", out)  # the initial save is what failed
         self.assertIn("ERROR: the state file could not be updated either", out)
+        self.assertIn("still show the previous run's result", out)
         self.assertFalse(os.path.isfile(lock_path(self.rdir())))
         self.assertIn("PermissionError", err.getvalue())
         # nothing was recorded, so the run reads as dead
@@ -324,6 +359,13 @@ class ConfiguredWindow(RepoCase):
 
 
 _REAL_REPLACE = os.replace
+
+
+def _deny_state_json(src, dst):
+    """os.replace that refuses every state.json and lets other files through."""
+    if os.path.basename(dst) == "state.json":
+        raise PermissionError(13, "Access is denied")
+    return _REAL_REPLACE(src, dst)
 
 
 if __name__ == "__main__":
