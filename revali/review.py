@@ -23,6 +23,7 @@ MANIFEST_PATTERNS = [
     "conanfile.*", "vcpkg.json", "Gemfile", "Gemfile.lock",
 ]
 SHELL_ALLOW = ["git diff", "git log", "git show"]   # read-only git, mapped by the engine
+TRAILER = "Revali-Round"   # on every test commit revali makes; marks the reviewer's files as its own
 LIST_FIELDS = ("questions", "findings", "previous_findings", "scope_mismatch", "dependencies_changed",
                "test_changes", "tests", "not_testable", "suggestions")
 
@@ -155,6 +156,47 @@ def existing_test_names(ctx: Context, state: State) -> List[str]:
     pattern = test_pattern_glob(ctx)
     return sorted(p for p in tracked_test_files(ctx)
                   if gitops.matches_any(p, [pattern]) and p not in state.test_files)
+
+
+def branch_test_commits(ctx: Context) -> List[Tuple[str, List[str]]]:
+    """The reviewer's test commits between the base and HEAD, oldest first: the commits whose
+    message carries the `Revali-Round` trailer (commit_tests writes it), each with the files
+    under test_dir it added or modified that HEAD still tracks. This is how ownership survives
+    a history rewrite, which gives those commits new SHAs; a rewrite that drops the trailer
+    (the author folds the reviewer's commit into their own) drops the ownership with it."""
+    tracked = set(tracked_test_files(ctx))
+    test_dir = ctx.cfg.project.test_dir
+    out = []
+    for sha, _ in gitops.trailer_commits(ctx.base_ref, "HEAD", TRAILER, ctx.repo_root):
+        paths = [p for p in gitops.commit_paths(sha, ctx.repo_root)
+                 if _under_test_dir(p, test_dir) and p in tracked]
+        out.append((sha, sorted(paths)))
+    return out
+
+
+def recover_test_ownership(ctx: Context, state: State, log: Optional[RunLog]) -> Tuple[List[str], List[str]]:
+    """Add the branch's trailer commits and their surviving test files to the state (front of
+    the lists, no duplicates). Runs on every run, so the state heals whatever forgot the files:
+    a rewrite, `revali reset`, a state written before this rule existed. Idempotent; returns
+    (commits, files) found on the branch and logs only what was missing from the state, so a
+    run where nothing changed stays quiet."""
+    found = branch_test_commits(ctx)
+    commits = [sha for sha, _ in found]
+    files = sorted({p for _, paths in found for p in paths})
+    new_commits = [c for c in commits if c not in state.test_commits]
+    new_files = [f for f in files if f not in state.test_files]
+    state.test_commits = commits + [c for c in state.test_commits if c not in commits]
+    state.test_files = files + [f for f in state.test_files if f not in files]
+    if log and new_files:
+        log.stage("run", "recovered the reviewer's %d test file(s) from %d earlier test commit(s) on the "
+                         "branch (%s trailer): %s; commits %s"
+                  % (len(new_files), len(commits), TRAILER, ", ".join(new_files),
+                     ", ".join(c[:10] for c in commits)))
+    elif log and new_commits and not files:
+        log.stage("run", "found %d earlier reviewer test commit(s) on the branch (%s trailer) but none of "
+                         "their test files is still in HEAD: %s"
+                  % (len(commits), TRAILER, ", ".join(c[:10] for c in commits)))
+    return commits, files
 
 
 def _existing_tests_section(ctx: Context, state: State) -> str:
@@ -523,7 +565,7 @@ def commit_tests(ctx: Context, files: List[str], round_no: int, log: Optional[Ru
     root = ctx.repo_root
     gitops.git_ok(["add", "--"] + files, root)
     message = ("test: review tests (round %d)\n\nWritten by the revali reviewer from the acceptance criteria.\n\n"
-               "Co-Authored-By: Claude <noreply@anthropic.com>\nRevali-Round: %d\n" % (round_no, round_no))
+               "Co-Authored-By: Claude <noreply@anthropic.com>\n%s: %d\n" % (round_no, TRAILER, round_no))
     res = run(resolve("git") + ["commit", "--quiet", "-F", "-"], cwd=root, input_text=message,
               log=log.detail if log else None)
     if not res.ok:
