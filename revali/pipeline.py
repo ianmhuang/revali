@@ -479,6 +479,9 @@ def cmd_reset(args) -> int:
         print("ERROR: a run is in progress; `revali stop` first")
         return EXIT_ERROR
     path = State.path(rdir)
+    state = State.load(rdir)
+    if state is not None and (state.pending_test_files or state.reviewer_running):
+        _reset_test_dir(state, rdir)
     if os.path.isfile(path):
         os.unlink(path)
         print("state removed: %s (review files kept)" % path)
@@ -486,6 +489,37 @@ def cmd_reset(args) -> int:
         print("no state to remove")
     release_lock(rdir)
     return EXIT_OK
+
+
+def _reset_test_dir(state: State, rdir: str) -> None:
+    """The reviewer's uncommitted test files would outlive the state as a dirty tree the next
+    run refuses, so `reset` disposes of them the way the run after an interrupted round does:
+    untracked drafts deleted, a modified tracked file of the reviewer's own restored from HEAD.
+    Without a usable project (config, change.md) the paths are printed for the author instead."""
+    from revali import review
+    cwd = os.getcwd()
+    pending = list(state.pending_test_files)
+
+    def by_hand(reason: str, paths) -> None:
+        listed = list(paths) or ["(the interrupted session's untracked files under test_dir "
+                                 "matching test_file_pattern)"]
+        print("could not clean up the reviewer's uncommitted test files (%s); delete them by hand "
+              "before the next run:\n  %s" % (reason, "\n  ".join(listed)))
+
+    try:
+        ctx = locate(cwd)
+        log = RunLog(rdir, logs_dir=paths_for(gitops.repo_root(cwd)).logs_dir)
+        # an interrupted session's files are not known, so that case sweeps the whole pattern;
+        # otherwise only the pending list is the reviewer's, an author's own draft stays
+        only = None if state.reviewer_running else pending
+        review.discard_round_leftovers(ctx, state, log, "the reviewer", stage="reset", only=only,
+                                       tolerated_next_run=False)
+    except (Stop, gitops.GitError) as exc:
+        message = exc.message if isinstance(exc, Stop) else str(exc)
+        by_hand(message.splitlines()[0], pending)
+        return
+    if state.pending_test_files:
+        print("delete by hand before the next run: %s" % ", ".join(state.pending_test_files))
 
 
 def cmd_clean(args) -> int:
