@@ -30,6 +30,34 @@ class StopHelpText(unittest.TestCase):
         self.assertIn("died without a result", after)                                          # AC-1: the dead-run job
         self.assertIn("stopped", after)
 
+    def test_stop_dash_h_names_both_jobs(self):
+        """`revali stop -h` is the subparser's own help, which argparse builds from
+        `description=`, not from the parent's `help=` entry (round 1 F1)."""
+        import argparse
+        from revali.cli import build_parser
+        parser = build_parser()
+        actions = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+        self.assertEqual(len(actions), 1)
+        stop_parser = actions[0].choices["stop"]
+        text = " ".join(stop_parser.format_help().split())   # argparse wraps long lines
+        self.assertIn("kill the running pipeline", text)                                       # AC-1: the live job
+        self.assertIn("died without a result", text)                                           # AC-1: the dead-run job
+        self.assertIn("as stopped", text)
+
+    def test_stop_dash_h_through_the_cli_exits_0_with_the_text(self):
+        """The same through the real entry point: `-h` prints and exits 0."""
+        import io
+        from contextlib import redirect_stdout
+        from revali.cli import main
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as raised:
+                main(["stop", "-h"])
+        self.assertEqual(raised.exception.code, 0)
+        text = " ".join(buf.getvalue().split())
+        self.assertIn("died without a result", text)                                           # AC-1
+        self.assertIn("kill the running pipeline", text)                                       # AC-1
+
 
 class StopCloseCase(RepoCase):
     def dead_state(self, stage="review", **fields):
