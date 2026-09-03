@@ -583,11 +583,12 @@ def _close_stopped(state: State, rdir: str, message: str) -> bool:
     the episode. A state file that cannot be written (a reader holding it on Windows past the
     retry window) is reported on one line, not as a traceback, and `state` is put back the
     way it was; the run then still reads as dead, which is what it is."""
-    before = (state.stage, state.message, state.last_exit)
+    before = (state.stage, state.message, state.last_exit, state.started_at, state.updated_at)
     try:
         state.set_stage(rdir, "stopped", message, EXIT_ERROR)
     except OSError as exc:
-        state.stage, state.message, state.last_exit = before  # set_stage assigns before it saves
+        # set_stage assigns the outcome, and save stamps the timestamps, before the write
+        state.stage, state.message, state.last_exit, state.started_at, state.updated_at = before
         print("ERROR: the state file could not be updated (%s); `wait` and `status` will report "
               "the run as dead; run `revali stop` again once the file is free" % exc)
         return False

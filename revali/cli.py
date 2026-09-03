@@ -7,6 +7,15 @@ from revali import NAME, VERSION
 from revali import pipeline
 
 
+def _command(sub, name: str, sentence: str, func):
+    """Register a subcommand whose one sentence serves both the `revali --help` listing
+    (`help=`) and its own `revali <cmd> -h` (`description=`); argparse feeds only the
+    listing from `help=`."""
+    p = sub.add_parser(name, help=sentence, description=sentence)
+    p.set_defaults(func=func)
+    return p
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=NAME,
@@ -14,44 +23,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verbose", action="store_true", help="echo every command to the terminal")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_run = sub.add_parser("run", help="start the pipeline on the current branch (detached by default)")
+    p_run = _command(sub, "run", "start the pipeline on the current branch (detached by default)",
+                     pipeline.cmd_run)
     p_run.add_argument("--foreground", action="store_true", help="run in this process instead of detaching")
     p_run.add_argument("--dry-run", action="store_true", help="print what would happen, spawn nothing")
     p_run.add_argument("--base", default="", help="base branch for this run (overrides revali.toml)")
-    p_run.set_defaults(func=pipeline.cmd_run)
 
-    p_pre = sub.add_parser("preflight", help="run the preflight checks only")
-    p_pre.add_argument("--base", default="")
-    p_pre.set_defaults(func=pipeline.cmd_preflight)
+    p_pre = _command(sub, "preflight", "run the preflight checks only", pipeline.cmd_preflight)
+    p_pre.add_argument("--base", default="", help="base branch to check against (overrides revali.toml)")
 
-    p_wait = sub.add_parser("wait", help="wait for the running pipeline (returns its exit code, or 4 if still running)")
+    p_wait = _command(sub, "wait", "wait for the running pipeline (returns its exit code, or 4 if still running)",
+                      pipeline.cmd_wait)
     p_wait.add_argument("--timeout", default="9m", help="e.g. 30s, 9m, 1h (default 9m)")
-    p_wait.set_defaults(func=pipeline.cmd_wait)
 
-    p_status = sub.add_parser("status", help="show the state of the current (or given) branch")
-    p_status.add_argument("--branch", default="")
-    p_status.set_defaults(func=pipeline.cmd_status)
+    p_status = _command(sub, "status", "show the state of the current (or given) branch", pipeline.cmd_status)
+    p_status.add_argument("--branch", default="", help="branch to show instead of the checked-out one")
 
-    p_reset = sub.add_parser("reset", help="drop state.json for the current branch, keep the files")
-    p_reset.set_defaults(func=pipeline.cmd_reset)
+    _command(sub, "reset", "drop state.json for the current branch, keep the files", pipeline.cmd_reset)
 
-    p_clean = sub.add_parser("clean", help="delete the state directory of a branch")
-    p_clean.add_argument("branch")
-    p_clean.set_defaults(func=pipeline.cmd_clean)
+    p_clean = _command(sub, "clean", "delete the state directory of a branch", pipeline.cmd_clean)
+    p_clean.add_argument("branch", help="the branch whose state directory goes (its git branch may be gone)")
 
-    stop_help = ("kill the running pipeline for the current branch, or record a run that died without a "
-                 "result as stopped")
-    p_stop = sub.add_parser("stop", help=stop_help, description=stop_help)  # description: `stop -h`
-    p_stop.set_defaults(func=pipeline.cmd_stop)
-
-    p_merge = sub.add_parser("merge", help="merge the PR of the current branch (only after READY TO MERGE)")
-    p_merge.set_defaults(func=pipeline.cmd_merge)
-
-    p_stats = sub.add_parser("stats", help="summarise the run history")
-    p_stats.set_defaults(func=_cmd_stats)
-
-    p_ver = sub.add_parser("version", help="print the version")
-    p_ver.set_defaults(func=pipeline.cmd_version)
+    _command(sub, "stop", "kill the running pipeline for the current branch, or record a run that died "
+                          "without a result as stopped", pipeline.cmd_stop)
+    _command(sub, "merge", "merge the PR of the current branch (only after READY TO MERGE)", pipeline.cmd_merge)
+    _command(sub, "stats", "summarise the run history", _cmd_stats)
+    _command(sub, "version", "print the version", pipeline.cmd_version)
     return parser
 
 
