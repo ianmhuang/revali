@@ -1,4 +1,5 @@
 """`revali stop` follow-ups: the help text, a state write that fails, and the history row."""
+import argparse
 import os
 import subprocess
 import sys
@@ -16,6 +17,14 @@ class StopHelp(unittest.TestCase):
         from revali.cli import build_parser
         text = build_parser().format_help()
         self.assertIn("stop", text)
+        self.assertIn("died without a result", text)
+        self.assertIn("kill the running pipeline", text)
+
+    def test_stop_dash_h_says_the_same(self):                                              # AC-1: `revali stop -h`
+        from revali.cli import build_parser
+        parser = build_parser()
+        subparsers = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)][0]
+        text = " ".join(subparsers.choices["stop"].format_help().split())  # argparse wraps lines
         self.assertIn("died without a result", text)
         self.assertIn("kill the running pipeline", text)
 
@@ -69,6 +78,15 @@ class StopClosesTheRun(RepoCase):
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR)
         self.assertIn("died at stage 'review'", out)
+
+    def test_the_in_memory_state_is_put_back_after_a_failed_write(self):
+        from revali.pipeline import _close_stopped
+        state = self._dead_state()
+        with mock.patch("revali.state.write_json_atomic", side_effect=PermissionError("busy")):
+            with mock.patch("sys.stdout"):
+                ok = _close_stopped(state, self.rdir(), "stopped by user at stage 'review'")
+        self.assertFalse(ok)
+        self.assertEqual((state.stage, state.message, state.last_exit), ("review", "reviewer round 1", -1))
 
     def test_a_second_stop_after_the_failure_closes_the_run(self):
         self._dead_state()

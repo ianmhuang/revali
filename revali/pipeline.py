@@ -572,21 +572,22 @@ def cmd_stop(args) -> int:
         time.sleep(0.1)
     release_lock(rdir)
     state = State.load(rdir)
-    if state is not None and not _close_stopped(state, rdir, "stopped by user at stage '%s'" % state.stage):
-        print("stopped pid %d" % pid)
-        return EXIT_ERROR
     print("stopped pid %d" % pid)
+    if state is not None and not _close_stopped(state, rdir, "stopped by user at stage '%s'" % state.stage):
+        return EXIT_ERROR
     return EXIT_OK
 
 
 def _close_stopped(state: State, rdir: str, message: str) -> bool:
     """Record a run closed by `stop`: stage `stopped`, exit 1, a history row so `stats` sees
     the episode. A state file that cannot be written (a reader holding it on Windows past the
-    retry window) is reported on one line, not as a traceback; the run then still reads as
-    dead, which is what it is."""
+    retry window) is reported on one line, not as a traceback, and `state` is put back the
+    way it was; the run then still reads as dead, which is what it is."""
+    before = (state.stage, state.message, state.last_exit)
     try:
         state.set_stage(rdir, "stopped", message, EXIT_ERROR)
     except OSError as exc:
+        state.stage, state.message, state.last_exit = before  # set_stage assigns before it saves
         print("ERROR: the state file could not be updated (%s); `wait` and `status` will report "
               "the run as dead; run `revali stop` again once the file is free" % exc)
         return False
