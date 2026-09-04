@@ -35,9 +35,9 @@ def _entry_script() -> str:
     return os.path.join(here, "revali.py")
 
 
-def _locate_run(cwd: str, branch: str = "") -> tuple:
+def _locate_run(cwd: str, branch: str = "", allow_detached: bool = False) -> tuple:
     """(repo root, branch, review dir) for the checked-out (or given) branch. Stop (exit 1)
-    outside a repository or on a detached HEAD."""
+    outside a repository or, unless allow_detached, on a detached HEAD (branch "HEAD")."""
     root = gitops.repo_root(cwd)
     if not root:
         raise Stop(EXIT_ERROR, "not inside a git repository")
@@ -46,15 +46,15 @@ def _locate_run(cwd: str, branch: str = "") -> tuple:
             branch = gitops.current_branch(root)
         except gitops.GitError as exc:
             raise Stop(EXIT_ERROR, "not inside a git repository (%s)" % exc)
-        if branch == "HEAD":
+        if branch == "HEAD" and not allow_detached:
             raise Stop(EXIT_ERROR, "detached HEAD; check out a branch first")
     return root, branch, review_dir(root, branch, paths_for(root).state_dir)
 
 
-def _located(cwd: str, branch: str = "") -> Optional[tuple]:
+def _located(cwd: str, branch: str = "", allow_detached: bool = False) -> Optional[tuple]:
     """_locate_run for a subcommand: prints the ERROR line and returns None when it cannot."""
     try:
-        return _locate_run(cwd, branch)
+        return _locate_run(cwd, branch, allow_detached)
     except Stop as stop:
         print("ERROR: %s" % stop.message)
         return None
@@ -602,7 +602,8 @@ def cmd_clean(args) -> int:
 
 
 def cmd_stop(args) -> int:
-    found = _located(os.getcwd())
+    # a detached HEAD is fine here: the run to stop is found through tree.lock
+    found = _located(os.getcwd(), allow_detached=True)
     if not found:
         return EXIT_ERROR
     root, branch, rdir = found
@@ -684,7 +685,12 @@ def cmd_merge(args) -> int:
         print("ERROR: a run is in progress")
         return EXIT_ERROR
     acquire_lock(rdir)
-    acquire_tree_lock(tpath, branch)   # the checkout and pull below must not race a `run`
+    try:
+        acquire_tree_lock(tpath, branch)   # the checkout and pull below must not race a `run`
+    except TreeLockHeld as exc:
+        release_lock(rdir)
+        print(_tree_held_message({"pid": exc.pid, "branch": exc.branch}))
+        return EXIT_ERROR
     log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(root).logs_dir)
     try:
         code = merge.do_merge(cwd, rdir, state, log)
@@ -693,8 +699,6 @@ def cmd_merge(args) -> int:
         if stop.exit_code != EXIT_ACTION:
             state.message = stop.message
             state.save(rdir)
-        release_lock(rdir)
-        release_tree_lock(tpath)
         _record_history(state, stop.exit_code)
         return stop.exit_code
     finally:

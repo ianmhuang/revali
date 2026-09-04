@@ -854,7 +854,7 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
     write_text(review_path, review_md)
     write_json_atomic(os.path.join(rdir, "review-%d.json" % round_no),
                       {"meta": meta, "verdict": verdict, "reasons": reasons, "data": rr.data,
-                       "test_files": files, "commit": commit_sha, "bounces": bounces})
+                       "test_files": files, "head_sha": reviewed_head, "commit": commit_sha, "bounces": bounces})
     record = {"round": round_no, "head_sha": reviewed_head, "base_sha": ctx.base_sha, "verdict": verdict,
               "reviewer_verdict": rr.data.get("verdict"), "model": rr.model_actual, "fallback": rr.fallback,
               "cost_usd": total_cost, "test_commit": commit_sha, "data": rr.data, "at": now_iso()}

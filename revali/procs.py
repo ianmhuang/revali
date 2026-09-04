@@ -160,7 +160,7 @@ def kill_tree(pid: int) -> None:
     if not pid_alive(pid):
         return
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, **_no_window())
         return
     import signal
     try:

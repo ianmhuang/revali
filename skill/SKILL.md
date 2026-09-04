@@ -15,7 +15,11 @@ performs (push, draft PR, test commits). Never use `override`.
 Do this when a task starts in a repository that has `revali.toml` (the
 project's CLAUDE.md says so; see `templates/CLAUDE-snippet.md`).
 
-1. Create the feature branch (not the base branch).
+1. Create the feature branch (not the base branch). When another session
+   is active in this repository, create it in a worktree of your own
+   (`git worktree add ../<name> -b <branch>` from the primary tree) and work
+   there: a checkout runs one revali pipeline at a time, and one working
+   tree has one checked-out branch.
 2. Write `.revali/<branch>/change.md` from `templates/change.md` in the
    revali repo. Branch `feature/x` maps to directory `feature__x`. Keep
    `status: draft`. Fill in:
@@ -71,6 +75,9 @@ Acting on the result:
   Do not merge. The user runs `python "<revali dir>/revali.py" merge` when they
   decide to; if they ask you to run it, run it in the foreground and relay the
   result (it waits for CI checks, so allow up to the configured timeout).
+  After a merge from a worktree, revali leaves the worktree detached at the
+  merged base; when the user asks, run `git worktree remove <path>` from the
+  primary tree and `git pull` there.
 
 Do not edit files under `test_dir` that the reviewer wrote unless a finding
 asks for it, and say so in `response-<n>.md`.

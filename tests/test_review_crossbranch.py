@@ -199,7 +199,8 @@ class EveryCommandOpensWithTheIdentityLine(CrossBranchCase):
 
     def test_detached_head_is_an_error_line_not_a_traceback(self):                     # AC-4
         git(["checkout", "-q", "--detach"], self.repo)
-        for argv in (["status"], ["run", "--dry-run"], ["wait", "--timeout", "1s"], ["stop"], ["reset"],
+        # `stop` left this list with feature/worktree-docs AC-8: it resolves the run through tree.lock
+        for argv in (["status"], ["run", "--dry-run"], ["wait", "--timeout", "1s"], ["reset"],
                      ["merge"]):
             with self.subTest(argv=argv):
                 code, out = run_cli(argv)

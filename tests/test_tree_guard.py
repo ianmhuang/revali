@@ -299,7 +299,8 @@ class IdentityEverywhereTests(TreeCase):
 
     def test_status_on_a_detached_head(self):
         git(["checkout", "-q", "--detach"], self.repo)
-        for argv in (["status"], ["run"], ["wait", "--timeout", "1s"], ["stop"], ["reset"]):
+        # `stop` left this list with feature/worktree-docs AC-8: it resolves the run through tree.lock
+        for argv in (["status"], ["run"], ["wait", "--timeout", "1s"], ["reset"]):
             with self.subTest(argv=argv):
                 code, out = run_cli(argv)
                 self.assertEqual(code, EXIT_ERROR, out)
