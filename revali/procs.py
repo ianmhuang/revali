@@ -185,7 +185,7 @@ def run_shell(cmd: str, cwd: Optional[str] = None, timeout: Optional[float] = No
     try:
         proc = subprocess.run(
             cmd, shell=True, cwd=cwd, env=child_env(env), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout,
+            encoding="utf-8", errors="replace", timeout=timeout, **_no_window(),
         )
     except subprocess.TimeoutExpired as exc:
         raise ProcTimeout("timed out after %ss: %s" % (timeout, cmd)) from exc

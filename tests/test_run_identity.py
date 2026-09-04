@@ -1,4 +1,5 @@
-"""feature/run-identity: a detached run opens no console windows on Windows (AC-1), and
+"""feature/run-identity: a detached run opens no console windows on Windows (AC-1; since
+round 1 F1 this covers run_shell, the lint line and the LocalRunner steps, as well), and
 `run`, `wait` and `status` open with an identity line naming the working tree and the
 branch (AC-2), keeping the pid in every message that reports a process (AC-3) and the
 exit codes and wording that follow (AC-4)."""
@@ -47,6 +48,22 @@ class NoWindowTests(unittest.TestCase):
         with mock.patch("os.name", "nt"), mock.patch("subprocess.run", fake_run):
             procs.run_retry(["gh", "auth", "status"], retries=0)
         self.assertEqual(calls[0].get("creationflags", 0) & NO_WINDOW, NO_WINDOW)
+
+    def test_run_shell_windows_passes_create_no_window(self):
+        # the lint line and every LocalRunner step go through run_shell (round 1, F1)
+        calls, fake_run = self._capture()
+        with mock.patch("os.name", "nt"), mock.patch("subprocess.run", fake_run):
+            res = procs.run_shell("echo lint")
+        self.assertTrue(res.ok)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].get("shell"))
+        self.assertEqual(calls[0].get("creationflags", 0) & NO_WINDOW, NO_WINDOW)
+
+    def test_run_shell_posix_passes_no_creationflags(self):
+        calls, fake_run = self._capture()
+        with mock.patch("os.name", "posix"), mock.patch("subprocess.run", fake_run):
+            procs.run_shell("echo lint")
+        self.assertNotIn("creationflags", calls[0])
 
 
 class IdentityLineTests(RepoCase):
