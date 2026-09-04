@@ -134,7 +134,7 @@ class WaitAndStatusAfterTheMark(StopDeadCase):
         run_cli(["stop"])
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR, out)                                                # AC-3: returns 1
-        self.assertTrue(out.startswith("stopped: "), out)                                      # AC-3: the stage and message
+        self.assertTrue(out.split("\n", 1)[1].startswith("stopped: "), out)                                      # AC-3: the stage and message
         self.assertIn("'review'", out)
         self.assertNotIn("died at stage", out)                                                 # AC-3: no death wording
         self.assertNotIn("without a result", out)

@@ -34,7 +34,9 @@ def _entry_script() -> str:
     return os.path.join(here, "revali.py")
 
 
-def _rdir_for(cwd: str, branch: str = "") -> Optional[str]:
+def _locate_run(cwd: str, branch: str = "") -> Optional[tuple]:
+    """(repo root, branch, review dir) for the checked-out (or given) branch; None outside a
+    repository or on a detached HEAD."""
     root = gitops.repo_root(cwd)
     if not root:
         return None
@@ -42,7 +44,18 @@ def _rdir_for(cwd: str, branch: str = "") -> Optional[str]:
         branch = branch or gitops.current_branch(root)
     except gitops.GitError:
         return None
-    return review_dir(root, branch, paths_for(root).state_dir)
+    return root, branch, review_dir(root, branch, paths_for(root).state_dir)
+
+
+def _rdir_for(cwd: str, branch: str = "") -> Optional[str]:
+    found = _locate_run(cwd, branch)
+    return found[2] if found else None
+
+
+def _print_identity(root: str, branch: str) -> None:
+    """The first line of run / wait / status: which working tree and branch this is about,
+    so sessions running revali in several checkouts can tell their output apart."""
+    print("repo: %s  branch: %s" % (root, branch))
 
 
 def _run_log_path(rdir: str) -> str:
@@ -65,10 +78,12 @@ def cmd_run(args) -> int:
 
 def _run_detached(args) -> int:
     cwd = os.getcwd()
-    rdir = _rdir_for(cwd)
-    if not rdir:
+    found = _locate_run(cwd)
+    if not found:
         print("ERROR: not inside a git repository")
         return EXIT_ERROR
+    root, branch, rdir = found
+    _print_identity(root, branch)
     pid = lock_owner_alive(rdir)
     if pid:
         print("ERROR: a revali run is already in progress (pid %d); use `revali wait` or `revali stop`" % pid)
@@ -93,10 +108,12 @@ def _run_detached(args) -> int:
 
 def _run_foreground(args) -> int:
     cwd = os.getcwd()
-    rdir = _rdir_for(cwd)
-    if not rdir:
+    found = _locate_run(cwd)
+    if not found:
         print("ERROR: not inside a git repository")
         return EXIT_ERROR
+    root, branch, rdir = found
+    _print_identity(root, branch)
     try:
         acquire_lock(rdir)
     except LockHeld as exc:
@@ -401,10 +418,12 @@ def parse_duration(text: str) -> float:
 
 
 def cmd_wait(args) -> int:
-    rdir = _rdir_for(os.getcwd())
-    if not rdir:
+    found = _locate_run(os.getcwd())
+    if not found:
         print("ERROR: not inside a git repository")
         return EXIT_ERROR
+    root, branch, rdir = found
+    _print_identity(root, branch)
     deadline = time.monotonic() + parse_duration(args.timeout)
     while True:
         pid = lock_owner_alive(rdir)
@@ -440,6 +459,7 @@ def cmd_status(args) -> int:
     rdir = review_dir(root, branch, paths.state_dir)
     state = State.load(rdir)
     pid = lock_owner_alive(rdir)
+    _print_identity(root, branch)
     print("%s %s" % (NAME, VERSION))
     print("branch: %s" % branch)
     if pid:

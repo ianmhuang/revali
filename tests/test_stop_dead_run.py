@@ -81,7 +81,7 @@ class StopAcknowledgesADeadRun(RepoCase):
         run_cli(["stop"])
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR)
-        self.assertTrue(out.startswith("stopped: "), out)
+        self.assertTrue(out.split("\n", 1)[1].startswith("stopped: "), out)
         self.assertNotIn("died at stage", out)
         self.assertNotIn("error:", out)
         code, out = run_cli(["status"])
