@@ -189,6 +189,22 @@ def commit_paths(sha: str, cwd: str, diff_filter: str = "AM") -> List[str]:
     return [p.replace("\\", "/") for p in res.stdout.split("\0") if p]
 
 
+def worktree_holding(branch: str, cwd: str) -> str:
+    """Path of another worktree of this repository that has `branch` checked out, or "".
+    (`git checkout <branch>` here would fail while that is the case.)"""
+    res = _git(["worktree", "list", "--porcelain"], cwd)
+    if not res.ok:
+        return ""
+    here = os.path.normpath(repo_root(cwd) or cwd)
+    path = ""
+    for line in res.stdout.splitlines():
+        if line.startswith("worktree "):
+            path = os.path.normpath(line[len("worktree "):].strip())
+        elif line.strip() == "branch refs/heads/%s" % branch and path and path != here:
+            return path
+    return ""
+
+
 def push_branch(branch: str, cwd: str, log: Logger = None, force: bool = False) -> Result:
     args = ["push", "--quiet", "-u"]
     if force:

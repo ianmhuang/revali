@@ -102,18 +102,34 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
     if cfg.merge.wait_for_checks:
         wait_for_checks(state.pr_number, root, cfg.merge.checks_timeout_min, log)
 
-    log.stage("merge", "gh pr merge #%d --%s --delete-branch" % (state.pr_number, cfg.merge.method))
+    # In a linked worktree whose base branch is checked out elsewhere, gh's --delete-branch
+    # would try to check out the base here and fail after the PR was merged; do the local
+    # part by hand instead.
+    elsewhere = gitops.worktree_holding(base, root)
+    argv = ["pr", "merge", str(state.pr_number), "--%s" % cfg.merge.method]
+    if elsewhere:
+        log.stage("merge", "gh %s (worktree mode: %s is checked out in %s)" % (" ".join(argv), base, elsewhere))
+    else:
+        argv.append("--delete-branch")
+        log.stage("merge", "gh " + " ".join(argv))
     state.pending_effect = "merge"
     state.save(rdir)
-    res = run_retry(resolve("gh") + ["pr", "merge", str(state.pr_number), "--%s" % cfg.merge.method, "--delete-branch"],
-                    retries=0, cwd=root, log=log.detail, timeout=300)
+    res = run_retry(resolve("gh") + argv, retries=0, cwd=root, log=log.detail, timeout=300)
     if not res.ok:
-        state.pending_effect = ""
-        state.save(rdir)
-        raise Stop(EXIT_ERROR, "gh pr merge failed: %s" % res.text.strip()[:400])
+        # gh can fail on its local follow-up after the PR itself merged; the PR is the truth
+        if pr_merged(state.pr_number, root, log):
+            log.stage("merge", "gh reported an error but PR #%d is merged: %s"
+                      % (state.pr_number, res.text.strip()[:200]))
+        else:
+            state.pending_effect = ""
+            state.save(rdir)
+            raise Stop(EXIT_ERROR, "gh pr merge failed: %s" % res.text.strip()[:400])
     state.pending_effect = ""
     state.set_stage(rdir, "merged", "merged PR #%d into %s" % (state.pr_number, base), EXIT_OK)
 
+    if elsewhere:
+        _worktree_follow_up(root, branch, base, elsewhere, log)
+        return EXIT_OK
     # Local follow-up: gh usually switches to the base branch and deletes the local branch itself.
     if gitops.current_branch(root) != base:
         run(resolve("git") + ["checkout", "--quiet", base], cwd=root, log=log.detail)
@@ -122,6 +138,32 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
         run(resolve("git") + ["branch", "-D", branch], cwd=root, log=log.detail)
     log.stage("merge", "local: on %s, branch %s removed" % (gitops.current_branch(root), branch))
     return EXIT_OK
+
+
+def pr_merged(pr_number: int, cwd: str, log: Optional[RunLog]) -> bool:
+    res = run(resolve("gh") + ["pr", "view", str(pr_number), "--json", "state"], cwd=cwd,
+              log=log.detail if log else None, timeout=120)
+    if not res.ok:
+        return False
+    try:
+        return str(json.loads(res.stdout).get("state", "")).upper() == "MERGED"
+    except ValueError:
+        return False
+
+
+def _worktree_follow_up(root: str, branch: str, base: str, elsewhere: str, log: RunLog) -> None:
+    """After the PR merged from a linked worktree: delete the remote branch, detach this
+    worktree at the merged base, drop the local branch, and say what is left to the user."""
+    res = run(resolve("git") + ["push", "--quiet", "origin", "--delete", branch], cwd=root, log=log.detail,
+              timeout=300)
+    if not res.ok:
+        log.stage("merge", "note: could not delete origin/%s: %s" % (branch, res.text.strip()[:200]))
+    run(resolve("git") + ["fetch", "--quiet", "--prune", "origin", base], cwd=root, log=log.detail, timeout=300)
+    run(resolve("git") + ["checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=root, log=log.detail)
+    if gitops.rev_parse(branch, root) and gitops.current_branch(root) == "HEAD":
+        run(resolve("git") + ["branch", "-D", branch], cwd=root, log=log.detail)
+    log.stage("merge", "worktree: detached at the merged %s, branch %s removed; remove this worktree with "
+                       "`git worktree remove %s` and run `git pull` in %s" % (base, branch, root, elsewhere))
 
 
 def merge_summary(state: State, base: str) -> str:

@@ -10,7 +10,7 @@ from revali.config import PlatformCfg
 from revali.engines import EngineRequest
 from revali.preflight import Context, Stop
 from revali.runners import RunReport, RunnerError, get_runner, steps_for, tail
-from revali.state import RunLog, State, now_iso, read_text, write_text
+from revali.state import RunLog, State, now_iso, read_text, safe_branch, write_text
 
 PASS, FAIL = "PASS", "FAIL"
 LOG_LINES = 200
@@ -58,7 +58,7 @@ def baseline(ctx: Context, rdir: str, log: Optional[RunLog]) -> None:
         log.stage("preflight", "baseline: existing suite on %s" % runner.name)
     try:
         report = runner.run(ctx.repo_root, "HEAD", steps, {}, ctx.logs, "baseline",
-                            log.detail if log else None)
+                            log.detail if log else None, scope=safe_branch(ctx.branch))
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, "sandbox failed during baseline: %s" % exc)
     failed = report.failed
@@ -82,7 +82,7 @@ def run_validation(ctx: Context, state: State, rdir: str, log: Optional[RunLog])
             log.stage("validate", "run %d: %s on %s (%s)" % (number, ", ".join(n for n, _ in steps), runner.name, label))
         try:
             report = runner.run(ctx.repo_root, "HEAD", steps, {}, ctx.logs, label,
-                                log.detail if log else None)
+                                log.detail if log else None, scope=safe_branch(ctx.branch))
         except RunnerError as exc:
             raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc)
         outcome.report = report
