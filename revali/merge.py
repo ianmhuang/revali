@@ -106,6 +106,10 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
     # would try to check out the base here and fail after the PR was merged; do the local
     # part by hand instead.
     elsewhere = gitops.worktree_holding(base, root)
+    if elsewhere and not gitops.is_linked_worktree(root):
+        # the primary tree cannot be detached and removed like a linked worktree
+        raise Stop(EXIT_ERROR, "%s is checked out in %s; remove or switch that worktree, then merge again"
+                   % (base, elsewhere))
     argv = ["pr", "merge", str(state.pr_number), "--%s" % cfg.merge.method]
     if elsewhere:
         log.stage("merge", "gh %s (worktree mode: %s is checked out in %s)" % (" ".join(argv), base, elsewhere))
@@ -158,12 +162,21 @@ def _worktree_follow_up(root: str, branch: str, base: str, elsewhere: str, log: 
               timeout=300)
     if not res.ok:
         log.stage("merge", "note: could not delete origin/%s: %s" % (branch, res.text.strip()[:200]))
-    run(resolve("git") + ["fetch", "--quiet", "--prune", "origin", base], cwd=root, log=log.detail, timeout=300)
-    run(resolve("git") + ["checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=root, log=log.detail)
-    if gitops.rev_parse(branch, root) and gitops.current_branch(root) == "HEAD":
-        run(resolve("git") + ["branch", "-D", branch], cwd=root, log=log.detail)
-    log.stage("merge", "worktree: detached at the merged %s, branch %s removed; remove this worktree with "
-                       "`git worktree remove %s` and run `git pull` in %s" % (base, branch, root, elsewhere))
+    res = run(resolve("git") + ["fetch", "--quiet", "--prune", "origin", base], cwd=root, log=log.detail,
+              timeout=300)
+    if not res.ok:
+        log.stage("merge", "note: git fetch failed: %s" % res.text.strip()[:200])
+    else:
+        res = run(resolve("git") + ["checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=root, log=log.detail)
+        if not res.ok:
+            log.stage("merge", "note: git checkout --detach failed: %s" % res.text.strip()[:200])
+    removed = False
+    if gitops.current_branch(root) == "HEAD" and gitops.rev_parse(branch, root):
+        removed = run(resolve("git") + ["branch", "-D", branch], cwd=root, log=log.detail).ok
+    now = gitops.current_branch(root)
+    where = "detached at the merged %s" % base if now == "HEAD" else "still on %s" % now
+    log.stage("merge", "worktree: %s, local branch %s %s; remove this worktree with `git worktree remove %s` "
+                       "and run `git pull` in %s" % (where, branch, "removed" if removed else "kept", root, elsewhere))
 
 
 def merge_summary(state: State, base: str) -> str:

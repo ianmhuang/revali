@@ -83,9 +83,12 @@ everything between them is automatic. Exit codes: `0` done / ready to merge,
 `1` pipeline error (not a verdict), `2` the Developer must act (fix, rebase,
 answer a question), `3` a human must decide, `4` (`wait` only) still running.
 
-Status: v1.0 feature set complete (package version 0.1.0). Verified end to
-end on a private GitHub repository with real Reviewer sessions and a real
-WSL sandbox; revali reviews its own changes.
+Status: v1.0 feature set complete (package version 0.1.0), plus the
+multi-session work of PR #21 to #24: no console windows, identity lines,
+one run per working tree, sandbox directories per branch, merge from a
+worktree. Verified end to end on a private GitHub repository with real
+Reviewer sessions and real WSL and ssh sandboxes; revali reviews its own
+changes on this public one.
 
 ## Requirements
 
@@ -237,6 +240,25 @@ acceptance tests come on top of the author's tests, not instead of them.
 To make an authoring session do this without being asked each time, paste
 `templates/CLAUDE-snippet.md` into the project's `CLAUDE.md`.
 
+## Several agents on one repository
+
+One working tree has one checked-out branch, so give every agent session
+its own worktree: `git worktree add ../<name> -b <branch>` from the primary
+tree, then work, run and merge there. Each worktree has its own `.revali/`
+state and locks, so runs in different worktrees are independent. A second
+`run` in the same checkout, whatever branch it is on, is refused by
+`tree.lock` with the running branch and pid; `wait --branch <b>` waits for
+that run and `stop` stops it, from any branch or a detached HEAD. Sandbox
+clones are keyed `<repo>/<branch>/<label>` on the WSL distro or the ssh
+host, so validations of different branches never share a directory.
+`merge` from a linked worktree merges the PR, deletes the remote branch,
+detaches the worktree at the merged base and drops the local branch; the
+worktree itself stays until you run `git worktree remove <path>` from the
+primary tree, where `git pull` brings in the merge. `merge` in the primary
+tree while a linked worktree holds the base branch is refused. Two clones
+with the same branch checked out are not a supported layout: they would
+share the PR and the sandbox directory.
+
 ## Sandbox
 
 `[validate.linux] runner = "wsl"` clones the branch into the WSL distro's own
@@ -323,7 +345,14 @@ stated.
   TO MERGE and HEAD has not moved): waits for CI checks if the PR has any,
   then `gh pr merge --<method> --delete-branch`, which also deletes the
   local branch and checks out the base branch; then `git pull --prune` and
-  deletion of the branch's state directory
+  deletion of the branch's state directory. In a linked worktree whose base
+  branch is checked out elsewhere: `gh pr merge --<method>` without
+  `--delete-branch`, then `git push origin --delete <branch>`,
+  `git fetch --prune origin <base>`, `git checkout --detach FETCH_HEAD`,
+  `git branch -D <branch>`, each reported if it fails; the worktree is left
+  for you to remove. When `gh pr merge` exits non-zero but `gh pr view`
+  reports the PR as MERGED, the merge counts as done and the local
+  follow-up still runs
 - after a review round that stops before its tests are committed (a failed
   or timed-out Reviewer session, unusable output, a smoke run that fails
   twice), deletes the untracked files matching `test_file_pattern` under

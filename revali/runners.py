@@ -211,10 +211,10 @@ cleanup() {
 }
 rm -rf "$SB" && mkdir -p "$SB"
 if ! git -c safe.directory='*' clone -q --no-checkout "$HOST" "$SB/repo" > "$LOGS/$LABEL-clone.log" 2>&1; then
-    printf "clone\t128\t0\n" >> "$RES"; exit 0
+    printf "clone\t128\t0\n" >> "$RES"; cleanup; exit 0
 fi
 if ! (cd "$SB/repo" && git checkout -q --detach "$REF") >> "$LOGS/$LABEL-clone.log" 2>&1; then
-    printf "clone\t1\t0\n" >> "$RES"; exit 0
+    printf "clone\t1\t0\n" >> "$RES"; cleanup; exit 0
 fi
 if [ -d "$EXTRA" ]; then cp -r "$EXTRA/." "$SB/repo/"; fi
 ulimit -u 512 -f 4000000 2>/dev/null

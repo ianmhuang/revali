@@ -205,6 +205,17 @@ def worktree_holding(branch: str, cwd: str) -> str:
     return ""
 
 
+def is_linked_worktree(cwd: str) -> bool:
+    """True in a worktree added with `git worktree add`; False in the tree that owns `.git`."""
+    git_dir = _git(["rev-parse", "--git-dir"], cwd)
+    common = _git(["rev-parse", "--git-common-dir"], cwd)
+    if not git_dir.ok or not common.ok:
+        return False
+    a = os.path.normcase(os.path.normpath(os.path.join(cwd, git_dir.stdout.strip())))
+    b = os.path.normcase(os.path.normpath(os.path.join(cwd, common.stdout.strip())))
+    return a != b
+
+
 def push_branch(branch: str, cwd: str, log: Logger = None, force: bool = False) -> Result:
     args = ["push", "--quiet", "-u"]
     if force:

@@ -60,10 +60,11 @@ def one(words):
                 shutil.rmtree(local(p), ignore_errors=True)
         return 0
     if name == "rmdir":
-        try:
-            os.rmdir(local([w for w in words[1:] if not w.startswith("-")][0]))
-        except OSError:
-            pass
+        for p in [w for w in words[1:] if not w.startswith("-")]:   # in order, like rmdir
+            try:
+                os.rmdir(local(p))
+            except OSError:
+                pass
         return 0
     if name == "2>/dev/null":
         return 0

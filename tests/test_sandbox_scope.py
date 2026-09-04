@@ -103,6 +103,10 @@ class SshLayoutTests(SshCase):
         self.assertIn("feature__mul/validate-r1", cleanup)
         self.assertIn("rmdir --ignore-fail-on-non-empty", cleanup)
         self.assertEqual(self.remote_leftovers(), [])
+        # the <branch> and <repo> directories are gone too (PR #23 F6: the stub now removes every rmdir argument)
+        sandbox = os.path.join(self.remote, ".revali", "sandbox")
+        self.assertFalse(os.path.isdir(os.path.join(sandbox, "sample", "feature__mul")))
+        self.assertFalse(os.path.isdir(os.path.join(sandbox, "sample")))
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_without_scope_the_layout_is_unchanged(self):
@@ -263,33 +267,39 @@ class MergeLockTests(RepoCase):
 
 
 class WorktreeMergeTests(RepoCase):
-    """AC-9: merge from a linked worktree while the base branch is checked out elsewhere."""
+    """AC-9 of PR #23, re-based on a real linked worktree since feature/worktree-docs AC-3: the
+    primary tree (self.repo) holds main, feature/mul lives in the linked worktree self.wt, and
+    every command runs there."""
 
     def setUp(self):
         super().setUp()
-        # the fixture checks out feature/mul; give main its own worktree, like a primary tree
-        self.primary = os.path.join(self.tmp, "primary")
-        git(["worktree", "add", "--quiet", self.primary, "main"], self.repo)
+        git(["checkout", "-q", "main"], self.repo)
+        self.wt = os.path.join(self.tmp, "wt")
+        git(["worktree", "add", "--quiet", self.wt, "feature/mul"], self.repo)
 
         def drop():
             os.chdir(self.repo)
-            subprocess.run(["git", "worktree", "remove", "--force", self.primary], cwd=self.repo, capture_output=True)
+            subprocess.run(["git", "worktree", "remove", "--force", self.wt], cwd=self.repo, capture_output=True)
 
         self.addCleanup(drop)
+        os.chdir(self.wt)
+
+    def rdir(self):
+        return os.path.join(self.wt, ".revali", "feature__mul")
 
     def ready(self):
         State(repo="owner/repo", branch="feature/mul", base="main", stage="ready_to_merge",
               message="validation 1 passed", last_exit=EXIT_OK, pr_number=7,
-              head_sha=gitops.rev_parse("HEAD", self.repo), test_files=["tests/test_review_mul.py"]).save(self.rdir())
-        git(["push", "-q", "-u", "origin", "feature/mul"], self.repo)   # what the pr stage does in a real run
+              head_sha=gitops.rev_parse("HEAD", self.wt), test_files=["tests/test_review_mul.py"]).save(self.rdir())
+        git(["push", "-q", "-u", "origin", "feature/mul"], self.wt)   # what the pr stage does in a real run
 
     def remote_heads(self):
-        return sorted(l.split("refs/heads/")[1] for l in git(["ls-remote", "--heads", "origin"], self.repo).splitlines())
+        return sorted(l.split("refs/heads/")[1] for l in git(["ls-remote", "--heads", "origin"], self.wt).splitlines())
 
     def test_worktree_holding(self):
-        self.assertEqual(os.path.normpath(gitops.worktree_holding("main", self.repo)), os.path.normpath(self.primary))
-        self.assertEqual(gitops.worktree_holding("feature/mul", self.repo), "")
-        self.assertEqual(gitops.worktree_holding("nope", self.repo), "")
+        self.assertEqual(os.path.normpath(gitops.worktree_holding("main", self.wt)), os.path.normpath(self.repo))
+        self.assertEqual(gitops.worktree_holding("feature/mul", self.wt), "")
+        self.assertEqual(gitops.worktree_holding("nope", self.wt), "")
 
     def test_merge_from_the_worktree(self):
         self.ready()
@@ -300,14 +310,15 @@ class WorktreeMergeTests(RepoCase):
         merge_calls = [c["argv"] for c in self.fake_calls("gh") if c["argv"][:2] == ["pr", "merge"]]
         self.assertEqual(merge_calls, [["pr", "merge", "7", "--squash"]])   # no --delete-branch
         self.assertNotIn("feature/mul", self.remote_heads())               # deleted by revali
-        self.assertEqual(gitops.current_branch(self.repo), "HEAD")          # detached
-        self.assertIsNone(gitops.rev_parse("feature/mul", self.repo))       # local branch gone
-        self.assertEqual(gitops.rev_parse("HEAD", self.repo), gitops.rev_parse("origin/main", self.repo))
-        self.assertEqual(gitops.current_branch(self.primary), "main")       # untouched
+        self.assertEqual(gitops.current_branch(self.wt), "HEAD")            # detached
+        self.assertIsNone(gitops.rev_parse("feature/mul", self.wt))         # local branch gone
+        self.assertEqual(gitops.rev_parse("HEAD", self.wt), gitops.rev_parse("origin/main", self.wt))
+        self.assertEqual(gitops.current_branch(self.repo), "main")          # the primary tree is untouched
         self.assertIn("worktree mode", out)          # the stage lines go to stdout; the log dir is removed
+        self.assertIn("detached at the merged main, local branch feature/mul removed", out)
         self.assertIn("git worktree remove", out)
-        self.assertIn(self.primary, out)             # where to `git pull`
-        self.assertFalse(os.path.isfile(tree_lock_path(self.repo, ".revali")))
+        self.assertIn(os.path.normpath(self.repo), os.path.normpath(out))   # where to `git pull`
+        self.assertFalse(os.path.isfile(tree_lock_path(self.wt, ".revali")))
 
     def test_gh_error_after_the_pr_merged_still_counts(self):
         self.ready()
@@ -316,7 +327,7 @@ class WorktreeMergeTests(RepoCase):
         code, out = run_cli(["merge"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("MERGED: PR #7 into main", out)
-        self.assertEqual(gitops.current_branch(self.repo), "HEAD")
+        self.assertEqual(gitops.current_branch(self.wt), "HEAD")
         views = [c["argv"] for c in self.fake_calls("gh") if c["argv"][:2] == ["pr", "view"]]
         self.assertTrue(views, "gh pr view was consulted")
 
@@ -327,7 +338,7 @@ class WorktreeMergeTests(RepoCase):
         code, out = run_cli(["merge"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn("gh pr merge failed", out)
-        self.assertEqual(gitops.current_branch(self.repo), "feature/mul")
+        self.assertEqual(gitops.current_branch(self.wt), "feature/mul")
         self.assertIn("feature/mul", self.remote_heads())
         self.assertEqual(State.load(self.rdir()).stage, "ready_to_merge")
 
