@@ -1,10 +1,11 @@
-"""Reviewer tests for feature/run-identity, AC-1: every subprocess started by `procs.run`
-and `procs.run_retry` carries CREATE_NO_WINDOW on Windows and no `creationflags` on POSIX.
+"""Reviewer tests for feature/run-identity, AC-1: every subprocess started by `procs.run`,
+`procs.run_retry` and (since round 2) `procs.run_shell` carries CREATE_NO_WINDOW on Windows
+and no `creationflags` on POSIX.
 
 `subprocess.run` is replaced with a recorder, so the tests run on any host and only look at
 the keyword arguments revali hands to the interpreter; `os.name` is patched to pick the
 platform branch. On the base branch no `creationflags` is ever passed, so the Windows
-cases fail there."""
+cases fail there; the `run_shell` cases also fail on the round-1 code."""
 import os
 import subprocess
 import unittest
@@ -29,8 +30,8 @@ class Recorder:
         return subprocess.CompletedProcess(argv, code, "out", "err")
 
 
-class WindowsPassesTheFlag(unittest.TestCase):
-    """AC-1 on Windows: the flag is on the call, whatever else `run` is asked to do."""
+class NtRecorderCase(unittest.TestCase):
+    """os.name says Windows and subprocess.run is the recorder."""
 
     def setUp(self):
         self.rec = Recorder()
@@ -43,6 +44,10 @@ class WindowsPassesTheFlag(unittest.TestCase):
 
     def flags(self, index=0):
         return self.rec.calls[index][1].get("creationflags", 0)
+
+
+class WindowsPassesTheFlag(NtRecorderCase):
+    """AC-1 on Windows: the flag is on the call, whatever else `run` is asked to do."""
 
     def test_run_sets_create_no_window(self):
         res = procs.run(["git", "--version"])
@@ -86,6 +91,39 @@ class WindowsPassesTheFlag(unittest.TestCase):
         self.assertEqual(argv, ["git", "log", "-n", "3"])
 
 
+class WindowsRunShellPassesTheFlag(NtRecorderCase):
+    """AC-1 on Windows for `run_shell`, the path of the `lint` line (preflight) and of every
+    `local` runner step (runners.LocalRunner). Round 2, F1."""
+
+    def test_run_shell_sets_create_no_window(self):
+        res = procs.run_shell("python --version")
+        self.assertTrue(res.ok)
+        self.assertEqual(len(self.rec.calls), 1)
+        self.assertEqual(self.flags() & CREATE_NO_WINDOW, CREATE_NO_WINDOW)
+
+    def test_run_shell_keeps_the_shell_and_the_capture(self):
+        procs.run_shell("make test", cwd=os.getcwd(), timeout=7)
+        argv, kw = self.rec.calls[0]
+        self.assertEqual(argv, "make test")                          # the string goes to the shell as is
+        self.assertTrue(kw.get("shell"))                             # the flag did not displace shell=True
+        self.assertEqual(kw.get("cwd"), os.getcwd())
+        self.assertEqual(kw.get("timeout"), 7)
+        self.assertTrue(kw.get("capture_output"))
+        self.assertEqual(kw.get("encoding"), "utf-8")
+        self.assertEqual(kw.get("errors"), "replace")
+
+    def test_run_shell_flag_is_only_the_no_window_bit(self):
+        procs.run_shell("echo lint")
+        self.assertEqual(self.flags(), CREATE_NO_WINDOW)
+
+    def test_run_shell_non_zero_exit_is_still_a_result_not_an_exception(self):
+        self.rec.codes = [3]
+        res = procs.run_shell("false")
+        self.assertFalse(res.ok)
+        self.assertEqual(res.returncode, 3)
+        self.assertEqual(self.flags() & CREATE_NO_WINDOW, CREATE_NO_WINDOW)
+
+
 class PosixPassesNothing(unittest.TestCase):
     """AC-1 elsewhere: `creationflags` is a Windows-only argument and must not appear."""
 
@@ -110,6 +148,13 @@ class PosixPassesNothing(unittest.TestCase):
         for _, kw in self.rec.calls:
             self.assertNotIn("creationflags", kw)
 
+    def test_run_shell_passes_no_creationflags(self):
+        procs.run_shell("echo lint")
+        self.assertEqual(len(self.rec.calls), 1)
+        argv, kw = self.rec.calls[0]
+        self.assertTrue(kw.get("shell"))
+        self.assertNotIn("creationflags", kw)
+
 
 class ErrorsStillSurface(unittest.TestCase):
     """AC-1 must not swallow the failure paths `run` already had."""
@@ -129,6 +174,14 @@ class ErrorsStillSurface(unittest.TestCase):
         with mock.patch("os.name", "nt"), mock.patch("subprocess.run", missing):
             with self.assertRaises(procs.ExeNotFound):
                 procs.run(["no-such-exe"])
+
+    def test_run_shell_timeout_is_still_reported_with_the_flag_on(self):
+        def slow(cmd, **kw):
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+        with mock.patch("os.name", "nt"), mock.patch("subprocess.run", slow):
+            with self.assertRaises(procs.ProcTimeout):
+                procs.run_shell("sleep 100", timeout=1)
 
 
 if __name__ == "__main__":
