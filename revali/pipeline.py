@@ -12,10 +12,11 @@ from typing import Optional
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION
 from revali import gitops
 from revali.config import history_path, load_user_config, paths_for, ConfigError
-from revali.preflight import Stop, locate, preflight
+from revali.preflight import Stop, check_tree_unmoved, locate, preflight
 from revali.procs import kill_tree, pid_alive, python_exe, spawn_detached
-from revali.state import (LockHeld, RunLog, State, acquire_lock, append_history, lock_owner_alive,
-                          read_lock, release_lock, review_dir, run_died, safe_branch)
+from revali.state import (LockHeld, RunLog, State, TreeLockHeld, acquire_lock, acquire_tree_lock,
+                          append_history, lock_owner_alive, read_lock, release_lock, release_tree_lock,
+                          review_dir, run_died, safe_branch, tree_lock_owner, tree_lock_path)
 
 
 def _interrupted(state: State) -> bool:
@@ -34,22 +35,46 @@ def _entry_script() -> str:
     return os.path.join(here, "revali.py")
 
 
-def _locate_run(cwd: str, branch: str = "") -> Optional[tuple]:
-    """(repo root, branch, review dir) for the checked-out (or given) branch; None outside a
-    repository or on a detached HEAD."""
+def _locate_run(cwd: str, branch: str = "") -> tuple:
+    """(repo root, branch, review dir) for the checked-out (or given) branch. Stop (exit 1)
+    outside a repository or on a detached HEAD."""
     root = gitops.repo_root(cwd)
     if not root:
-        return None
-    try:
-        branch = branch or gitops.current_branch(root)
-    except gitops.GitError:
-        return None
+        raise Stop(EXIT_ERROR, "not inside a git repository")
+    if not branch:
+        try:
+            branch = gitops.current_branch(root)
+        except gitops.GitError as exc:
+            raise Stop(EXIT_ERROR, "not inside a git repository (%s)" % exc)
+        if branch == "HEAD":
+            raise Stop(EXIT_ERROR, "detached HEAD; check out a branch first")
     return root, branch, review_dir(root, branch, paths_for(root).state_dir)
 
 
+def _located(cwd: str, branch: str = "") -> Optional[tuple]:
+    """_locate_run for a subcommand: prints the ERROR line and returns None when it cannot."""
+    try:
+        return _locate_run(cwd, branch)
+    except Stop as stop:
+        print("ERROR: %s" % stop.message)
+        return None
+
+
 def _rdir_for(cwd: str, branch: str = "") -> Optional[str]:
-    found = _locate_run(cwd, branch)
-    return found[2] if found else None
+    try:
+        return _locate_run(cwd, branch)[2]
+    except Stop:
+        return None
+
+
+def _tree_lock_path(root: str) -> str:
+    return tree_lock_path(root, paths_for(root).state_dir)
+
+
+def _tree_held_message(owner: dict) -> str:
+    return ("ERROR: a revali run is already in progress in this working tree on branch %s (pid %d); "
+            "use `revali wait --branch %s` or `revali stop`"
+            % (owner.get("branch", "?"), int(owner.get("pid", 0)), owner.get("branch", "?")))
 
 
 def _print_identity(root: str, branch: str) -> None:
@@ -78,15 +103,19 @@ def cmd_run(args) -> int:
 
 def _run_detached(args) -> int:
     cwd = os.getcwd()
-    found = _locate_run(cwd)
+    found = _located(cwd)
     if not found:
-        print("ERROR: not inside a git repository")
         return EXIT_ERROR
     root, branch, rdir = found
     _print_identity(root, branch)
     pid = lock_owner_alive(rdir)
     if pid:
         print("ERROR: a revali run is already in progress (pid %d); use `revali wait` or `revali stop`" % pid)
+        return EXIT_ERROR
+    tpath = _tree_lock_path(root)
+    owner = tree_lock_owner(tpath)
+    if owner:
+        print(_tree_held_message(owner))
         return EXIT_ERROR
     logs = os.path.join(rdir, paths_for(gitops.repo_root(cwd)).logs_dir)
     os.makedirs(logs, exist_ok=True)
@@ -99,8 +128,9 @@ def _run_detached(args) -> int:
     if args.verbose:
         cmd.append("--verbose")
     child = spawn_detached(cmd, cwd=cwd, log_path=log_path)
-    # Reserve the lock for the child so a second `run` cannot slip in first.
+    # Reserve both locks for the child so a second `run` cannot slip in first.
     acquire_lock(rdir, pid=child)
+    acquire_tree_lock(tpath, branch, pid=child)
     print("started revali run (pid %d); log: %s" % (child, log_path))
     print("next: `revali wait --timeout 9m` (repeat until it reports a result)")
     return EXIT_OK
@@ -108,9 +138,8 @@ def _run_detached(args) -> int:
 
 def _run_foreground(args) -> int:
     cwd = os.getcwd()
-    found = _locate_run(cwd)
+    found = _located(cwd)
     if not found:
-        print("ERROR: not inside a git repository")
         return EXIT_ERROR
     root, branch, rdir = found
     _print_identity(root, branch)
@@ -119,13 +148,21 @@ def _run_foreground(args) -> int:
     except LockHeld as exc:
         print("ERROR: %s" % exc)
         return EXIT_ERROR
-    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(gitops.repo_root(cwd)).logs_dir)
+    tpath = _tree_lock_path(root)
+    try:
+        acquire_tree_lock(tpath, branch)
+    except TreeLockHeld as exc:
+        release_lock(rdir)
+        print(_tree_held_message({"pid": exc.pid, "branch": exc.branch}))
+        return EXIT_ERROR
+    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(root).logs_dir)
     state = State.load(rdir) or State()
     code = EXIT_ERROR
     try:
         code = _pipeline(args, cwd, rdir, state, log)
     finally:
         release_lock(rdir)
+        release_tree_lock(tpath)
     return code
 
 
@@ -292,6 +329,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     state.set_stage(rdir, "review", "reviewer round %d" % (len(state.rounds) + 1))
     outcome = review.run_round(ctx, state, rdir, log)
     if outcome.commit_sha:
+        check_tree_unmoved(ctx, tail="the test commit was not pushed")
         state.pending_effect = "push"
         state.save(rdir)
         res = gitops.push_branch(ctx.branch, ctx.repo_root, log.detail)
@@ -347,6 +385,7 @@ def _validate_and_finish(ctx, state: State, rdir: str, log: RunLog, round_no: in
 
     counts = review.counts_label(data, review_path)
     others = review.non_blocking_note(data, round_no, review_path, rdir)
+    check_tree_unmoved(ctx, tail="validation was not started")
     state.set_stage(rdir, "validate", "review approved in round %d; validating" % round_no)
     prstage.update_body(ctx, state, rdir, log)
     vout = validate.run_validation(ctx, state, rdir, log)
@@ -418,9 +457,8 @@ def parse_duration(text: str) -> float:
 
 
 def cmd_wait(args) -> int:
-    found = _locate_run(os.getcwd())
+    found = _located(os.getcwd(), args.branch)
     if not found:
-        print("ERROR: not inside a git repository")
         return EXIT_ERROR
     root, branch, rdir = found
     _print_identity(root, branch)
@@ -449,14 +487,11 @@ def cmd_wait(args) -> int:
 
 
 def cmd_status(args) -> int:
-    cwd = os.getcwd()
-    root = gitops.repo_root(cwd)
-    if not root:
-        print("not inside a git repository")
+    found = _located(os.getcwd(), args.branch)
+    if not found:
         return EXIT_ERROR
-    branch = args.branch or gitops.current_branch(root)
+    root, branch, rdir = found
     paths = paths_for(root)
-    rdir = review_dir(root, branch, paths.state_dir)
     state = State.load(rdir)
     pid = lock_owner_alive(rdir)
     _print_identity(root, branch)
@@ -491,10 +526,11 @@ def cmd_status(args) -> int:
 
 
 def cmd_reset(args) -> int:
-    rdir = _rdir_for(os.getcwd())
-    if not rdir:
-        print("not inside a git repository")
+    found = _located(os.getcwd())
+    if not found:
         return EXIT_ERROR
+    root, branch, rdir = found
+    _print_identity(root, branch)
     if lock_owner_alive(rdir):
         print("ERROR: a run is in progress; `revali stop` first")
         return EXIT_ERROR
@@ -545,9 +581,10 @@ def _reset_test_dir(state: State, rdir: str) -> None:
 def cmd_clean(args) -> int:
     root = gitops.repo_root(os.getcwd())
     if not root:
-        print("not inside a git repository")
+        print("ERROR: not inside a git repository")
         return EXIT_ERROR
     name = args.branch
+    _print_identity(root, name)
     state_dir = paths_for(root).state_dir
     rdir = os.path.join(root, state_dir, safe_branch(name))
     if not os.path.isdir(rdir):
@@ -564,13 +601,23 @@ def cmd_clean(args) -> int:
 
 
 def cmd_stop(args) -> int:
-    rdir = _rdir_for(os.getcwd())
-    if not rdir:
-        print("not inside a git repository")
+    found = _located(os.getcwd())
+    if not found:
         return EXIT_ERROR
+    root, branch, rdir = found
+    tpath = _tree_lock_path(root)
     pid = lock_owner_alive(rdir)
     if not pid:
+        owner = tree_lock_owner(tpath)   # a stale file goes here
+        if owner and owner.get("branch") and owner["branch"] != branch:
+            # the working tree's live run belongs to another branch: that is the one to stop
+            branch = owner["branch"]
+            rdir = review_dir(root, branch, paths_for(root).state_dir)
+            pid = int(owner["pid"])
+    _print_identity(root, branch)
+    if not pid:
         release_lock(rdir)  # stale when present: nobody alive owns it
+        release_tree_lock(tpath)
         state = State.load(rdir)
         if state is not None and run_died(state):
             # The process is gone and nothing recorded a result: close the episode so `wait`
@@ -591,6 +638,7 @@ def cmd_stop(args) -> int:
             break
         time.sleep(0.1)
     release_lock(rdir)
+    release_tree_lock(tpath)
     state = State.load(rdir)
     print("stopped pid %d" % pid)
     if state is not None and not _close_stopped(state, rdir, "stopped by user at stage '%s'" % state.stage):
@@ -619,10 +667,11 @@ def _close_stopped(state: State, rdir: str, message: str) -> bool:
 def cmd_merge(args) -> int:
     from revali import merge
     cwd = os.getcwd()
-    rdir = _rdir_for(cwd)
-    if not rdir:
-        print("ERROR: not inside a git repository")
+    found = _located(cwd)
+    if not found:
         return EXIT_ERROR
+    root, branch, rdir = found
+    _print_identity(root, branch)
     state = State.load(rdir)
     if state is None or state.stage != "ready_to_merge":
         print("ERROR: this branch is not ready to merge (stage: %s); run `revali run` first"

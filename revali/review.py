@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from revali import EXIT_ERROR
 from revali import engines, gitops, models
 from revali.engines import EngineRequest
-from revali.preflight import Context, Stop
+from revali.preflight import Context, Stop, check_tree_unmoved
 from revali.procs import resolve, run
 from revali.runners import RunnerError, get_runner, steps_for
 from revali.state import State, RunLog, now_iso, read_text, write_json_atomic, write_text
@@ -783,6 +783,7 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
         attempt += 1
         prompt = build_prompt(ctx, state, rdir, round_no, bounce_notes)
         write_text(os.path.join(ctx.logs, "prompt-r%d-%d.md" % (round_no, attempt)), prompt)
+        check_tree_unmoved(ctx)
         state.reviewer_running = True   # cleared when this round ends; a later run cleans up otherwise
         state.save(rdir)
         rr = spawn_reviewer(ctx, prompt, rdir, round_no, attempt, log)
@@ -829,9 +830,11 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
 
     commit_sha = ""
     if files and verdict != NEEDS_INFO:
+        check_tree_unmoved(ctx)
         state.pending_effect = "commit-tests"
         state.save(rdir)
         commit_sha = commit_tests(ctx, files, round_no, log)
+        ctx.head_sha = commit_sha   # the run's own commit: what the later checks expect
         state.pending_effect = ""
         state.test_commits.append(commit_sha)
         for f in files:
