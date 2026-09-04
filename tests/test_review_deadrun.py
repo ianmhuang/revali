@@ -57,7 +57,7 @@ class UnexpectedErrorIsRecorded(DeadRunCase):
         # a recorded error is a result: wait and status report it, not a death
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR)
-        self.assertTrue(out.startswith("error:"), out)
+        self.assertTrue(out.split("\n", 1)[1].startswith("error:"), out)
         self.assertNotIn("died", out)
         code, out = run_cli(["status"])
         self.assertEqual(code, EXIT_OK)
@@ -123,7 +123,7 @@ class StateFileCannotBeWritten(DeadRunCase):
         self.assertEqual(self.fake_calls("claude"), [])                                        # no reviewer was paid for
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertTrue(out.startswith("error:"), out)                                         # the recorded result, not a death
+        self.assertTrue(out.split("\n", 1)[1].startswith("error:"), out)                                         # the recorded result, not a death
         self.assertNotIn("died", out)
 
     def test_a_state_file_that_never_frees_still_ends_with_error_lines_and_exit_1(self):
@@ -160,7 +160,7 @@ class StateFileCannotBeWritten(DeadRunCase):
         self.assertEqual((state.stage, state.last_exit), ("needs_action", EXIT_ACTION))        # untouched on disk
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ACTION, out)                                               # the note was true
-        self.assertTrue(out.startswith("needs_action:"), out)
+        self.assertTrue(out.split("\n", 1)[1].startswith("needs_action:"), out)
         self.assertNotIn("died", out)
         code, out = run_cli(["status"])
         self.assertNotIn("without a result", out)

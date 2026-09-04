@@ -66,6 +66,15 @@ def child_env(extra: Optional[dict] = None) -> dict:
     return env
 
 
+def _no_window() -> dict:
+    """Windows: a console program started by a process without a console (the detached
+    pipeline) gets a fresh console window unless CREATE_NO_WINDOW is set; the output is
+    captured anyway. Elsewhere there is nothing to pass."""
+    if os.name == "nt":
+        return {"creationflags": 0x08000000}  # CREATE_NO_WINDOW
+    return {}
+
+
 def run(cmd: list, cwd: Optional[str] = None, timeout: Optional[float] = None,
         env: Optional[dict] = None, input_text: Optional[str] = None,
         log: Optional[Callable[[str], None]] = None) -> Result:
@@ -78,7 +87,7 @@ def run(cmd: list, cwd: Optional[str] = None, timeout: Optional[float] = None,
             [str(c) for c in cmd], cwd=cwd, env=child_env(env), input=input_text,
             stdin=None if input_text is not None else subprocess.DEVNULL,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout,
+            timeout=timeout, **_no_window(),
         )
     except subprocess.TimeoutExpired as exc:
         raise ProcTimeout("timed out after %ss: %s" % (timeout, cmd[0])) from exc

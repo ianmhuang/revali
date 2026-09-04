@@ -113,6 +113,13 @@ checks AC coverage, smoke-runs the new tests, commits them), validation
 failure), then READY TO MERGE. Every result lands in `.revali/<branch>/`
 (`review-<n>.md`, `tests.md`, `diagnose-<n>.json`, `logs/`) and as PR comments.
 
+`run`, `wait` and `status` print one identity line first,
+`repo: <working tree root>  branch: <branch>`, so several sessions running
+revali in different checkouts can tell their output apart; every message
+that reports a live or dead run carries its pid. On Windows the detached
+run starts its git / gh / claude / wsl subprocesses with `CREATE_NO_WINDOW`,
+so no console windows appear while it works.
+
 After exit code 2 the author fixes or answers in
 `.revali/<branch>/response-<n>.md` (`- F1: fixed` / `- F1: wontfix: <reason>`),
 commits, and runs again; each such cycle counts against `review.max_fixes`.
