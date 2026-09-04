@@ -277,3 +277,14 @@ def preflight(cwd: str, base_override: str = "", dry_run: bool = False,
         ctx.say("note: " + note)
     ctx.say("ok: %s (%s, %d AC)" % (ctx.doc.title, ctx.doc.kind, len(ctx.doc.acs)))
     return ctx
+
+
+def check_tree_unmoved(ctx: Context, tail: str = "nothing was committed or pushed") -> None:
+    """Stop when something else changed the checked-out branch or HEAD since the run last
+    looked. Called before the reviewer is spawned, before its tests are committed, before
+    every push and before validation; `ctx.head_sha` advances only with the run's own commits."""
+    branch = gitops.current_branch(ctx.repo_root)
+    head = gitops.rev_parse("HEAD", ctx.repo_root) or ""
+    if branch != ctx.branch or head != ctx.head_sha:
+        raise Stop(EXIT_ERROR, "the working tree moved under the run: expected branch %s at %s, "
+                               "found %s at %s; %s" % (ctx.branch, ctx.head_sha[:10], branch, head[:10], tail))

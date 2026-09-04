@@ -78,7 +78,7 @@ class EveryArgumentHasAHelpText(unittest.TestCase):
     EXPECTED = {
         "run": {"foreground", "dry_run", "base"},
         "preflight": {"base"},
-        "wait": {"timeout"},
+        "wait": {"timeout", "branch"},   # --branch since feature/tree-guard (AC-3)
         "status": {"branch"},
         "reset": set(),
         "clean": {"branch"},

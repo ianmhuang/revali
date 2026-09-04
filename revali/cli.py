@@ -35,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_wait = _command(sub, "wait", "wait for the running pipeline (returns its exit code, or 4 if still running)",
                       pipeline.cmd_wait)
     p_wait.add_argument("--timeout", default="9m", help="e.g. 30s, 9m, 1h (default 9m)")
+    p_wait.add_argument("--branch", default="", help="wait for that branch's run instead of the checked-out one")
 
     p_status = _command(sub, "status", "show the state of the current (or given) branch", pipeline.cmd_status)
     p_status.add_argument("--branch", default="", help="branch to show instead of the checked-out one")
@@ -44,8 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_clean = _command(sub, "clean", "delete the state directory of a branch", pipeline.cmd_clean)
     p_clean.add_argument("branch", help="the branch whose state directory goes (its git branch may be gone)")
 
-    _command(sub, "stop", "kill the running pipeline for the current branch, or record a run that died "
-                          "without a result as stopped", pipeline.cmd_stop)
+    _command(sub, "stop", "kill the running pipeline in this working tree, whatever branch is checked out, "
+                          "or record a run that died without a result as stopped", pipeline.cmd_stop)
     _command(sub, "merge", "merge the PR of the current branch (only after READY TO MERGE)", pipeline.cmd_merge)
     _command(sub, "stats", "summarise the run history", _cmd_stats)
     _command(sub, "version", "print the version", pipeline.cmd_version)

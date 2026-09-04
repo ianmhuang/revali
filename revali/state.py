@@ -213,6 +213,54 @@ def lock_owner_alive(rdir: str) -> Optional[int]:
     return None
 
 
+# ---- working-tree lock ------------------------------------------------------
+# One checkout has one HEAD, so it runs one pipeline at a time whatever branch each session
+# has checked out. The branch lock above keys the state; this one keys the tree.
+
+class TreeLockHeld(Exception):
+    def __init__(self, pid: int, branch: str, since: str):
+        self.pid, self.branch, self.since = pid, branch, since
+        super().__init__("another revali run holds this working tree (branch %s, pid %d since %s)"
+                         % (branch, pid, since))
+
+
+def tree_lock_path(repo_root: str, state_dir: str) -> str:
+    return os.path.join(repo_root, state_dir, "tree.lock")
+
+
+def read_tree_lock(path: str) -> Optional[dict]:
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def tree_lock_owner(path: str) -> Optional[dict]:
+    """The lock record ({pid, branch, since}) while a live process holds the working tree;
+    a stale or unreadable file is removed and None returned."""
+    existing = read_tree_lock(path)
+    if existing and pid_alive(int(existing.get("pid", 0))):
+        return existing
+    release_tree_lock(path)
+    return None
+
+
+def acquire_tree_lock(path: str, branch: str, pid: Optional[int] = None) -> None:
+    owner = tree_lock_owner(path)
+    if owner and int(owner.get("pid", 0)) != os.getpid():
+        raise TreeLockHeld(int(owner["pid"]), str(owner.get("branch", "?")), str(owner.get("since", "?")))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    write_json_atomic(path, {"pid": pid or os.getpid(), "branch": branch, "since": now_iso()})
+
+
+def release_tree_lock(path: str) -> None:
+    if os.path.isfile(path):
+        os.unlink(path)
+
+
 # ---- logs -------------------------------------------------------------------
 
 class RunLog:

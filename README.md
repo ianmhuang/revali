@@ -121,6 +121,17 @@ run starts every subprocess (git, gh, claude, wsl, the `lint` line and the
 `local` runner's steps) with `CREATE_NO_WINDOW`, so no console windows
 appear while it works.
 
+A working tree runs one pipeline at a time: `run` takes `.revali/tree.lock`
+next to the branch lock, and a second `run` in the same checkout, on any
+branch, is refused with the running branch and pid. `wait --branch <b>`
+waits for another branch's run from wherever you are; `stop` stops the run
+of this working tree whatever branch is checked out. Two worktrees of one
+repository (`git worktree add`) have separate state directories and locks.
+While it works, a run checks before spawning the reviewer, before committing
+its tests, before every push and before validation that the checked-out
+branch and HEAD are still its own; when another session moved them it stops
+with exit 1 (stage `error`) and commits and pushes nothing from that point.
+
 After exit code 2 the author fixes or answers in
 `.revali/<branch>/response-<n>.md` (`- F1: fixed` / `- F1: wontfix: <reason>`),
 commits, and runs again; each such cycle counts against `review.max_fixes`.
@@ -193,6 +204,7 @@ time and recorded in the review and diagnosis headers.
 | `tests.md` | revali, from the Reviewer's answer; validation results appended | you, diagnosis session | same | same |
 | `diagnose-n.json` | revali, from the diagnosis session | you | same | same |
 | `state.json` (stage, rounds, validations, exit) | revali | `wait`, `status`, the next `run` | same | same; `[paths] write_retry_s` is how long a write waits for a reader to release the file (Windows) |
+| `tree.lock` (pid, branch, since of the run holding the working tree) | revali | `run`, `stop` | `.revali/` | `[paths] state_dir` |
 | logs, prompts, raw answers | revali | you | `.revali/<branch>/logs/` | `[paths] logs_dir` |
 | acceptance tests | Reviewer | Validator; merged into `main` | `tests/test_review_<topic>.py` | `[project] test_dir`, `test_file_pattern` |
 | checklist, built-in layer | revali | Reviewer | `checklists/default.md` in revali | `[review] checklist_builtin` |
@@ -272,6 +284,12 @@ Read this before the first run. All of it is on the feature branch unless
 stated.
 
 - appends the state directory (`.revali/`) to `.gitignore` if missing
+- holds one lock per working tree (`.revali/tree.lock`) for the length of a
+  run, so a second `run` in the same checkout is refused whatever branch it
+  is on; before spawning the reviewer, committing its tests, pushing, and
+  validating, checks that the checked-out branch and HEAD are still the
+  run's own, and stops with exit 1 (stage `error`) otherwise, committing and
+  pushing nothing from that point
 - `git push -u origin <branch>` and `gh pr create --draft`
 - commits the reviewer's test files into `test_dir`, with
   `Co-Authored-By: Claude` and `Revali-Round: <n>` trailers; only new files

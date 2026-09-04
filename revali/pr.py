@@ -6,7 +6,7 @@ from typing import Optional
 
 from revali import EXIT_ERROR
 from revali import gitops
-from revali.preflight import Context, Stop
+from revali.preflight import Context, Stop, check_tree_unmoved
 from revali.procs import resolve, run, run_retry
 from revali.secretscan import scan_text
 from revali.state import RunLog, State, write_text
@@ -19,6 +19,7 @@ def _log(log: Optional[RunLog]):
 def ensure_pr(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> None:
     root = ctx.repo_root
     entry = ctx.cfg.paths.state_dir + "/"
+    check_tree_unmoved(ctx)
     if gitops.ensure_gitignore(root, entry):
         gitops.git_ok(["add", ".gitignore"], root)
         res = run(resolve("git") + ["commit", "--quiet", "-m", "chore: ignore %s" % entry], cwd=root, log=_log(log))
@@ -33,6 +34,7 @@ def ensure_pr(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> N
             log.stage("pr", "dry run: would push %s and open a draft PR" % ctx.branch)
         return
 
+    check_tree_unmoved(ctx)
     state.pending_effect = "push"
     state.save(rdir)
     res = gitops.push_branch(ctx.branch, root, _log(log), force=state.force_push)
