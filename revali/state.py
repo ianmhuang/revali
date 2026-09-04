@@ -193,10 +193,14 @@ def read_lock(rdir: str) -> Optional[dict]:
 
 
 def acquire_lock(rdir: str, pid: Optional[int] = None) -> None:
+    """Take the branch lock for this process, or reserve it for `pid` (a detached child).
+    A record already carrying the caller's pid, or `pid`, is the caller's own: the parent
+    and the child write in either order."""
     os.makedirs(rdir, exist_ok=True)
     existing = read_lock(rdir)
-    if existing and pid_alive(int(existing.get("pid", 0))) and int(existing.get("pid", 0)) != os.getpid():
-        raise LockHeld(int(existing["pid"]), existing.get("since", "?"))
+    holder = int(existing.get("pid", 0)) if existing else 0
+    if existing and pid_alive(holder) and holder not in (os.getpid(), pid or 0):
+        raise LockHeld(holder, existing.get("since", "?"))
     write_json_atomic(lock_path(rdir), {"pid": pid or os.getpid(), "since": now_iso()})
 
 
@@ -249,8 +253,9 @@ def tree_lock_owner(path: str) -> Optional[dict]:
 
 
 def acquire_tree_lock(path: str, branch: str, pid: Optional[int] = None) -> None:
+    """Same contract as acquire_lock: a record carrying the caller's pid or `pid` is ours."""
     owner = tree_lock_owner(path)
-    if owner and int(owner.get("pid", 0)) != os.getpid():
+    if owner and int(owner.get("pid", 0)) not in (os.getpid(), pid or 0):
         raise TreeLockHeld(int(owner["pid"]), str(owner.get("branch", "?")), str(owner.get("since", "?")))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     write_json_atomic(path, {"pid": pid or os.getpid(), "branch": branch, "since": now_iso()})

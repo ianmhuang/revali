@@ -213,7 +213,7 @@ time and recorded in the review and diagnosis headers.
 | Reviewer prompt and schema | revali | Reviewer | `prompts/review.md`, `schemas/review.schema.json` in revali | `[review] prompt`, `schema` |
 | diagnosis prompt and schema | revali | diagnosis session | `prompts/diagnose.md`, `schemas/diagnose.schema.json` in revali | `[validate] prompt`, `schema` |
 | how tests are added here | the project | Reviewer | none | `[project] test_guide` |
-| sandbox clone | Validator | Validator; deleted after the run | `~/.revali/sandbox/<repo>/<label>/` inside WSL or on the ssh host | `[validate.<platform>] sandbox_dir` |
+| sandbox clone | Validator | Validator; deleted after the run | `~/.revali/sandbox/<repo>/<branch>/<label>/` inside WSL or on the ssh host | `[validate.<platform>] sandbox_dir` |
 | run history | revali | `revali stats` | `~/.revali/history.jsonl` | `history_path` or `[paths] history_file` in `~/.revali/config.toml` (user level only) |
 
 Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves
@@ -240,9 +240,11 @@ To make an authoring session do this without being asked each time, paste
 ## Sandbox
 
 `[validate.linux] runner = "wsl"` clones the branch into the WSL distro's own
-filesystem (`sandbox_dir`, default `~/.revali/sandbox/<repo>/<label>/`), runs `setup`, `build`,
+filesystem (`sandbox_dir`, default `~/.revali/sandbox/<repo>/<branch>/<label>/`,
+where `<branch>` is the run's branch with `/` written as `__`, so worktrees of
+one repository validate side by side), runs `setup`, `build`,
 `test`, `new_test` there with a per-step timeout, copies the logs back, and
-deletes the clone. The distro needs git and whatever `setup` installs; on
+deletes the clone and the `<branch>` and `<repo>` directories once empty. The distro needs git and whatever `setup` installs; on
 Ubuntu 24.04 that means `python3-venv` and `python3-pip` for a Python project.
 `runner = "local"` uses a git worktree on the host with no isolation.
 
@@ -289,7 +291,8 @@ stated.
   is on; before spawning the reviewer, committing its tests, pushing, and
   validating, checks that the checked-out branch and HEAD are still the
   run's own, and stops with exit 1 (stage `error`) otherwise, committing and
-  pushing nothing from that point
+  pushing nothing from that point; `merge` holds the same lock while it
+  checks out the base branch and pulls
 - `git push -u origin <branch>` and `gh pr create --draft`
 - commits the reviewer's test files into `test_dir`, with
   `Co-Authored-By: Claude` and `Revali-Round: <n>` trailers; only new files

@@ -481,7 +481,8 @@ def cmd_wait(args) -> int:
             return state.last_exit if state.last_exit >= 0 else EXIT_ERROR
         if time.monotonic() >= deadline:
             stage = state.stage if state else "starting"
-            print("still running (pid %d), stage %s; call `revali wait` again" % (pid, stage))
+            again = "revali wait --branch %s" % args.branch if args.branch else "revali wait"
+            print("still running (pid %d), stage %s; call `%s` again" % (pid, stage, again))
             return EXIT_OK + 4  # 4: still running, distinct from the pipeline codes
         time.sleep(min(2.0, max(0.1, deadline - time.monotonic())))
 
@@ -609,9 +610,10 @@ def cmd_stop(args) -> int:
     pid = lock_owner_alive(rdir)
     if not pid:
         owner = tree_lock_owner(tpath)   # a stale file goes here
-        if owner and owner.get("branch") and owner["branch"] != branch:
-            # the working tree's live run belongs to another branch: that is the one to stop
-            branch = owner["branch"]
+        if owner:
+            # the working tree's live run, whichever branch it names (this one too, when its
+            # own lock is missing): its branch's state is the one to close
+            branch = str(owner.get("branch") or branch)
             rdir = review_dir(root, branch, paths_for(root).state_dir)
             pid = int(owner["pid"])
     _print_identity(root, branch)
@@ -677,11 +679,13 @@ def cmd_merge(args) -> int:
         print("ERROR: this branch is not ready to merge (stage: %s); run `revali run` first"
               % (state.stage if state else "none"))
         return EXIT_ERROR
-    if lock_owner_alive(rdir):
+    tpath = _tree_lock_path(root)
+    if lock_owner_alive(rdir) or tree_lock_owner(tpath):
         print("ERROR: a run is in progress")
         return EXIT_ERROR
     acquire_lock(rdir)
-    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(gitops.repo_root(cwd)).logs_dir)
+    acquire_tree_lock(tpath, branch)   # the checkout and pull below must not race a `run`
+    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(root).logs_dir)
     try:
         code = merge.do_merge(cwd, rdir, state, log)
     except Stop as stop:
@@ -690,9 +694,12 @@ def cmd_merge(args) -> int:
             state.message = stop.message
             state.save(rdir)
         release_lock(rdir)
+        release_tree_lock(tpath)
         _record_history(state, stop.exit_code)
         return stop.exit_code
-    release_lock(rdir)
+    finally:
+        release_lock(rdir)
+        release_tree_lock(tpath)
     _record_history(state, code)
     print(merge.merge_summary(state, state.base))
     root = gitops.repo_root(cwd)

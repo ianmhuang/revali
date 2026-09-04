@@ -13,7 +13,7 @@ from revali.engines import EngineRequest
 from revali.preflight import Context, Stop, check_tree_unmoved
 from revali.procs import resolve, run
 from revali.runners import RunnerError, get_runner, steps_for
-from revali.state import State, RunLog, now_iso, read_text, write_json_atomic, write_text
+from revali.state import State, RunLog, now_iso, read_text, safe_branch, write_json_atomic, write_text
 
 APPROVE, CHANGES_REQUESTED, NEEDS_INFO = "APPROVE", "CHANGES_REQUESTED", "NEEDS_INFO"
 MANIFEST_PATTERNS = [
@@ -576,7 +576,7 @@ def smoke_run(ctx: Context, test_files: List[str], rdir: str, round_no: int, att
         log.stage("review", "smoke run of %d new test file(s) on %s" % (len(extra), runner.name))
     try:
         report = runner.run(ctx.repo_root, "HEAD", steps_for(plat, ["setup", "build", "new_test"]), extra,
-                            ctx.logs, label, log.detail if log else None)
+                            ctx.logs, label, log.detail if log else None, scope=safe_branch(ctx.branch))
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc)
     failed = report.failed
@@ -828,6 +828,7 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
     asked = rr.data.get("verdict") == NEEDS_INFO
     verdict, reasons = compute_verdict(rr.data, [] if asked else gaps, needs_info_allowed)
 
+    reviewed_head = ctx.head_sha   # what the reviewer saw; ctx.head_sha moves on with the run's commits
     commit_sha = ""
     if files and verdict != NEEDS_INFO:
         check_tree_unmoved(ctx)
@@ -854,7 +855,7 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
     write_json_atomic(os.path.join(rdir, "review-%d.json" % round_no),
                       {"meta": meta, "verdict": verdict, "reasons": reasons, "data": rr.data,
                        "test_files": files, "commit": commit_sha, "bounces": bounces})
-    record = {"round": round_no, "head_sha": ctx.head_sha, "base_sha": ctx.base_sha, "verdict": verdict,
+    record = {"round": round_no, "head_sha": reviewed_head, "base_sha": ctx.base_sha, "verdict": verdict,
               "reviewer_verdict": rr.data.get("verdict"), "model": rr.model_actual, "fallback": rr.fallback,
               "cost_usd": total_cost, "test_commit": commit_sha, "data": rr.data, "at": now_iso()}
     state.rounds.append(record)
