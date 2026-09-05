@@ -2,6 +2,7 @@
 
 import os
 import string
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -9,8 +10,9 @@ from revali import EXIT_ERROR, engines, models
 from revali.config import PlatformCfg
 from revali.engines import EngineRequest
 from revali.preflight import Context, Stop
-from revali.runners import RunnerError, RunReport, get_runner, steps_for, tail
+from revali.runners import RunnerError, RunReport, get_runner, steps_for, steps_with_files, tail
 from revali.state import RunLog, State, now_iso, read_text, safe_branch, write_text
+from revali.timing import fmt_duration
 
 PASS, FAIL = "PASS", "FAIL"
 LOG_LINES = 200
@@ -56,6 +58,7 @@ def baseline(ctx: Context, rdir: str, log: Optional[RunLog]) -> None:
     runner = _runner(ctx)
     if log:
         log.stage("preflight", "baseline: existing suite on %s" % runner.name)
+    started = time.monotonic()
     try:
         report = runner.run(
             ctx.repo_root,
@@ -69,7 +72,16 @@ def baseline(ctx: Context, rdir: str, log: Optional[RunLog]) -> None:
         )
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, "sandbox failed during baseline: %s" % exc) from exc
+    took = time.monotonic() - started
+    if log:
+        log.timing.sandbox("baseline", took)
     failed = report.failed
+    if log:
+        log.stage(
+            "preflight",
+            "baseline %s (%s)"
+            % ("passed" if failed is None else "failed at " + failed.name, fmt_duration(took)),
+        )
     if failed is not None:
         raise Stop(
             EXIT_ERROR,
@@ -89,11 +101,19 @@ def run_validation(
 ) -> ValidationOutcome:
     number = len(state.validations) + 1
     outcome = ValidationOutcome(number=number, result=PASS)
+    took = None
     if ctx.doc.kind == "docs":
         outcome.skipped_reason = "kind docs: nothing to run"
     else:
         plat = platform(ctx)
-        steps = [s for s in steps_for(plat, ["setup", "build", "test", "new_test"]) if s[1].strip()]
+        # new_test names every reviewer file on the branch when it asks for {files}
+        steps = steps_with_files(
+            plat,
+            ["setup", "build", "test", "new_test"],
+            list(state.test_files),
+            log.stage if log else None,
+            "validate",
+        )
         runner = _runner(ctx)
         label = "validate-r%d" % max(1, len(state.rounds))
         if log:
@@ -102,6 +122,7 @@ def run_validation(
                 "run %d: %s on %s (%s)"
                 % (number, ", ".join(n for n, _ in steps), runner.name, label),
             )
+        started = time.monotonic()
         try:
             report = runner.run(
                 ctx.repo_root,
@@ -115,6 +136,9 @@ def run_validation(
             )
         except RunnerError as exc:
             raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc) from exc
+        took = time.monotonic() - started
+        if log:
+            log.timing.sandbox(label, took)
         outcome.report = report
         failed = report.failed
         if failed is not None:
@@ -155,11 +179,12 @@ def run_validation(
     if log:
         log.stage(
             "validate",
-            "run %d: %s%s"
+            "run %d: %s%s%s"
             % (
                 number,
                 outcome.result,
                 " (%s)" % outcome.failed_step if outcome.failed_step else "",
+                " (%s)" % fmt_duration(took) if took is not None else "",
             ),
         )
     return outcome

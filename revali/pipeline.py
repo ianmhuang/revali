@@ -221,14 +221,23 @@ def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         return _record_stop(state, rdir, log, "error", stop, started)
 
 
+def _stage(
+    state: State, rdir: str, log: RunLog, stage: str, message: str = "", exit_code=None
+) -> None:
+    """state.set_stage plus the run's timing: a running stage starts its clock, a terminal
+    one closes the running clock."""
+    log.timing.stage(stage)
+    state.set_stage(rdir, stage, message, exit_code)
+
+
 def _record_stop(
     state: State, rdir: str, log: RunLog, stage: str, stop: Stop, started: bool
 ) -> int:
     """Persist a run's outcome. When the state file itself cannot be written, say what `wait`
     will show instead of escaping with a traceback; the exit code stands either way."""
     try:
-        state.set_stage(rdir, stage, stop.message, stop.exit_code)
-        _record_history(state, stop.exit_code)
+        _stage(state, rdir, log, stage, stop.message, stop.exit_code)
+        _record_history(state, stop.exit_code, log)
     except OSError as exc:
         if started:
             shows = "`wait` and `status` will report the run as dead"
@@ -240,7 +249,14 @@ def _record_stop(
     return stop.exit_code
 
 
-def _record_history(state: State, exit_code: int) -> None:
+def _record_history(state: State, exit_code: int, log: Optional[RunLog] = None) -> None:
+    """The history row for this run. With `log`, the run's timing is closed, written to the
+    log as one `run: timing` line, and stored in the row (`stage_s`, `sandbox_s`)."""
+    timing = {}
+    if log is not None:
+        log.timing.close()
+        log.stage("run", "timing " + log.timing.summary())
+        timing = log.timing.as_dict()
     try:
         path = history_path(load_user_config())
     except ConfigError:
@@ -261,6 +277,7 @@ def _record_history(state: State, exit_code: int) -> None:
                 "models": state.models_used,
                 "fallback": state.fallback,
                 "pr": state.pr_number,
+                **timing,
             },
         )
     except OSError:
@@ -366,7 +383,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     # lowercased like gitops.remote_repo, so stats groups both sources under one row
     state.repo = ("%s/%s" % (ctx.repo.owner, ctx.repo.name)).lower() if ctx.repo else ""
     state.head_sha, state.base_sha = ctx.head_sha, ctx.base_sha
-    state.set_stage(rdir, "preflight", "preflight passed")
+    _stage(state, rdir, log, "preflight", "preflight passed")
 
     if args.dry_run:
         msg = (
@@ -380,11 +397,13 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
             )
         )
         log.stage("run", msg)
-        state.set_stage(rdir, "preflight", msg, EXIT_OK)
+        _stage(state, rdir, log, "preflight", msg, EXIT_OK)
+        log.timing.close()
+        log.stage("run", "timing " + log.timing.summary())
         print("DRY RUN OK: " + msg)
         return EXIT_OK
 
-    state.set_stage(rdir, "pr", "pushing and opening the PR")
+    _stage(state, rdir, log, "pr", "pushing and opening the PR")
     prstage.ensure_pr(ctx, state, rdir, log)
     state.head_sha = ctx.head_sha
 
@@ -405,7 +424,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
             os.path.join(rdir, "review-%d.md" % resume_round),
         )
 
-    state.set_stage(rdir, "review", "reviewer round %d" % (len(state.rounds) + 1))
+    _stage(state, rdir, log, "review", "reviewer round %d" % (len(state.rounds) + 1))
     outcome = review.run_round(ctx, state, rdir, log)
     if outcome.commit_sha:
         check_tree_unmoved(ctx, tail="the test commit was not pushed")
@@ -443,11 +462,16 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
                     "\n".join("  - " + p for p in state.pending_test_files),
                 )
             )
-        state.set_stage(
-            rdir, "needs_action", "reviewer needs information (%s)" % counts, EXIT_ACTION
+        _stage(
+            state,
+            rdir,
+            log,
+            "needs_action",
+            "reviewer needs information (%s)" % counts,
+            EXIT_ACTION,
         )
         prstage.update_body(ctx, state, rdir, log)
-        _record_history(state, EXIT_ACTION)
+        _record_history(state, EXIT_ACTION, log)
         print(
             "ACTION NEEDED: the reviewer has questions (round %d). Answer them in %s, adjust "
             "change.md if the acceptance criteria were unclear, then run again.\n%s%s%s"
@@ -462,14 +486,16 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         return EXIT_ACTION
     if outcome.verdict == review.CHANGES_REQUESTED:
         reasons = "\n".join("  - " + r for r in outcome.reasons)
-        state.set_stage(
+        _stage(
+            state,
             rdir,
+            log,
             "needs_action",
             "changes requested in round %d (%s)" % (outcome.round_no, counts),
             EXIT_ACTION,
         )
         prstage.update_body(ctx, state, rdir, log)
-        _record_history(state, EXIT_ACTION)
+        _record_history(state, EXIT_ACTION, log)
         print(
             "ACTION NEEDED: changes requested (round %d, fix cycle %d of %d). Full review: %s\n"
             "Fix what blocks, or answer each finding in %s (fixed / wontfix: <reason>), "
@@ -501,7 +527,7 @@ def _validate_and_finish(
     counts = review.counts_label(data, review_path)
     others = review.non_blocking_note(data, round_no, review_path, rdir)
     check_tree_unmoved(ctx, tail="validation was not started")
-    state.set_stage(rdir, "validate", "review approved in round %d; validating" % round_no)
+    _stage(state, rdir, log, "validate", "review approved in round %d; validating" % round_no)
     prstage.update_body(ctx, state, rdir, log)
     vout = validate.run_validation(ctx, state, rdir, log)
     section = vout.section_md
@@ -511,14 +537,16 @@ def _validate_and_finish(
 
     if vout.result == validate.FAIL:
         summary = validate.summary_for_author(vout, rdir)
-        state.set_stage(
+        _stage(
+            state,
             rdir,
+            log,
             "needs_action",
             "validation %d failed at %s (%s)" % (vout.number, vout.failed_step, counts),
             EXIT_ACTION,
         )
         prstage.update_body(ctx, state, rdir, log)
-        _record_history(state, EXIT_ACTION)
+        _record_history(state, EXIT_ACTION, log)
         print(
             "ACTION NEEDED: %s\nFix (or correct the test if the diagnosis says the test is wrong, "
             "and say so in %s), commit, run again.%s"
@@ -526,10 +554,10 @@ def _validate_and_finish(
         )
         return EXIT_ACTION
 
-    state.set_stage(rdir, "ready_to_merge", "validation %d passed" % vout.number, EXIT_OK)
+    _stage(state, rdir, log, "ready_to_merge", "validation %d passed" % vout.number, EXIT_OK)
     prstage.mark_ready(ctx, state, log)
     prstage.update_body(ctx, state, rdir, log)
-    _record_history(state, EXIT_OK)
+    _record_history(state, EXIT_OK, log)
     flags = []
     if state.fallback:
         flags.append("a reviewer round ran on a fallback model")

@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from revali import PROMPT_VERSION, STATE_VERSION, VERSION
 from revali.procs import pid_alive
+from revali.timing import Timing
 
 STAGES = (
     "preflight",
@@ -313,6 +314,7 @@ class RunLog:
         self.path = os.path.join(rdir, logs_dir, "revali.log") if rdir else None
         self.verbose = verbose
         self.quiet = quiet
+        self.timing = Timing()  # stage and sandbox wall times, reported at the end of the run
         if self.path:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
 

@@ -8,7 +8,16 @@ filesystem (`sandbox_dir`, default `~/.revali/sandbox/<repo>/<branch>/<label>/`,
 where `<branch>` is the run's branch with `/` written as `__`, so worktrees of
 one repository validate side by side), runs `setup`, `build`,
 `test`, `new_test` there with a per-step timeout, copies the logs back, and
-deletes the clone and the `<branch>` and `<repo>` directories once empty. The distro needs git and whatever `setup` installs; on
+deletes the clone and the `<branch>` and `<repo>` directories once empty. A
+`new_test` command may contain `{files}`: it is replaced by the reviewer's
+test files (paths relative to the repository root, space separated, quoted
+when they contain whitespace), this round's files in the smoke run and every
+reviewer file on the branch in validation, so only the new tests run rather
+than everything a pattern matches; when `{files}` would name no file the
+step is skipped and the log says so. Without `{files}` the command runs as
+written. Every sandbox session's wall time appears in the log line that
+reports its result and, with the per-stage times, in the run's final
+`run: timing` line. The distro needs git and whatever `setup` installs; on
 Ubuntu 24.04 that means `python3-venv` and `python3-pip` for a Python project.
 `runner = "local"` uses a git worktree on the host with no isolation.
 
