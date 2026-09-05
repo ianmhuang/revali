@@ -223,9 +223,9 @@ class DeletedFileNotRecovered(RewriteCase):
 
 class ReadmeStatesTheRule(unittest.TestCase):
     def test_readme_names_the_trailer(self):
-        with open(os.path.join(os.path.dirname(HERE), "README.md"), "r", encoding="utf-8") as fh:
+        with open(os.path.join(os.path.dirname(HERE), "docs", "side-effects.md"), "r", encoding="utf-8") as fh:
             text = fh.read()
-        part = text.split("## What revali does to your repository", 1)[1].split("\n## ", 1)[0]
+        part = text.split("# What revali does to your repository", 1)[1].split("\n## ", 1)[0]
         self.assertIn("Revali-Round", part)                                          # AC-6
         self.assertIn("rebase", part)
 

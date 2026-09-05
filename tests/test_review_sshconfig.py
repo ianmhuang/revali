@@ -88,7 +88,7 @@ class DocsTests(unittest.TestCase):
             return fh.read()
 
     def test_readme_documents_the_ssh_runner(self):
-        text = self.read("README.md")
+        text = self.read("docs", "sandbox.md")
         self.assertIn('runner = "ssh"', text)
         self.assertIn("host = ", text)
         self.assertIn("BatchMode", text)
@@ -96,7 +96,7 @@ class DocsTests(unittest.TestCase):
         self.assertNotIn("```\r\n```", text, "empty code fence still in README")
 
     def test_readme_documents_the_ssh_timeout_keys(self):
-        text = self.read("README.md")
+        text = self.read("docs", "sandbox.md")
         self.assertIn("connect_timeout_s", text)
         self.assertIn("transfer_timeout_min", text)
 

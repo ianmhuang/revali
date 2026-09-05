@@ -15,8 +15,9 @@ from revali.config import history_path, load_user_config, paths_for, ConfigError
 from revali.preflight import Stop, check_tree_unmoved, locate, preflight
 from revali.procs import kill_tree, pid_alive, python_exe, spawn_detached
 from revali.state import (LockHeld, RunLog, State, TreeLockHeld, acquire_lock, acquire_tree_lock,
-                          append_history, lock_owner_alive, read_lock, release_lock, release_tree_lock,
-                          review_dir, run_died, safe_branch, tree_lock_owner, tree_lock_path)
+                          append_history, lock_owner_alive, read_lock, read_tree_lock, release_lock,
+                          release_tree_lock, review_dir, run_died, safe_branch, tree_lock_owner,
+                          tree_lock_path)
 
 
 def _interrupted(state: State) -> bool:
@@ -610,12 +611,18 @@ def cmd_stop(args) -> int:
     tpath = _tree_lock_path(root)
     pid = lock_owner_alive(rdir)
     if not pid:
+        # The working tree's live run, whichever branch it names (this one too, when its own
+        # lock is missing): its branch's state is the one to close. A stale record is only
+        # followed on a detached HEAD, where it is the one thing that still names the branch
+        # of a run that died; on a branch, a stale record for another branch is ignored and
+        # removed as before. Read it before tree_lock_owner removes it.
+        record = read_tree_lock(tpath) if branch == "HEAD" else None
         owner = tree_lock_owner(tpath)   # a stale file goes here
-        if owner:
-            # the working tree's live run, whichever branch it names (this one too, when its
-            # own lock is missing): its branch's state is the one to close
-            branch = str(owner.get("branch") or branch)
+        named = owner or record
+        if named and named.get("branch"):
+            branch = str(named["branch"])
             rdir = review_dir(root, branch, paths_for(root).state_dir)
+        if owner:
             pid = int(owner["pid"])
     _print_identity(root, branch)
     if not pid:
@@ -684,7 +691,11 @@ def cmd_merge(args) -> int:
     if lock_owner_alive(rdir) or tree_lock_owner(tpath):
         print("ERROR: a run is in progress")
         return EXIT_ERROR
-    acquire_lock(rdir)
+    try:
+        acquire_lock(rdir)   # a `run` may have taken it since the check above
+    except LockHeld as exc:
+        print("ERROR: %s" % exc)
+        return EXIT_ERROR
     try:
         acquire_tree_lock(tpath, branch)   # the checkout and pull below must not race a `run`
     except TreeLockHeld as exc:

@@ -14,7 +14,8 @@ Keep it to things a linter cannot check. Delete what does not apply.
   change, the change description says why.
 
 ## Interfaces
-- Public API or CLI changes update the README in the same change.
+- Public API or CLI changes update the README, or the page under `docs/`
+  that describes them, in the same change.
 - Error paths are handled and tested, not just the happy path.
 
 ## Portability

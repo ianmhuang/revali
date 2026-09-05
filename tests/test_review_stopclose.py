@@ -265,7 +265,7 @@ class StatsCountsTheStoppedEpisode(StopCloseCase):
 
 class ReadmeSaysSo(unittest.TestCase):
     def test_the_stop_paragraph_mentions_the_history_row_and_the_failed_write(self):
-        with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8", newline="") as fh:
+        with open(os.path.join(ROOT, "docs", "workflow.md"), "r", encoding="utf-8", newline="") as fh:
             readme = fh.read()
         self.assertIn("`revali stop`", readme)
         paragraph = readme.split("`revali stop` acknowledges", 1)[1][:1200]

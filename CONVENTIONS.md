@@ -27,10 +27,12 @@ Things a linter cannot check; formatting is not listed.
 
 ## Interfaces
 - CLI flags, `revali.toml` keys, exit codes, and the files under
-  `.revali/<branch>/` are public interface: a change updates `README.md`
-  (and `templates/` when a key is involved) in the same change.
-- Every git or GitHub side effect the tool performs is listed in README
-  under "What revali does to your repository".
+  `.revali/<branch>/` are public interface: a change updates the page
+  under `docs/` that describes it, or `README.md` for the command list and
+  the status line (and `templates/` when a key is involved), in the same
+  change.
+- Every git or GitHub side effect the tool performs is listed in
+  `docs/side-effects.md`.
 
 ## Portability
 - Runs on the Windows host (PowerShell / Git Bash) and inside WSL or Linux:

@@ -244,7 +244,7 @@ class LiveRunStopIsUnchanged(StopDeadCase):
 
 class ReadmeSaysSo(unittest.TestCase):
     def test_the_dead_run_paragraph_mentions_stop(self):
-        with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8", newline="") as fh:
+        with open(os.path.join(ROOT, "docs", "workflow.md"), "r", encoding="utf-8", newline="") as fh:
             readme = fh.read()
         self.assertIn("without a result", readme)
         after = readme.split("without a result", 1)[1][:1500]

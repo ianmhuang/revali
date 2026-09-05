@@ -204,10 +204,10 @@ class StateThatForgotTheFiles(FreshStateCase):
 
 class ReadmeStatesTheOwnershipRule(unittest.TestCase):
     def test_section_names_the_trailer_and_what_dropping_it_means(self):
-        with open(os.path.join(os.path.dirname(HERE), "README.md"), "r", encoding="utf-8") as fh:
+        with open(os.path.join(os.path.dirname(HERE), "docs", "side-effects.md"), "r", encoding="utf-8") as fh:
             text = fh.read()
-        self.assertIn("## What revali does to your repository", text)
-        part = text.split("## What revali does to your repository", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("# What revali does to your repository", text)
+        part = text.split("# What revali does to your repository", 1)[1].split("\n## ", 1)[0]
         self.assertIn("Revali-Round", part)                                            # AC-6: the rule
         self.assertIn("rebase", part)
         self.assertIn("squash", part.lower())                                          # AC-6: dropping it

@@ -74,9 +74,9 @@ class PrivateRequirementIsGone(unittest.TestCase):
         self.assertNotIn("must be private", low)
 
     def test_side_effect_list_describes_the_summary_comments(self):
-        start = self.text.index("## What revali does to your repository")
-        end = self.text.index("## Development", start)
-        section = self.text[start:end].lower()
+        with open(os.path.join(ROOT, "docs", "side-effects.md"), "r", encoding="utf-8", newline="") as fh:
+            section = fh.read().lower()
+        self.assertTrue(section.startswith("# what revali does to your repository"))
         self.assertIn("pr comment", section)
         self.assertIn("summar", section)
         self.assertIn("not private", section)

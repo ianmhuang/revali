@@ -174,12 +174,14 @@ class HistoryFileEndToEnd(RepoCase):
 
 class ReadmeAdditions(unittest.TestCase):
     def setUp(self):
-        with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8") as fh:
-            self.readme = fh.read()
+        with open(os.path.join(ROOT, "docs", "files.md"), "r", encoding="utf-8") as fh:
+            self.files_doc = fh.read()
+        with open(os.path.join(ROOT, "docs", "configuration.md"), "r", encoding="utf-8") as fh:
+            self.config_doc = fh.read()
 
     def test_files_section(self):
-        self.assertIn("\n## Files\n", self.readme)
-        files = self.readme.split("\n## Files\n", 1)[1].split("\n## ", 1)[0]
+        self.assertTrue(self.files_doc.startswith("# Files\n"))
+        files = self.files_doc.split("# Files\n", 1)[1].split("\n## ", 1)[0]
         self.assertIn("| Document | Written by | Read by | Default location | Config key |", files)
         for token in ("`change.md`", "`tests.md`", "`diagnose-n.json`", "[paths] state_dir", "[paths] logs_dir",
                       "sandbox_dir", "history_file", "checklist_builtin", "[review] prompt", "[validate] prompt",
@@ -187,7 +189,7 @@ class ReadmeAdditions(unittest.TestCase):
             self.assertIn(token, files, token)
 
     def test_model_paragraph_in_configuration(self):
-        conf = self.readme.split("\n## Configuration\n", 1)[1].split("\n## ", 1)[0]
+        conf = self.config_doc.split("# Configuration\n", 1)[1].split("\n## ", 1)[0]
         self.assertIn('`model = "auto"`', conf)
         self.assertIn("one tier above", conf)
         self.assertIn("one tier below", conf)

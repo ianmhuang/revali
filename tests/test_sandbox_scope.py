@@ -347,11 +347,12 @@ class ReadmeTests(unittest.TestCase):
     """AC-7"""
 
     def test_readme_shows_the_layout(self):
-        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as fh:
+        with open(os.path.join(ROOT, "docs", "sandbox.md"), encoding="utf-8") as fh:
             text = fh.read()
         self.assertIn("<repo>/<branch>/<label>", text)
         self.assertNotIn("sandbox/<repo>/<label>", text)
-        self.assertIn("`merge` holds", text)
+        with open(os.path.join(ROOT, "docs", "side-effects.md"), encoding="utf-8") as fh:
+            self.assertIn("`merge` holds", fh.read())
 
 
 if __name__ == "__main__":

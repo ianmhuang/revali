@@ -216,23 +216,27 @@ class ReadmeLayoutTests(unittest.TestCase):
     """AC-7"""
 
     def setUp(self):
-        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as fh:
+        with open(os.path.join(ROOT, "docs", "sandbox.md"), encoding="utf-8") as fh:
             self.text = fh.read()
+        with open(os.path.join(ROOT, "docs", "files.md"), encoding="utf-8") as fh:
+            self.text += fh.read()
+        with open(os.path.join(ROOT, "docs", "side-effects.md"), encoding="utf-8") as fh:
+            self.effects = fh.read()
 
-    def section(self, heading):
-        start = self.text.index(heading)
-        end = self.text.find("\n## ", start + 1)
-        return self.text[start:end if end >= 0 else len(self.text)]
+    def section(self, text, heading):
+        start = text.index(heading)
+        end = text.find("\n## ", start + 1)
+        return text[start:end if end >= 0 else len(text)]
 
     def test_files_table_and_sandbox_section_show_the_branch_level(self):
         self.assertIn("`~/.revali/sandbox/<repo>/<branch>/<label>/`", self.text)
         self.assertNotIn("sandbox/<repo>/<label>/", self.text)
-        section = self.section("## Sandbox")
+        section = self.section(self.text, "# Sandbox")
         self.assertIn("<repo>/<branch>/<label>", section)
         self.assertIn("__", section)   # how <branch> is written
 
     def test_what_revali_does_says_merge_holds_the_tree_lock(self):
-        section = self.section("## What revali does to your repository")
+        section = self.section(self.effects, "# What revali does to your repository")
         lock = [p for p in section.split("\n- ") if "tree.lock" in p]
         self.assertEqual(len(lock), 1, section)
         self.assertIn("`merge`", lock[0])

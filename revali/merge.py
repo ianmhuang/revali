@@ -99,17 +99,21 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
         raise Stop(EXIT_ACTION, "HEAD moved since validation (%s -> %s); run `revali run` again"
                    % (state.head_sha[:10], head[:10]))
 
-    if cfg.merge.wait_for_checks:
-        wait_for_checks(state.pr_number, root, cfg.merge.checks_timeout_min, log)
-
     # In a linked worktree whose base branch is checked out elsewhere, gh's --delete-branch
     # would try to check out the base here and fail after the PR was merged; do the local
-    # part by hand instead.
+    # part by hand instead. Decided before the CI wait: a refusal must not cost that wait.
     elsewhere = gitops.worktree_holding(base, root)
     if elsewhere and not gitops.is_linked_worktree(root):
         # the primary tree cannot be detached and removed like a linked worktree
-        raise Stop(EXIT_ERROR, "%s is checked out in %s; remove or switch that worktree, then merge again"
-                   % (base, elsewhere))
+        # No alternative is offered: the branch is checked out here, so a new worktree cannot
+        # take it, and this tree's .revali state would not follow it anyway.
+        raise Stop(EXIT_ERROR, "%s is checked out in %s; remove or switch that worktree, then merge again "
+                   "(the layout that works alone is a linked worktree from the start: docs/workflow.md, "
+                   "\"Several agents on one repository\")" % (base, elsewhere))
+
+    if cfg.merge.wait_for_checks:
+        wait_for_checks(state.pr_number, root, cfg.merge.checks_timeout_min, log)
+
     argv = ["pr", "merge", str(state.pr_number), "--%s" % cfg.merge.method]
     if elsewhere:
         log.stage("merge", "gh %s (worktree mode: %s is checked out in %s)" % (" ".join(argv), base, elsewhere))
@@ -138,10 +142,24 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
     if gitops.current_branch(root) != base:
         run(resolve("git") + ["checkout", "--quiet", base], cwd=root, log=log.detail)
     run(resolve("git") + ["pull", "--quiet", "--prune"], cwd=root, log=log.detail, timeout=300)
-    if gitops.rev_parse(branch, root) and gitops.current_branch(root) == base:
-        run(resolve("git") + ["branch", "-D", branch], cwd=root, log=log.detail)
-    log.stage("merge", "local: on %s, branch %s removed" % (gitops.current_branch(root), branch))
+    removed, why = _delete_local_branch(root, branch, log, when=gitops.current_branch(root) == base)
+    log.stage("merge", "local: on %s, branch %s %s%s"
+              % (gitops.current_branch(root), branch, "removed" if removed else "kept", why))
     return EXIT_OK
+
+
+def _delete_local_branch(root: str, branch: str, log: RunLog, when: bool) -> tuple:
+    """`git branch -D <branch>` when `when` holds and the branch still exists. (removed, why):
+    `why` is empty on success or when there was nothing to delete, and names git's error
+    otherwise, so the log line says why a branch is still there."""
+    if not gitops.rev_parse(branch, root):
+        return True, ""
+    if not when:
+        return False, ""
+    res = run(resolve("git") + ["branch", "-D", branch], cwd=root, log=log.detail)
+    if res.ok:
+        return True, ""
+    return False, " (git branch -D failed: %s)" % res.text.strip()[:200]
 
 
 def pr_merged(pr_number: int, cwd: str, log: Optional[RunLog]) -> bool:
@@ -170,13 +188,12 @@ def _worktree_follow_up(root: str, branch: str, base: str, elsewhere: str, log: 
         res = run(resolve("git") + ["checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=root, log=log.detail)
         if not res.ok:
             log.stage("merge", "note: git checkout --detach failed: %s" % res.text.strip()[:200])
-    removed = False
-    if gitops.current_branch(root) == "HEAD" and gitops.rev_parse(branch, root):
-        removed = run(resolve("git") + ["branch", "-D", branch], cwd=root, log=log.detail).ok
+    removed, why = _delete_local_branch(root, branch, log, when=gitops.current_branch(root) == "HEAD")
     now = gitops.current_branch(root)
     where = "detached at the merged %s" % base if now == "HEAD" else "still on %s" % now
-    log.stage("merge", "worktree: %s, local branch %s %s; remove this worktree with `git worktree remove %s` "
-                       "and run `git pull` in %s" % (where, branch, "removed" if removed else "kept", root, elsewhere))
+    log.stage("merge", "worktree: %s, local branch %s %s%s; remove this worktree with `git worktree remove %s` "
+                       "and run `git pull` in %s" % (where, branch, "removed" if removed else "kept", why, root,
+                                                     elsewhere))
 
 
 def merge_summary(state: State, base: str) -> str:

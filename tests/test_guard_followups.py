@@ -269,9 +269,9 @@ class StagedAdditionTests(RepoCase):
 
 class ReadmeTests(unittest.TestCase):
     def test_readme_describes_cleanup_and_restore_source(self):
-        with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8") as fh:
+        with open(os.path.join(ROOT, "docs", "side-effects.md"), "r", encoding="utf-8") as fh:
             text = fh.read()
-        section = text.split("## What revali does to your repository")[1].split("\n## ")[0]
+        section = text.split("# What revali does to your repository")[1].split("\n## ")[0]
         self.assertNotIn("do not clean up", section)                                       # AC-6
         self.assertIn("interrupted", section)
         self.assertIn("from HEAD", section)

@@ -40,7 +40,7 @@ class ReadmeAgents(unittest.TestCase):
     """AC-1 (README), AC-2, AC-10"""
 
     def test_several_agents_section_follows_workflow(self):
-        text = read("README.md")
+        text = read("docs/workflow.md")
         self.assertIn("\n## Several agents on one repository\n", text)
         self.assertLess(text.index("\n## Workflow\n"), text.index("\n## Several agents on one repository\n"))
         # the next top-level heading after Workflow is this one
@@ -48,7 +48,7 @@ class ReadmeAgents(unittest.TestCase):
         self.assertEqual(after_workflow.split("\n## ", 1)[1].split("\n", 1)[0], "Several agents on one repository")
 
     def test_several_agents_section_content(self):
-        body = unwrap(section(read("README.md"), "Several agents on one repository"))
+        body = unwrap(section(read("docs/workflow.md"), "Several agents on one repository"))
         for phrase in ("git worktree add ../<name> -b <branch>",   # one worktree per agent
                        "tree.lock",                                 # a second run in one checkout is refused
                        "`stop`",
@@ -62,7 +62,7 @@ class ReadmeAgents(unittest.TestCase):
         self.assertIn("detached HEAD", body)
 
     def test_merge_bullet_lists_the_worktree_side_effects(self):
-        body = unwrap(section(read("README.md"), "What revali does to your repository"))
+        body = unwrap(read("docs/side-effects.md").split("# What revali does to your repository\n", 1)[1])
         bullet = body.split("on `revali merge`", 1)[1].split(" - ", 1)[0]
         for phrase in ("`gh pr merge --<method>` without `--delete-branch`",
                        "`git push origin --delete <branch>`",
