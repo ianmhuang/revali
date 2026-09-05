@@ -1,9 +1,42 @@
+import contextlib
+import io
 import os
+import subprocess
+import sys
 import unittest
 
-from revali import EXIT_ERROR, EXIT_OK, VERSION
+from revali import EXIT_ERROR, EXIT_OK, NAME, VERSION
 from revali.state import State, lock_owner_alive, review_dir
-from tests.helpers import RepoCase, claude_entry, run_cli
+from tests.helpers import ROOT, RepoCase, claude_entry, run_cli
+
+
+class VersionFlag(unittest.TestCase):
+    """`revali --version` is the flag form of `revali version`: same line, exit 0."""
+
+    def test_flag_prints_the_subcommand_line(self):
+        code, out = run_cli(["--version"])
+        self.assertEqual(code, EXIT_OK)
+        self.assertEqual(out, run_cli(["version"])[1])
+        self.assertEqual(out.strip(), "%s %s" % (NAME, VERSION))
+
+    def test_flag_as_a_subprocess(self):
+        res = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "revali.py"), "--version"],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+        )
+        self.assertEqual(res.returncode, EXIT_OK, res.stderr)
+        self.assertEqual(res.stdout.strip(), "%s %s" % (NAME, VERSION))
+        self.assertEqual(res.stderr, "")
+
+    def test_flag_is_top_level_only(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code, out = run_cli(["run", "--version"])
+        self.assertNotEqual(code, EXIT_OK)
+        self.assertNotIn(VERSION, out)
+        self.assertIn("unrecognized arguments", err.getvalue())
 
 
 class CliTests(RepoCase):

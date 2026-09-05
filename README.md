@@ -105,6 +105,7 @@ python <path-to>/revali.py run              # detached; then:
 python <path-to>/revali.py wait --timeout 9m
 python <path-to>/revali.py merge            # only after READY TO MERGE; waits for CI
 python <path-to>/revali.py status | stop | reset | clean <branch> | stats | version
+python <path-to>/revali.py --version        # same line as `version`
 ```
 
 What a run does, in order: preflight (including the existing suite in the
