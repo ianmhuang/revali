@@ -105,9 +105,11 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
     elsewhere = gitops.worktree_holding(base, root)
     if elsewhere and not gitops.is_linked_worktree(root):
         # the primary tree cannot be detached and removed like a linked worktree
-        raise Stop(EXIT_ERROR, "%s is checked out in %s; remove or switch that worktree, then merge again, "
-                   "or merge from a linked worktree of %s (`git worktree add <path> %s`)"
-                   % (base, elsewhere, branch, branch))
+        # No alternative is offered: the branch is checked out here, so a new worktree cannot
+        # take it, and this tree's .revali state would not follow it anyway.
+        raise Stop(EXIT_ERROR, "%s is checked out in %s; remove or switch that worktree, then merge again "
+                   "(the layout that works alone is a linked worktree from the start: docs/workflow.md, "
+                   "\"Several agents on one repository\")" % (base, elsewhere))
 
     if cfg.merge.wait_for_checks:
         wait_for_checks(state.pr_number, root, cfg.merge.checks_timeout_min, log)

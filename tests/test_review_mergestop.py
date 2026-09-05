@@ -1,5 +1,5 @@
 """Review of feature/docs-split, the PR #24 follow-ups in `merge` and `stop`:
-AC-6 the primary-tree refusal comes before the CI wait and names the worktree alternative;
+AC-6 the primary-tree refusal comes before the CI wait and points at the docs (no unrunnable command);
 AC-7 a failed `git branch -D` after the merge is reported as a kept branch with git's words,
 in the primary tree and in worktree mode, and `merge` still returns 0;
 AC-8 a branch lock taken between the check and `acquire_lock` is one ERROR line, exit 1;
@@ -105,9 +105,10 @@ class RefusalBeforeTheCiWait(MergeCase):
         line = self.line_with(out, "ERROR: main is checked out in")
         self.assertTrue(same_path_in(line, linked), line)
         self.assertIn("remove or switch that worktree, then merge again", line)
-        # the alternative is named: a linked worktree of the feature branch
-        self.assertIn("linked worktree of feature/mul", line)
-        self.assertIn("git worktree add <path> feature/mul", line)
+        # AC-6 as rewritten after round 1 (F1): no command that cannot run from this state,
+        # a pointer at the docs instead
+        self.assertNotIn("git worktree add", line)
+        self.assertIn('docs/workflow.md, "Several agents on one repository"', line)
         # nothing changed and both locks are released
         self.assertEqual(State.load(rdir).stage, "ready_to_merge")
         self.assertEqual(gitops.current_branch(self.repo), "feature/mul")

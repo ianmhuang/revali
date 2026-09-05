@@ -209,7 +209,10 @@ class RefusalBeforeTheCiWait(ReadyRepo):
         self.assertIn("ERROR: main is checked out in", out)
         self.assertIn(os.path.normpath(linked), os.path.normpath(out))
         self.assertIn("remove or switch that worktree, then merge again", out)
-        self.assertIn("or merge from a linked worktree of feature/mul (`git worktree add <path> feature/mul`)", out)
+        line = next(l for l in out.splitlines() if "ERROR: main is checked out in" in l)
+        self.assertIn('docs/workflow.md, "Several agents on one repository"', line)
+        self.assertNotIn("git worktree add", line)      # cannot run while this tree holds the branch
+        self.assertNotIn("git checkout", line)
         self.assertFalse(any(c["argv"][:2] == ["pr", "checks"] for c in self.fake_calls("gh")))
         self.assertFalse(any(c["argv"][:2] == ["pr", "merge"] for c in self.fake_calls("gh")))
         self.assertEqual(State.load(rdir).stage, "ready_to_merge")
