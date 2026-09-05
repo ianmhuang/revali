@@ -254,14 +254,14 @@ def ensure_gitignore(repo: str, entry: str) -> bool:
     if is_ignored(entry, repo):
         return False
     path = os.path.join(repo, ".gitignore")
-    lines = []
+    text = ""
     if os.path.isfile(path):
         with open(path, "r", encoding="utf-8", newline="") as fh:
-            lines = fh.read().splitlines()
-    if any(line.strip() in (entry, entry.rstrip("/")) for line in lines):
+            text = fh.read()
+    if any(line.strip() in (entry, entry.rstrip("/")) for line in text.splitlines()):
         return False
     with open(path, "a", encoding="utf-8", newline="\n") as fh:
-        if lines and lines[-1].strip():
+        if text and not text.endswith(("\n", "\r\n")):
             fh.write("\n")
         fh.write(entry + "\n")
     return True

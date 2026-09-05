@@ -114,7 +114,8 @@ class ApprovePath(RepoCase):
         # .git/info/exclude ignores the state dir; .gitignore must stay as the project left it
         self.write(".gitignore", ".venv/\n")
         self.commit_all("drop ignore")
-        with open(os.path.join(self.repo, ".git", "info", "exclude"), "a", encoding="utf-8") as fh:
+        exclude = os.path.join(self.repo, ".git", "info", "exclude")
+        with open(exclude, "a", encoding="utf-8", newline="\n") as fh:
             fh.write(".revali/\n")
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
