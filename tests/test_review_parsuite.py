@@ -2,19 +2,31 @@
 acceptance criteria and exercised through the command line only: a throwaway test tree is
 built in a temp dir and the runner starts as a subprocess, the way revali.toml and the README
 start it. Plain `python -m unittest` in a fresh interpreter is the reference for collection,
-test counts and verdict wording."""
+test counts and verdict wording.
+
+Round 2 adds: the crashed worker's tests count in N (AC-2 / AC-5), a worker that exits 0
+without a record is still an error (AC-5), the stubs give every test a private HOME so two
+classes with the same sandbox label cannot share a directory across workers (AC-1, round 1
+F3), and SIGINT to the parent ends its workers (round 1 F4; POSIX only)."""
 
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 
-from tests.helpers import ROOT, rmtree_force
+from revali.config import PlatformCfg
+from revali.runners import WslRunner
+from tests.helpers import FAKE_BIN, ROOT, RepoCase, _quote, git, rmtree_force
 
 RUNNER = os.path.join(ROOT, "tests", "run_parallel.py")
+WSL_STUB = os.path.join(FAKE_BIN, "wsl_stub.py")
+SSH_STUB = os.path.join(FAKE_BIN, "ssh_stub.py")
+HAVE_BASH = os.name == "nt" or os.path.exists("/bin/bash")
 
 # Every test of these modules appends its worker's pid to a file named after its id, so a
 # run can be checked for "each class in one process", "no test twice" and "N processes".
@@ -131,6 +143,27 @@ import unittest
 class CrashCase(unittest.TestCase):
     def test_kills_the_worker(self):
         os._exit(7)
+"""
+
+# A worker that dies with exit 0 before unittest can print its summary: "exits without
+# printing a unittest summary" (AC-5) does not depend on the exit code being non-zero.
+CRASHING_QUIETLY = CRASHING.replace("os._exit(7)", "os._exit(0)")
+
+# A test that records its worker's pid and then sleeps, so the parent can be interrupted
+# while a worker is busy.
+SLEEPING = """
+import os
+import time
+import unittest
+
+RECORD = %r
+
+
+class SleepCase(unittest.TestCase):
+    def test_sleeps(self):
+        with open(os.path.join(RECORD, "sleeper.pid"), "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+        time.sleep(60)
 """
 
 
@@ -396,14 +429,165 @@ class WorkerCrash(ParsuiteCase):
         self.assertEqual(code, 1, out)
         self.assertRegex(out, r"exit(?: code)?[ :=]+7\b")
         ran, verdict = tail(out)
-        self.assertTrue(verdict.startswith("FAILED (errors=1"), verdict)
-        self.assertGreaterEqual(ran_count(ran), 2)  # the other worker's tests still count
+        self.assertEqual(verdict, "FAILED (errors=1, skipped=1)")
+        # AC-2: N is the collected count; the crashed worker's test still counts
+        self.assertEqual(ran_count(ran), 3)
 
     def test_crash_in_the_only_worker_is_still_exit_1(self):
         t = self.tree(test_a=CRASHING)
         code, out = t.parallel("-j", "1")
         self.assertEqual(code, 1, out)
-        self.assertTrue(tail(out)[1].startswith("FAILED (errors=1"), out)
+        self.assertEqual(tail(out)[1], "FAILED (errors=1)")
+        self.assertEqual(ran_count(tail(out)[0]), 1)
+
+    def test_a_worker_that_exits_0_without_a_summary_is_still_an_error(self):
+        t = self.tree(test_a=CRASHING_QUIETLY, test_b=SKIPPING)
+        code, out = t.parallel("-j", "2")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"exit(?: code)?[ :=]+0\b")
+        ran, verdict = tail(out)
+        self.assertEqual(verdict, "FAILED (errors=1, skipped=1)")
+        self.assertEqual(ran_count(ran), 3)
+
+
+class PrivateHome(unittest.TestCase):
+    """AC-1 (the same pass/fail answer as the serial run): two test classes that both use
+    `sandbox_dir = "~/.revali/sandbox"` with the same label must not clone into one shared
+    directory once they land in different workers (round 1, F3). The stubs resolve HOME
+    under the test's REVALI_HOME, which RepoCase makes private per test."""
+
+    def private_home(self):
+        home = tempfile.mkdtemp(prefix="revali parsuite home ")
+        self.addCleanup(rmtree_force, home)
+        env = dict(os.environ)
+        env["REVALI_HOME"] = home
+        env.pop("REVALI_FAKE_REMOTE", None)
+        env.pop("REVALI_FAKE_LOG", None)
+        return home, env
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_wsl_stub_runs_bash_with_home_under_revali_home(self):
+        home, env = self.private_home()
+        res = subprocess.run(
+            [sys.executable, WSL_STUB, "-d", "Ubuntu", "-e", "bash", "-c", 'printf "%s" "$HOME"'],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+        self.assertEqual(res.returncode, 0, res.stderr)
+        seen = res.stdout.strip().replace("\\", "/").rstrip("/")
+        self.assertTrue(seen.endswith("/wsl-home"), seen)
+        self.assertTrue(os.path.isdir(os.path.join(home, "wsl-home")), "HOME was not created")
+        real_home = os.path.expanduser("~").replace("\\", "/").rstrip("/")
+        self.assertNotEqual(seen.lower(), real_home.lower(), "bash still ran with the real HOME")
+
+    def test_ssh_stub_remote_falls_back_under_revali_home(self):
+        home, env = self.private_home()
+        res = subprocess.run(
+            [sys.executable, SSH_STUB, "box", "mkdir -p $HOME/.revali/sandbox/sample/validate-r1"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertTrue(
+            os.path.isdir(
+                os.path.join(home, "fake-remote", ".revali", "sandbox", "sample", "validate-r1")
+            ),
+            os.listdir(home),
+        )
+
+
+class PrivateSandbox(RepoCase):
+    """The end-to-end form of PrivateHome: a WslRunner session with the shared
+    `~/.revali/sandbox` root and the label the two racing classes use puts its clone under
+    this test's own home, so another worker's session with the same label cannot delete it."""
+
+    runner = "wsl"
+
+    def setUp(self):
+        super().setUp()
+        self.use_real_local_runner()
+        os.environ["REVALI_WSL_CMD"] = "%s %s" % (_quote(sys.executable), _quote(WSL_STUB))
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_home_relative_sandbox_lands_under_the_tests_own_home(self):
+        runner = WslRunner(
+            PlatformCfg(
+                runner="wsl",
+                distro="Ubuntu",
+                command_timeout_min=1,
+                sandbox_dir="~/.revali/sandbox",
+            )
+        )
+        logs = os.path.join(self.tmp, "logs")
+        head = git(["rev-parse", "HEAD"], self.repo).strip()
+        report = runner.run(self.repo, head, [("test", "pwd")], {}, logs, "validate-r1")
+        self.assertTrue(report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in report.steps])
+        where = report.step("test").stdout.strip().replace("\\", "/")
+        self.assertIn("/wsl-home/.revali/sandbox/sample/validate-r1/repo", where)
+        self.assertTrue(os.path.isdir(os.path.join(self.home, "wsl-home")))
+
+
+def process_alive(pid):
+    """False once the process is gone or a zombie waiting to be reaped."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    stat = "/proc/%d/stat" % pid
+    if os.path.isfile(stat):
+        try:
+            with open(stat, "r", encoding="ascii", errors="replace") as fh:
+                state = fh.read().rsplit(")", 1)[1].split()[0]
+            return state != "Z"
+        except (OSError, IndexError):
+            return True
+    return True
+
+
+class Interruption(ParsuiteCase):
+    """Round 1, F4: the parent that is interrupted while waiting kills the workers it
+    started, so an interrupted run does not leave workers running the rest of the suite."""
+
+    @unittest.skipIf(os.name == "nt", "SIGINT to a single process needs POSIX")
+    def test_sigint_to_the_parent_ends_its_workers(self):
+        if signal.getsignal(signal.SIGINT) is not signal.default_int_handler:
+            self.skipTest("SIGINT is ignored in this process and the runner would inherit that")
+        t = self.tree()
+        t.write("test_sleep.py", SLEEPING % t.record)
+        parent = subprocess.Popen(
+            [sys.executable, RUNNER, "-s", t.tests, "-t", t.root, "-j", "1"],
+            cwd=t.root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(lambda: parent.poll() is None and parent.kill())
+        pid_file = os.path.join(t.record, "sleeper.pid")
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if os.path.isfile(pid_file) and os.path.getsize(pid_file) > 0:
+                break
+            time.sleep(0.05)
+        self.assertTrue(os.path.isfile(pid_file), "the worker never started its test")
+        with open(pid_file, "r", encoding="utf-8") as fh:
+            worker = int(fh.read().strip())
+        self.assertTrue(process_alive(worker), "the worker is not running before the interrupt")
+        os.kill(parent.pid, signal.SIGINT)
+        parent.wait(timeout=30)
+        deadline = time.monotonic() + 10
+        while process_alive(worker) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        alive = process_alive(worker)
+        if alive:
+            os.kill(worker, signal.SIGKILL)
+        self.assertFalse(alive, "worker %d outlived the interrupted parent" % worker)
 
 
 class JobsExtremes(ParsuiteCase):
