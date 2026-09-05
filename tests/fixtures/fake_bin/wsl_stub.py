@@ -34,7 +34,13 @@ def main(argv):
             print("no bash on this host", file=sys.stderr)
             return 1
         env = dict(os.environ)
-        env.setdefault("HOME", os.path.expanduser("~"))
+        # A private HOME per test when REVALI_HOME is set (RepoCase sets it per test), so
+        # sandboxes under "$HOME/.revali/sandbox" never collide between parallel workers.
+        if env.get("REVALI_HOME"):
+            env["HOME"] = os.path.join(env["REVALI_HOME"], "wsl-home")
+            os.makedirs(env["HOME"], exist_ok=True)
+        else:
+            env.setdefault("HOME", os.path.expanduser("~"))
         proc = subprocess.run([bash] + cmd[1:], env=env)
         return proc.returncode
     print("wsl_stub: unhandled %s" % cmd, file=sys.stderr)

@@ -76,7 +76,8 @@ class Tree:
         res = subprocess.run(
             [sys.executable, RUNNER, "-s", self.tests, "-t", self.root] + list(extra),
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=self.root,
         )
         return res.returncode, res.stdout + res.stderr
@@ -152,14 +153,34 @@ class RunParallel(unittest.TestCase):
         self.assertIn("tests.test_broken", out)
         self.assertIn("module_that_does_not_exist_anywhere", out)
 
-    def test_a_worker_that_dies_without_a_summary_is_an_error(self):
+    def test_a_worker_that_dies_without_a_result_is_an_error(self):
         t = self.tree(test_pass=PASSING, test_crash=CRASHING)
         code, out = t.run("-j", "2")
         self.assertEqual(code, 1, out)
-        self.assertIn("without a unittest summary", out)
+        self.assertIn("without a result", out)
         self.assertIn("exit 3", out)
-        _, verdict = last_lines(out)
+        ran, verdict = last_lines(out)
+        self.assertRegex(ran, r"^Ran 5 tests in ")  # N stays the collected count
         self.assertTrue(verdict.startswith("FAILED (errors=1"), verdict)
+
+    def test_a_tests_own_output_cannot_fake_the_verdict(self):
+        talker = FAILING.replace(
+            "    def test_errors(self):",
+            '    def test_prints_ok(self):\n        print("\\nOK\\nRan 1 test in 0.0s\\nOK")\n\n'
+            "    def test_errors(self):",
+        )
+        t = self.tree(test_pass=PASSING, test_talk=talker)
+        code, out = t.run("-j", "1")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(last_lines(out)[1], "FAILED (failures=1, errors=1, skipped=1)")
+
+    def test_non_ascii_in_a_traceback_survives(self):
+        module = FAILING.replace('"one is not two"', '"一不等於二 – ünïcode"')
+        t = self.tree(test_nonascii=module)
+        code, out = t.run("-j", "1")
+        self.assertEqual(code, 1, out)
+        self.assertIn("一不等於二 – ünïcode", out)
+        self.assertNotIn("�", out)
 
     def test_one_worker_and_too_many_workers_agree(self):
         t = self.tree(test_pass=PASSING, test_fail=FAILING)

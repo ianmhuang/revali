@@ -6,13 +6,15 @@ Collects the same tests `python -m unittest discover -s tests -t .` collects (or
 `names`, resolved like `python -m unittest <names>`), distributes whole test classes over
 N worker processes (default: the CPU count) and prints one unittest-style summary:
 
-    Ran 997 tests in 118.3s
+    Ran 1008 tests in 149.1s
     OK (skipped=1)
 
-Workers whose tests all pass contribute one line; a worker with a failure or error has its
-full output (tracebacks, summary) reprinted. A worker that ends without a unittest summary
-(crash, kill) is reported as an error with its exit code. Exit 0 when everything passed,
-1 otherwise. Standard library only.
+Each worker runs its tests with `unittest.TextTestRunner` and writes its counts to a JSON
+file; its printed output is kept only for reprinting. Workers whose tests all pass
+contribute one line; a worker with a failure or error has its full output (tracebacks,
+summary) reprinted. A worker that ends without writing its result (crash, kill) is
+reported as one error carrying its exit code, and its tests still count in `Ran N`.
+Exit 0 when everything passed, 1 otherwise. Standard library only.
 
 `--list` prints the collected test ids and exits; `-s DIR -t DIR` change the discovery
 start and top-level directories (the defaults are this repository's `tests/` and root).
@@ -20,21 +22,20 @@ start and top-level directories (the defaults are this repository's `tests/` and
 
 import argparse
 import io
+import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-SUMMARY_RE = re.compile(r"^Ran (\d+) tests? in ([\d.]+)s$", re.M)
-VERDICT_RE = re.compile(r"^(OK|FAILED)(?: \((.*)\))?\s*$", re.M)
 COUNT_KEYS = ("failures", "errors", "skipped", "expected failures", "unexpected successes")
+FAILING_KEYS = ("failures", "errors", "unexpected successes")
 
 
 def _flatten(suite) -> List[unittest.TestCase]:
@@ -80,39 +81,50 @@ def shard(ids: Sequence[str], workers: int) -> List[List[str]]:
     return [b for b in buckets if b]
 
 
+def counts_of(result: unittest.TestResult) -> Dict[str, int]:
+    return {
+        "failures": len(result.failures),
+        "errors": len(result.errors),
+        "skipped": len(result.skipped),
+        "expected failures": len(result.expectedFailures),
+        "unexpected successes": len(result.unexpectedSuccesses),
+    }
+
+
 def run_worker_mode(ids_file: str, top: str) -> int:
-    """`--worker`: run the ids listed in the file the way `python -m unittest <ids>` would."""
+    """`--worker`: run the ids listed in the file the way `python -m unittest <ids>` would,
+    then write the counts to `<ids_file>.json` for the parent."""
     if top not in sys.path:
         sys.path.insert(0, top)
     with open(ids_file, "r", encoding="utf-8") as fh:
         ids = [line.strip() for line in fh if line.strip()]
     suite = unittest.TestLoader().loadTestsFromNames(ids)
     result = unittest.TextTestRunner(verbosity=1).run(suite)
+    record = counts_of(result)
+    record["ran"] = result.testsRun
+    record["successful"] = result.wasSuccessful()
+    with open(ids_file + ".json", "w", encoding="utf-8") as fh:
+        json.dump(record, fh)
     return 0 if result.wasSuccessful() else 1
 
 
-def parse_summary(text: str):
-    """(tests run, counts by key) from a worker's output, or None when it has no summary."""
-    summary = SUMMARY_RE.findall(text)
-    verdict = VERDICT_RE.findall(text)
-    if not summary or not verdict:
+def read_result(path: str) -> Optional[dict]:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
         return None
-    ran = int(summary[-1][0])
-    counts = {key: 0 for key in COUNT_KEYS}
-    detail = verdict[-1][1]
-    for part in [p.strip() for p in detail.split(",") if p.strip()]:
-        key, _, value = part.rpartition("=")
-        if key in counts and value.isdigit():
-            counts[key] = int(value)
-    return ran, counts
+    if not isinstance(data, dict) or "ran" not in data:
+        return None
+    return data
 
 
 def format_verdict(counts: Dict[str, int]) -> str:
-    failed = counts["failures"] or counts["errors"] or counts["unexpected successes"]
+    failed = any(counts[key] for key in FAILING_KEYS)
     infos = [
         "%s=%d" % (key, counts[key])
         for key in COUNT_KEYS
-        if counts[key] and (failed or key not in ("failures", "errors", "unexpected successes"))
+        if counts[key] and (failed or key not in FAILING_KEYS)
     ]
     head = "FAILED" if failed else "OK"
     return head + (" (%s)" % ", ".join(infos) if infos else "")
@@ -123,7 +135,18 @@ def run_failed_imports(tests: List[unittest.TestCase], out) -> Dict[str, int]:
     stream = io.StringIO()
     result = unittest.TextTestRunner(stream=stream, verbosity=0).run(unittest.TestSuite(tests))
     out.write(stream.getvalue())
-    return {"errors": len(result.errors), "failures": len(result.failures)}
+    return counts_of(result)
+
+
+def _utf8_stdout():
+    """The parent reprints worker output that may hold any text; never let that raise."""
+    stream = sys.stdout
+    if hasattr(stream, "reconfigure"):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, io.UnsupportedOperation):
+            pass
+    return stream
 
 
 def main(argv=None) -> int:
@@ -145,19 +168,21 @@ def main(argv=None) -> int:
         for test in tests:
             print(test.id())
         return 0
+    out = _utf8_stdout()
     broken = [t for t in tests if is_failed_import(t)]
     ids = [t.id() for t in tests if not is_failed_import(t)]
-    out = sys.stdout
     counts = {key: 0 for key in COUNT_KEYS}
     total_ran = 0
     if broken:
-        broken_counts = run_failed_imports(broken, out)
-        counts["errors"] += broken_counts["errors"]
-        counts["failures"] += broken_counts["failures"]
+        for key, value in run_failed_imports(broken, out).items():
+            counts[key] += value
         total_ran += len(broken)
 
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"  # the logs are read back as UTF-8
+    env["PYTHONUTF8"] = "1"
     buckets = shard(ids, args.jobs)
-    procs: List[Tuple[int, subprocess.Popen, str, int]] = []
+    procs: List[Tuple[int, subprocess.Popen, str, str, int]] = []
     tmp = tempfile.mkdtemp(prefix="run_parallel-")
     try:
         for index, bucket in enumerate(buckets):
@@ -165,40 +190,62 @@ def main(argv=None) -> int:
             with open(ids_path, "w", encoding="utf-8") as fh:
                 fh.write("\n".join(bucket) + "\n")
             log_path = os.path.join(tmp, "worker-%d.log" % index)
-            log = open(log_path, "wb")
-            proc = subprocess.Popen(
-                [sys.executable, os.path.abspath(__file__), "--worker", ids_path, "-t", top],
-                cwd=top,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-            )
-            log.close()
-            procs.append((index, proc, log_path, len(bucket)))
+            with open(log_path, "wb") as log:
+                proc = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-u",
+                        os.path.abspath(__file__),
+                        "--worker",
+                        ids_path,
+                        "-t",
+                        top,
+                    ],
+                    cwd=top,
+                    env=env,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=(os.name != "nt"),
+                )
+            procs.append((index, proc, ids_path + ".json", log_path, len(bucket)))
         out.write("%d tests in %d worker(s)\n" % (len(ids), len(procs)))
         out.flush()
-        for index, proc, log_path, size in procs:
+        for index, proc, result_path, log_path, size in procs:
             code = proc.wait()
             with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
                 text = fh.read()
-            parsed = parse_summary(text)
-            if parsed is None:
+            record = read_result(result_path)
+            if record is None:
                 counts["errors"] += 1
+                total_ran += size  # collected, assigned, never reported
                 out.write(
-                    "worker %d: exit %d without a unittest summary (%d tests not accounted "
-                    "for); its output:\n%s\n" % (index, code, size, text.rstrip())
+                    "worker %d: exit %d without a result (%d tests not accounted for, counted "
+                    "as one error); its output:\n%s\n" % (index, code, size, text.rstrip())
                 )
+                out.flush()
                 continue
-            ran, wc = parsed
-            total_ran += ran
+            total_ran += int(record["ran"])
             for key in COUNT_KEYS:
-                counts[key] += wc[key]
-            if code == 0 and not (wc["failures"] or wc["errors"] or wc["unexpected successes"]):
-                out.write(
-                    "worker %d: %s\n" % (index, SUMMARY_RE.findall(text)[-1][0] + " tests OK")
-                )
+                counts[key] += int(record.get(key, 0))
+            passed = (
+                code == 0
+                and record.get("successful")
+                and not any(record.get(key, 0) for key in FAILING_KEYS)
+            )
+            if passed:
+                out.write("worker %d: %d tests OK\n" % (index, int(record["ran"])))
             else:
                 out.write("worker %d (exit %d):\n%s\n" % (index, code, text.rstrip()))
+            if int(record["ran"]) != size:
+                out.write(
+                    "worker %d: ran %d tests but was given %d\n" % (index, int(record["ran"]), size)
+                )
             out.flush()
+    except BaseException:
+        for _, proc, _, _, _ in procs:
+            if proc.poll() is None:
+                proc.kill()
+        raise
     finally:
         for name in os.listdir(tmp):
             try:
