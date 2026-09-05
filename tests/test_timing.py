@@ -110,6 +110,14 @@ class NewTestFiles(unittest.TestCase):
         )
         self.assertEqual(files_argument([]), "")
 
+    def test_a_quoted_path_escapes_what_a_posix_shell_reads_inside_double_quotes(self):
+        self.assertEqual(
+            files_argument(['my $dir/te"st`/test_review_a.py']),
+            '"my \\$dir/te\\"st\\`/test_review_a.py"',
+        )
+        # no whitespace: no quotes, nothing escaped
+        self.assertEqual(files_argument(["my$dir/test_review_a.py"]), "my$dir/test_review_a.py")
+
     def test_steps_for_expands_only_new_test(self):
         plat = _plat("pytest -q {files}", test="pytest -q {files}")
         steps = dict(steps_for(plat, ["test", "new_test"], files=["tests/t.py"]))

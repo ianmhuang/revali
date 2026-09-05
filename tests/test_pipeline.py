@@ -206,6 +206,21 @@ class ApprovePath(RepoCase):
         self.assertEqual(list(rows[0]["stage_s"]), ["preflight", "pr"])
         self.assertEqual(list(rows[0]["sandbox_s"]), ["baseline"])
 
+    def test_preflight_time_covers_the_baseline_even_when_it_fails(self):
+        self.runner_scenario({"default": 0, "results": {"baseline": {"test": 1}}})
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        log = self.read(".revali/feature__mul/logs/revali.log")
+        self.assertRegex(log, r"preflight: baseline failed at test \(\d+(m\d+)?s\)")
+        timing = [line for line in log.splitlines() if "] run: timing " in line]
+        self.assertEqual(len(timing), 1, log)
+        self.assertEqual(timing[0], log.splitlines()[-1])
+        self.assertRegex(timing[0], r"timing preflight \d+(m\d+)?s; sandbox baseline ")
+        rows = read_history(os.path.join(self.home, "history.jsonl"))
+        self.assertEqual(list(rows[0]["stage_s"]), ["preflight"])
+        self.assertGreaterEqual(rows[0]["stage_s"]["preflight"], rows[0]["sandbox_s"]["baseline"])
+
     def test_dry_run_reports_its_timing_too(self):
         code, out = run_cli(["run", "--foreground", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)

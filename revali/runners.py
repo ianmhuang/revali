@@ -727,12 +727,18 @@ def wants_files(cmd: str) -> bool:
 
 def files_argument(files: List[str]) -> str:
     """The `{files}` expansion: paths relative to the repository root, forward slashes, space
-    separated; a path is double-quoted only when it contains whitespace (double quotes work
-    for both the POSIX shells of the sandbox runners and the Windows shell of `local`)."""
+    separated. A path is double-quoted only when it contains whitespace, with the characters
+    a POSIX shell still interprets inside double quotes (`"`, `$`, backquote, backslash)
+    escaped; double quotes work for both the sandbox runners' shells and the Windows shell
+    of `local`, where such characters do not occur in test paths."""
     out = []
     for path in files:
         path = path.replace("\\", "/")
-        out.append('"%s"' % path if any(ch.isspace() for ch in path) else path)
+        if any(ch.isspace() for ch in path):
+            for ch in ("\\", '"', "$", "`"):
+                path = path.replace(ch, "\\" + ch)
+            path = '"%s"' % path
+        out.append(path)
     return " ".join(out)
 
 

@@ -234,10 +234,11 @@ def _record_stop(
     state: State, rdir: str, log: RunLog, stage: str, stop: Stop, started: bool
 ) -> int:
     """Persist a run's outcome. When the state file itself cannot be written, say what `wait`
-    will show instead of escaping with a traceback; the exit code stands either way."""
+    will show instead of escaping with a traceback; the exit code stands either way. The
+    history row and the `run: timing` line are written after that, so the timing line ends
+    the log whether or not the state file could be saved."""
     try:
         _stage(state, rdir, log, stage, stop.message, stop.exit_code)
-        _record_history(state, stop.exit_code, log)
     except OSError as exc:
         if started:
             shows = "`wait` and `status` will report the run as dead"
@@ -246,6 +247,7 @@ def _record_stop(
         note = "the state file could not be updated either (%s); %s; see run.log" % (exc, shows)
         log.detail(note)
         print("ERROR: " + note)
+    _record_history(state, stop.exit_code, log)
     return stop.exit_code
 
 
@@ -365,6 +367,9 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     if not state.repo:
         # so a run that stops in preflight still names its repo in history
         state.repo = gitops.remote_repo("origin", cwd)
+    # the preflight clock starts here: preflight() below includes the baseline sandbox session,
+    # and the state's preflight stage is only recorded once it has passed
+    log.timing.stage("preflight")
     first_pass = not state.rounds and not args.dry_run
     baseline_hook = (lambda ctx: validate.baseline(ctx, rdir, log)) if first_pass else None
     cleanup_hook = review.interruption_cleanup(state, rdir, log) if not args.dry_run else None
