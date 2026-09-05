@@ -78,5 +78,5 @@ stated.
   your own files off `test_file_pattern`
 
 It never modifies files outside `test_dir` and the state directory, never
-commits a change to a test file the reviewer did not write, never merges on
-its own, and never runs on a repo you do not own.
+commits a change to a test file the reviewer did not write,
+never merges on its own, and never runs on a repo you do not own.
