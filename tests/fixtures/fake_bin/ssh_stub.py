@@ -16,9 +16,13 @@ import sys
 
 
 def remote_root():
-    return os.environ.get("REVALI_FAKE_REMOTE") or os.path.join(
-        os.path.expanduser("~"), "fake-remote"
-    )
+    """REVALI_FAKE_REMOTE, else a directory under the test's REVALI_HOME (private per test,
+    so parallel workers never share it), else ~/fake-remote."""
+    if os.environ.get("REVALI_FAKE_REMOTE"):
+        return os.environ["REVALI_FAKE_REMOTE"]
+    if os.environ.get("REVALI_HOME"):
+        return os.path.join(os.environ["REVALI_HOME"], "fake-remote")
+    return os.path.join(os.path.expanduser("~"), "fake-remote")
 
 
 def local(path):

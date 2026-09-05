@@ -131,11 +131,14 @@ failure), then READY TO MERGE. Every result lands in `.revali/<branch>/`
 ## Development
 
 ```
-python -m unittest discover -s tests -t .
+python tests/run_parallel.py                        # the suite, one worker per CPU (-j N)
+python tests/run_parallel.py tests.test_pipeline    # a module, a class or a test, as for unittest
+python -m unittest discover -s tests -t .           # the same tests, serially
 python tests/fixtures/make_sample_repo.py "<dir>"   # throwaway sample project
 ```
 
-Tests use a fake `gh` (via `REVALI_GH_CMD`) and real `git` in temp repos.
+Tests use a fake `gh` (via `REVALI_GH_CMD`) and real `git` in temp repos; every
+test builds its own repository, which is why the parallel runner exists.
 
 ## License
 

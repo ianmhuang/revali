@@ -21,10 +21,11 @@ budget_usd = 1.0
 [validate.linux]
 runner = "wsl"
 distro = "Ubuntu"
-# The suite builds a git repo per test: 7-8 minutes for ~950 tests in the WSL
-# sandbox (2026-09-05), far longer on the Windows host.
+# The suite builds a git repo per test: 7-8 minutes serially for ~1000 tests in
+# the WSL sandbox (2026-09-05), far longer on the Windows host; run_parallel.py
+# shards it by test class over the CPUs and prints one unittest-style summary.
 command_timeout_min = 30
-test = "python3 -m unittest discover -s tests -t ."
+test = "python3 tests/run_parallel.py"
 # {files} = the reviewer's test files (this round's in the smoke run, the branch's in
 # validation), so only the new tests run here, not every test_review_*.py ever landed.
 new_test = "python3 -m unittest {files}"
