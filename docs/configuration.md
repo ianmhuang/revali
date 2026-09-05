@@ -19,6 +19,12 @@ Unknown keys are errors in every layer. `[review] engine` and
 (`prompt`, `schema`, `checklist_builtin`) are relative to the project
 root; empty means the file revali ships with. `[validate.platform]` in
 any layer sets the defaults for every `[validate.<name>]` table.
+`[validate] reuse_baseline` (default true) lets validation skip the
+existing suite (`test`) when the baseline already ran it on the same tree:
+every commit since the baseline carries the reviewer's `Revali-Round`
+trailer and touches only `test_dir`. A fix round, an author commit, a
+rebase or `revali reset` all bring the full suite back; set the key to
+false to run it every time.
 
 Models: `model = "auto"` (the default) picks the Reviewer one tier above
 the Developer's model (`author_model` in `change.md`) and the diagnosis

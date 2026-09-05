@@ -112,8 +112,9 @@ What a run does, in order: preflight (including the existing suite in the
 sandbox as a baseline), push + draft PR, reviewer round (`claude -p` with the
 diff, change.md, and the checklist; writes tests into `test_dir`; the script
 checks AC coverage, smoke-runs the new tests, commits them), validation
-(existing suite + new tests in the sandbox; a diagnoser session only on
-failure), then READY TO MERGE. Every result lands in `.revali/<branch>/`
+(the new tests in the sandbox, plus the existing suite unless nothing but
+the reviewer's test commits changed since the baseline ran it; a diagnoser
+session only on failure), then READY TO MERGE. Every result lands in `.revali/<branch>/`
 (`review-<n>.md`, `tests.md`, `diagnose-<n>.json`, `logs/`) and as PR comments.
 
 ## Documentation

@@ -274,11 +274,13 @@ class ResumeAtValidation(RepoCase):
 
     def test_resumed_validation_can_still_fail(self):
         self._approve_then_die_before_validation()
+        # round-1 validation runs only new_test since the baseline-reuse change, so that is
+        # the step that fails here
         self.runner_scenario(
             {
                 "default": 0,
-                "results": {"validate-r1": {"test": 1}},
-                "outputs": {"validate-r1": {"test": "FAIL: test_add"}},
+                "results": {"validate-r1": {"new_test": 1}},
+                "outputs": {"validate-r1": {"new_test": "FAIL: test_add"}},
             }
         )
         diagnosis = {

@@ -307,6 +307,7 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
             )
             state.rounds, state.test_commits, state.test_files = [], [], []
             state.fixes, state.needs_info_used, state.last_verdict = 0, False, ""
+            state.baseline_sha = ""  # the tree it passed on is gone; validation runs the suite
             state.force_push = True  # the remote still has the dropped commits
             rewritten = True
         elif state.stage == "needs_action":
@@ -371,7 +372,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     # and the state's preflight stage is only recorded once it has passed
     log.timing.stage("preflight")
     first_pass = not state.rounds and not args.dry_run
-    baseline_hook = (lambda ctx: validate.baseline(ctx, rdir, log)) if first_pass else None
+    baseline_hook = (lambda ctx: validate.baseline(ctx, state, rdir, log)) if first_pass else None
     cleanup_hook = review.interruption_cleanup(state, rdir, log) if not args.dry_run else None
     ctx = preflight(
         cwd,

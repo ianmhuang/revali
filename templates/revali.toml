@@ -35,6 +35,8 @@ engine = "claude"                 # which CLI runs the diagnosis session on FAIL
 model = "auto"                    # auto = one tier below the Developer's model
 fallback_model = "auto"
 budget_usd = 1.0
+reuse_baseline = true             # skip the existing suite in validation when only the reviewer's
+                                  # test commits followed the baseline; false = run it every time
 
 [validate.linux]
 runner = "wsl"                    # wsl | local | ssh

@@ -15,7 +15,12 @@ when they contain whitespace), this round's files in the smoke run and every
 reviewer file on the branch in validation, so only the new tests run rather
 than everything a pattern matches; when `{files}` would name no file the
 step is skipped and the log says so. Without `{files}` the command runs as
-written. Every sandbox session's wall time appears in the log line that
+written. Validation leaves `test` out when the baseline already ran it on
+the same tree (every commit since the baseline is a reviewer test commit
+touching only `test_dir`; `[validate] reuse_baseline = false` disables
+this), and says so in the log, in `tests.md` and in the PR comment; a fix
+round, an author commit or a rewritten history brings the full suite back.
+Every sandbox session's wall time appears in the log line that
 reports its result and, with the per-stage times, in the run's final
 `run: timing` line. The distro needs git and whatever `setup` installs; on
 Ubuntu 24.04 that means `python3-venv` and `python3-pip` for a Python project.
