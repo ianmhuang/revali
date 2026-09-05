@@ -108,9 +108,10 @@ class DocsHoldTheFormerSections(unittest.TestCase):
     def test_side_effects_doc(self):
         text = read("docs", "side-effects.md")
         self.assertTrue(text.startswith("# What revali does to your repository\n"), text[:60])
+        whole = unwrap(text)   # phrases may cross a line wrap
         for phrase in ("Read this before the first run.", "appends the state directory (`.revali/`)",
                        "`gh pr merge --<method> --delete-branch`", "never merges on its own"):
-            self.assertIn(phrase, text, phrase)
+            self.assertIn(phrase, whole, phrase)
 
     def test_files_doc(self):
         text = read("docs", "files.md")

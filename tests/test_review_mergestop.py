@@ -16,7 +16,7 @@ import sys
 import unittest
 from unittest import mock
 
-from tests.helpers import RepoCase, git, run_cli
+from tests.helpers import ROOT, RepoCase, git, run_cli
 from revali import EXIT_ERROR, EXIT_OK
 from revali import gitops, pipeline
 from revali.config import history_path
@@ -42,6 +42,11 @@ def dead_pid():
     p = subprocess.Popen([sys.executable, "-c", "pass"])
     p.wait()
     return p.pid
+
+
+def read_doc(name):
+    with open(os.path.join(ROOT, "docs", name), "r", encoding="utf-8", newline="") as fh:
+        return fh.read()
 
 
 def same_path_in(text, path):
@@ -108,7 +113,9 @@ class RefusalBeforeTheCiWait(MergeCase):
         # AC-6 as rewritten after round 1 (F1): no command that cannot run from this state,
         # a pointer at the docs instead
         self.assertNotIn("git worktree add", line)
+        self.assertNotIn("`", line, "a command is offered: " + line)   # none can run from this state
         self.assertIn('docs/workflow.md, "Several agents on one repository"', line)
+        self.assertIn("\n## Several agents on one repository\n", read_doc("workflow.md"))   # the target exists
         # nothing changed and both locks are released
         self.assertEqual(State.load(rdir).stage, "ready_to_merge")
         self.assertEqual(gitops.current_branch(self.repo), "feature/mul")
