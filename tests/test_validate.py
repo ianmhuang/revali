@@ -161,6 +161,15 @@ class ValidationOutcomes(RepoCase):
         self.assertEqual([r["last_verdict"] for r in rows], ["FAIL", "PASS"])
 
     def test_existing_suite_failure_is_fail(self):
+        # round-1 validation reuses the baseline by default; switch that off so the existing
+        # suite runs here and its failure is what this test is about
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace(
+                "[validate]\n", "[validate]\nreuse_baseline = false\n"
+            ),
+        )
+        self.commit_all("always run the suite")
         self.runner_scenario({"default": 0, "results": {"validate-r1": {"test": 1}}})
         self.claude(claude_entry(), claude_entry(diagnosis("code"), write_tests=False))
         code, out = run_cli(["run", "--foreground"])

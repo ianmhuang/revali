@@ -54,6 +54,9 @@ effort = "high"
 budget_usd = 1.0
 prompt = ""                      # empty = prompts/diagnose.md
 schema = ""                      # empty = schemas/diagnose.schema.json
+reuse_baseline = true            # validation skips `test` when every commit since the baseline is
+                                 # a reviewer test commit touching only test_dir (the suite it
+                                 # would run is the one the baseline ran); false = always run it
 
 # Defaults for every [validate.<platform>] table; a user or project file may
 # repeat this table to change the defaults for all of its platforms.

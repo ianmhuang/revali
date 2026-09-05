@@ -209,7 +209,10 @@ class PublicRepoValidationComment(CommentCase):
         self.assertEqual(code, EXIT_OK, out)
         v = self.comment("validate-1")
         self.assertIn("## Validation 1: PASS", v)
-        self.assertIn("| test | 0", v)
+        # since the baseline-reuse change (feature/skip-unchanged-suite) round-1 validation
+        # leaves `test` out and says why instead of listing it
+        self.assertIn("existing suite not rerun", v)
+        self.assertNotIn("| test | 0", v)
         self.assertIn("| new_test | 0", v)
         self.assertNotIn("fake test output", v)
         self.assertNotIn("fake new_test output", v)

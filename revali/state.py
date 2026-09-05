@@ -64,6 +64,7 @@ class State:
     )  # per validation run: result, failed_step, cause
     test_commits: List[str] = field(default_factory=list)
     test_files: List[str] = field(default_factory=list)
+    baseline_sha: str = ""  # the commit the baseline suite passed on (STATE_VERSION 4)
     cost_usd: float = 0.0
     models_used: List[str] = field(default_factory=list)
     fallback: bool = False

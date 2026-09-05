@@ -121,7 +121,8 @@ class ApprovePath(RepoCase):
         self.assertEqual(rn[0]["steps"], ["test"])
         self.assertEqual(rn[1]["extra_files"], ["tests/test_review_mul.py"])
         self.assertEqual(rn[1]["steps"], ["new_test"])
-        self.assertEqual(rn[2]["steps"], ["test", "new_test"])
+        # only the reviewer's test commit followed the baseline: the existing suite is not rerun
+        self.assertEqual(rn[2]["steps"], ["new_test"])
         self.assertTrue(any(a[:2] == ["pr", "ready"] for a in gh))
         # history
         rows = read_history(os.path.join(self.home, "history.jsonl"))

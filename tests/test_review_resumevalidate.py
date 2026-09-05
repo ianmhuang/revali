@@ -106,11 +106,13 @@ class ResumeAtValidation(ResumeCase):
 
     def test_a_resumed_validation_that_fails_is_action_needed(self):
         self.approve_then_die_before_validation()
+        # round-1 validation runs only new_test since the baseline-reuse change
+        # (feature/skip-unchanged-suite), so that is the step that fails here
         self.runner_scenario(
             {
                 "default": 0,
-                "results": {"validate-r1": {"test": 1}},
-                "outputs": {"validate-r1": {"test": "FAIL: test_add"}},
+                "results": {"validate-r1": {"new_test": 1}},
+                "outputs": {"validate-r1": {"new_test": "FAIL: test_add"}},
             }
         )
         code, out = self.rerun(

@@ -79,7 +79,9 @@ class PlaceholderNamesTheFiles(FilesCase):
         self.assertEqual(validate, "run-new tests/test_review_mul.py")  # AC-4: the branch's
         self.assertNotIn("\\", smoke + validate)  # AC-4: forward slashes
         self.assertEqual(self.step_cmd("baseline", "test"), LOCAL_TEST)  # other steps untouched
-        self.assertEqual(self.step_cmd("validate-r1", "test"), LOCAL_TEST)
+        # Since the baseline-reuse change (feature/skip-unchanged-suite) round-1 validation
+        # leaves `test` out: only the reviewer's test commit followed the baseline.
+        self.assertFalse(self.exists(LOGS + "/validate-r1-test.log"))
         for name in os.listdir(os.path.join(self.repo, LOGS)):
             if name.endswith(".log") and name != "revali.log":
                 self.assertNotIn("{files}", self.read(LOGS + "/" + name), name)  # AC-4
@@ -234,10 +236,13 @@ class NothingToName(FilesCase):
         self.assertIn("READY TO MERGE", out)
         self.assertEqual(State.load(self.rdir()).stage, "ready_to_merge")
         self.assertFalse(self.exists(LOGS + "/validate-r1-new_test.log"))  # AC-6: not run
-        self.assertTrue(self.exists(LOGS + "/validate-r1-test.log"))  # the suite still ran
+        # Since the baseline-reuse change (feature/skip-unchanged-suite) the existing suite is
+        # not rerun either: nothing but the baseline's own tree is there to validate, so no
+        # sandbox session runs and validation records why.
+        self.assertFalse(self.exists(LOGS + "/validate-r1-test.log"))
+        self.assertIn("existing suite not rerun", self.read(REVALI_LOG))
         calls = [c for c in self.fake_calls("runner") if c["label"] == "validate-r1"]
-        self.assertEqual(len(calls), 1)
-        self.assertNotIn("new_test", calls[0]["steps"])  # AC-6: no empty-list command
+        self.assertEqual(calls, [])  # AC-6: no empty-list command (no session at all)
         log = self.read(REVALI_LOG)
         skip = [
             ln

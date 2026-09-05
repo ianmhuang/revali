@@ -113,6 +113,7 @@ class ValidateCfg:
     budget_usd: float = 0.0
     prompt: str = ""
     schema: str = ""
+    reuse_baseline: bool = False  # skip `test` when only reviewer test commits followed it
     platforms: dict = field(default_factory=dict)  # name -> PlatformCfg
 
 

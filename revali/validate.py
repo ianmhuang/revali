@@ -6,10 +6,11 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from revali import EXIT_ERROR, engines, models
+from revali import EXIT_ERROR, engines, gitops, models
 from revali.config import PlatformCfg
 from revali.engines import EngineRequest
 from revali.preflight import Context, Stop
+from revali.review import TRAILER
 from revali.runners import RunnerError, RunReport, get_runner, steps_for, steps_with_files, tail
 from revali.state import RunLog, State, now_iso, read_text, safe_branch, write_text
 from revali.timing import fmt_duration
@@ -32,6 +33,7 @@ class ValidationOutcome:
     cost: float = 0.0
     section_md: str = ""
     skipped_reason: str = ""
+    suite_note: str = ""  # why the existing suite was not rerun, when it was not
 
 
 def platform(ctx: Context) -> PlatformCfg:
@@ -45,8 +47,10 @@ def _runner(ctx: Context):
         raise Stop(EXIT_ERROR, str(exc)) from exc
 
 
-def baseline(ctx: Context, rdir: str, log: Optional[RunLog]) -> None:
-    """Existing suite must pass on the branch before anyone reviews it."""
+def baseline(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> None:
+    """Existing suite must pass on the branch before anyone reviews it. On success the commit
+    it passed on is recorded (`state.baseline_sha`) so validation can tell when the suite it
+    would run is the one that already ran."""
     if ctx.doc.kind == "docs":
         return
     plat = platform(ctx)
@@ -94,6 +98,27 @@ def baseline(ctx: Context, rdir: str, log: Optional[RunLog]) -> None:
                 tail(failed.text, 20),
             ),
         )
+    state.baseline_sha = ctx.head_sha
+    state.save(rdir)
+
+
+def baseline_reusable(ctx: Context, state: State) -> str:
+    """The baseline commit when the existing suite validation would run is the one the
+    baseline already ran: `[validate] reuse_baseline` is on, the baseline passed on a commit
+    HEAD still contains, every commit since carries the reviewer's `Revali-Round` trailer,
+    and every path changed since lies under test_dir. Empty string otherwise."""
+    sha = state.baseline_sha
+    root = ctx.repo_root
+    if not sha or not ctx.cfg.validate.reuse_baseline or not gitops.head_contains(sha, root):
+        return ""
+    if sha != ctx.head_sha:
+        trailer = {c for c, _ in gitops.trailer_commits(sha, "HEAD", TRAILER, root)}
+        if any(c not in trailer for c in gitops.rev_list(sha, "HEAD", root)):
+            return ""
+        test_dir = ctx.cfg.project.test_dir.strip("/").replace("\\", "/") + "/"
+        if any(not p.startswith(test_dir) for p in gitops.changed_files(sha, "HEAD", root)):
+            return ""
+    return sha
 
 
 def run_validation(
@@ -102,21 +127,33 @@ def run_validation(
     number = len(state.validations) + 1
     outcome = ValidationOutcome(number=number, result=PASS)
     took = None
-    if ctx.doc.kind == "docs":
-        outcome.skipped_reason = "kind docs: nothing to run"
-    else:
-        plat = platform(ctx)
+    reused = baseline_reusable(ctx, state)
+    if reused:
+        outcome.suite_note = (
+            "existing suite not rerun: unchanged since the baseline that passed on %s "
+            "(only the reviewer's test commits since)" % reused[:10]
+        )
+    which = ["setup", "build", "new_test"] if reused else ["setup", "build", "test", "new_test"]
+    steps = []
+    if ctx.doc.kind != "docs":
         # new_test names every reviewer file on the branch when it asks for {files}
         steps = steps_with_files(
-            plat,
-            ["setup", "build", "test", "new_test"],
-            list(state.test_files),
-            log.stage if log else None,
-            "validate",
+            platform(ctx), which, list(state.test_files), log.stage if log else None, "validate"
         )
+    if ctx.doc.kind == "docs":
+        outcome.skipped_reason = "kind docs: nothing to run"
+    elif not any(name in ("test", "new_test") for name, _ in steps):
+        outcome.skipped_reason = "nothing to run: " + (
+            outcome.suite_note + " and no new test file" if reused else "no test command"
+        )
+        if log:
+            log.stage("validate", "run %d: %s" % (number, outcome.skipped_reason))
+    else:
         runner = _runner(ctx)
         label = "validate-r%d" % max(1, len(state.rounds))
         if log:
+            if outcome.suite_note:
+                log.stage("validate", outcome.suite_note)
             log.stage(
                 "validate",
                 "run %d: %s on %s (%s)"
@@ -289,6 +326,8 @@ def render_section(ctx: Context, o: ValidationOutcome) -> str:
     if o.skipped_reason:
         out += ["", o.skipped_reason, ""]
         return "\n".join(out)
+    if o.suite_note:
+        out += ["", o.suite_note]
     if o.report:
         out += ["", "| step | exit | log |", "|---|---|---|"]
         for s in o.report.steps:
@@ -341,6 +380,8 @@ def render_section_summary(o: ValidationOutcome, state_dir: str) -> str:
     if o.skipped_reason:
         out += [o.skipped_reason, ""]
         return "\n".join(out)
+    if o.suite_note:
+        out += [o.suite_note, ""]
     if o.report:
         out += ["| step | exit |", "|---|---|"]
         for s in o.report.steps:

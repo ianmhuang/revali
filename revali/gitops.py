@@ -168,6 +168,12 @@ def head_contains(sha: str, cwd: str) -> bool:
     return is_ancestor(sha, "HEAD", cwd)
 
 
+def rev_list(base: str, head: str, cwd: str) -> List[str]:
+    """The commits in base..head, newest first."""
+    res = git_ok(["rev-list", "%s..%s" % (base, head)], cwd)
+    return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+
+
 def trailer_commits(base: str, head: str, key: str, cwd: str) -> List[Tuple[str, str]]:
     """(sha, value) of the commits in base..head whose message carries the trailer `key`,
     oldest first; several values of one trailer are joined with commas. Needs git 2.22
