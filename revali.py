@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Entry point: python revali.py <subcommand> ...  (see revali/cli.py)."""
+
 import os
 import sys
 

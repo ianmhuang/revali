@@ -1,11 +1,11 @@
 """Config layers and model resolution end to end: state_dir, prompt override, auto models."""
+
 import json
 import os
 import unittest
 
-from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
 from revali import EXIT_ACTION, EXIT_OK
-from revali.state import State
+from tests.helpers import RepoCase, claude_entry, git, run_cli
 from tests.test_validate import diagnosis
 
 
@@ -15,7 +15,10 @@ def argv_after(argv, flag):
 
 class StateDirTests(RepoCase):
     def test_state_dir_override(self):
-        self.write("revali.toml", self.read("revali.toml") + '\n[paths]\nstate_dir = ".rv"\nlogs_dir = "out"\n')
+        self.write(
+            "revali.toml",
+            self.read("revali.toml") + '\n[paths]\nstate_dir = ".rv"\nlogs_dir = "out"\n',
+        )
         self.commit_all("state dir")
         self.write(".rv/feature__mul/change.md", self.read(".revali/feature__mul/change.md"))
         self.claude(claude_entry())
@@ -35,8 +38,12 @@ class StateDirTests(RepoCase):
 class ModelResolutionTests(RepoCase):
     def set_author(self, model):
         import re
+
         text = self.read(".revali/feature__mul/change.md")
-        self.write(".revali/feature__mul/change.md", re.sub(r"author_model: .*", "author_model: " + model, text, count=1))
+        self.write(
+            ".revali/feature__mul/change.md",
+            re.sub(r"author_model: .*", "author_model: " + model, text, count=1),
+        )
 
     def test_unknown_author_gives_top_tier(self):
         self.claude(claude_entry())
@@ -67,9 +74,17 @@ class ModelResolutionTests(RepoCase):
 
     def test_diagnoser_one_below_author(self):
         self.set_author("claude-fable-5")
-        self.runner_scenario({"default": 0, "results": {"validate-r1": {"new_test": 1}},
-                              "outputs": {"validate-r1": {"new_test": "AssertionError: 12 != 7"}}})
-        self.claude(claude_entry(), claude_entry(diagnosis(), write_tests=False, model="claude-opus-5", cost=0.2))
+        self.runner_scenario(
+            {
+                "default": 0,
+                "results": {"validate-r1": {"new_test": 1}},
+                "outputs": {"validate-r1": {"new_test": "AssertionError: 12 != 7"}},
+            }
+        )
+        self.claude(
+            claude_entry(),
+            claude_entry(diagnosis(), write_tests=False, model="claude-opus-5", cost=0.2),
+        )
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
         reviewer, diag = [c["argv"] for c in self.fake_calls("claude")]
@@ -91,7 +106,10 @@ class ModelResolutionTests(RepoCase):
         self.assertNotIn("--fallback-model", argv)
         self.assertIn("model_reason: explicit", self.read(".revali/feature__mul/review-1.md"))
         # project layer pins sonnet, user layer says opus
-        self.write("revali.toml", self.read("revali.toml").replace("[review]\n", '[review]\nmodel = "sonnet"\n'))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace("[review]\n", '[review]\nmodel = "sonnet"\n'),
+        )
         self.commit_all("pin")
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
@@ -110,8 +128,14 @@ class PromptOverrideTests(RepoCase):
     def test_project_prompt_and_checklist_override(self):
         self.write("docs/review-prompt.md", "CUSTOM PROMPT for $branch\n\n$checklist\n")
         self.write("docs/builtin.md", "PROJECT BUILTIN LIST\n")
-        self.write("revali.toml", self.read("revali.toml").replace(
-            "[review]\n", '[review]\nprompt = "docs/review-prompt.md"\nchecklist_builtin = "docs/builtin.md"\n'))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace(
+                "[review]\n",
+                '[review]\nprompt = "docs/review-prompt.md"\n'
+                'checklist_builtin = "docs/builtin.md"\n',
+            ),
+        )
         self.commit_all("prompt override")
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
@@ -122,7 +146,10 @@ class PromptOverrideTests(RepoCase):
         self.assertNotIn("Behaviour changes have tests", prompt)
 
     def test_config_error_does_not_add_change_md_noise(self):
-        broken = self.read("revali.toml").replace("[review]\n", '[review]\nengine = "nope"\n') + '\n[paths]\nstate_dir = ".rv"\n'
+        broken = (
+            self.read("revali.toml").replace("[review]\n", '[review]\nengine = "nope"\n')
+            + '\n[paths]\nstate_dir = ".rv"\n'
+        )
         self.write("revali.toml", broken)
         self.write(".rv/feature__mul/change.md", self.read(".revali/feature__mul/change.md"))
         self.commit_all("broken")
@@ -132,7 +159,10 @@ class PromptOverrideTests(RepoCase):
         self.assertNotIn("change.md", out)
 
     def test_missing_override_file_is_a_preflight_error(self):
-        self.write("revali.toml", self.read("revali.toml").replace("[review]\n", '[review]\nprompt = "docs/none.md"\n'))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace("[review]\n", '[review]\nprompt = "docs/none.md"\n'),
+        )
         self.commit_all("bad override")
         code, out = run_cli(["preflight"])
         self.assertEqual(code, 1)

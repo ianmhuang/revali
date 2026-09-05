@@ -1,12 +1,13 @@
 """README wording, checked as text: the "Why separate sessions" paragraph, the
 removed private-only requirement and the public-repository side effect (PR #11);
 the status line, the role table and the note under the diagram (PR #8, #9)."""
+
 import os
 import re
 import unittest
 
-from tests.helpers import ROOT
 from revali import VERSION
+from tests.helpers import ROOT
 
 
 def readme():
@@ -25,24 +26,30 @@ class WhySeparateSessions(unittest.TestCase):
 
     def test_paragraph_follows_the_three_role_definitions(self):
         text = self.text
-        roles = [text.index("**Developer**"), text.index("**Reviewer**"), text.index("**Validator**")]
+        roles = [
+            text.index("**Developer**"),
+            text.index("**Reviewer**"),
+            text.index("**Validator**"),
+        ]
         why = text.index("**Why separate sessions")
         self.assertGreater(why, max(roles))
         self.assertLess(why, text.index("```mermaid"))
 
     def test_paragraph_covers_the_four_points(self):
         p = self.paragraph().lower()
-        self.assertIn("own work", p)                      # nobody grades their own work
-        self.assertIn("reviewer", p)                      # what each role sees
+        self.assertIn("own work", p)  # nobody grades their own work
+        self.assertIn("reviewer", p)  # what each role sees
         self.assertIn("validator", p)
-        self.assertIn("tier", p)                          # models differ by tier
-        self.assertIn("vendor", p)                        # or by vendor
-        self.assertIn("blind spot", p)                    # fresh context does not remove shared blind spots
-        self.assertIn("revali stats", p)                  # which stats tracks
+        self.assertIn("tier", p)  # models differ by tier
+        self.assertIn("vendor", p)  # or by vendor
+        self.assertIn("blind spot", p)  # fresh context does not remove shared blind spots
+        self.assertIn("revali stats", p)  # which stats tracks
 
     def test_vendor_claim_names_the_single_engine(self):
-        # round 2: "by vendor" must not read as a present capability while only one engine is registered
+        # round 2: "by vendor" must not read as a present capability while only one engine is
+        # registered
         from revali.engines import available
+
         p = self.paragraph().lower()
         self.assertIn("vendor", p)
         for name in available():
@@ -74,17 +81,20 @@ class PrivateRequirementIsGone(unittest.TestCase):
         self.assertNotIn("must be private", low)
 
     def test_side_effect_list_describes_the_summary_comments(self):
-        with open(os.path.join(ROOT, "docs", "side-effects.md"), "r", encoding="utf-8", newline="") as fh:
+        with open(
+            os.path.join(ROOT, "docs", "side-effects.md"), "r", encoding="utf-8", newline=""
+        ) as fh:
             section = fh.read().lower()
         self.assertTrue(section.startswith("# what revali does to your repository"))
         self.assertIn("pr comment", section)
         self.assertIn("summar", section)
         self.assertIn("not private", section)
-        self.assertIn("request", section)   # the PR body withholds the Request section
+        self.assertIn("request", section)  # the PR body withholds the Request section
         self.assertIn("never runs on a repo you do not own", section)
 
 
 # --- kept from PR #8 / #9 (this file is shared across rounds; do not drop earlier checks) ---
+
 
 def table_row(text, role):
     """Cells of the role table row whose first cell is `role`."""
@@ -129,8 +139,11 @@ class RoleTable(unittest.TestCase):
         self.assertIn("revali", writes)
         idx_revali = writes.index("revali")
         for artifact in ("review-n.md", "tests.md"):
-            self.assertGreater(writes.index(artifact), idx_revali,
-                               "%s should be listed as produced by revali, not written by the Reviewer" % artifact)
+            self.assertGreater(
+                writes.index(artifact),
+                idx_revali,
+                "%s should be listed as produced by revali, not written by the Reviewer" % artifact,
+            )
 
     def test_validator_tests_md_attributed_to_revali(self):
         row = table_row(self.text, "Validator")

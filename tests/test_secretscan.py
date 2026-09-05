@@ -1,11 +1,17 @@
 import unittest
 
-from tests.helpers import ROOT  # noqa: F401
 from revali.secretscan import ALLOW_MARKER, scan_diff, scan_text
+from tests.helpers import ROOT  # noqa: F401
 
 
 def diff(*added, removed=(), path="src/app.py"):
-    lines = ["diff --git a/%s b/%s" % (path, path), "--- a/%s" % path, "+++ b/%s" % path, "@@ -1,2 +1,3 @@", " unchanged"]
+    lines = [
+        "diff --git a/%s b/%s" % (path, path),
+        "--- a/%s" % path,
+        "+++ b/%s" % path,
+        "@@ -1,2 +1,3 @@",
+        " unchanged",
+    ]
     lines += ["-" + r for r in removed]
     lines += ["+" + a for a in added]
     return "\n".join(lines) + "\n"

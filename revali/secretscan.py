@@ -1,4 +1,5 @@
 """Credential scan over added diff lines. A hit blocks the push (RULES: revoke first)."""
+
 import re
 from dataclasses import dataclass
 from typing import List
@@ -14,12 +15,18 @@ PATTERNS = [
     ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
     ("slack-token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
     ("private-key", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY")),
-    ("generic-assignment", re.compile(
-        r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|password|passwd)\b"
-        r"\s*[:=]\s*['\"][^'\"\s]{8,}['\"]")),
+    (
+        "generic-assignment",
+        re.compile(
+            r"(?i)\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|password|passwd)\b"
+            r"\s*[:=]\s*['\"][^'\"\s]{8,}['\"]"
+        ),
+    ),
 ]
 
-PLACEHOLDER_RE = re.compile(r"(?i)(example|placeholder|dummy|changeme|xxxx|<[^>]+>|\$\{[^}]+\}|os\.environ|getenv)")
+PLACEHOLDER_RE = re.compile(
+    r"(?i)(example|placeholder|dummy|changeme|xxxx|<[^>]+>|\$\{[^}]+\}|os\.environ|getenv)"
+)
 
 
 @dataclass
@@ -68,7 +75,9 @@ def scan_diff(diff_text: str) -> List[Hit]:
                 continue
             if name == "generic-assignment" and PLACEHOLDER_RE.search(line):
                 continue
-            hits.append(Hit(file=current_file, line=new_line, pattern=name, excerpt=_mask(m.group(0))))
+            hits.append(
+                Hit(file=current_file, line=new_line, pattern=name, excerpt=_mask(m.group(0)))
+            )
             break
     return hits
 
@@ -88,7 +97,9 @@ def scan_text(text: str, label: str = "text") -> List[Hit]:
 
 
 def format_hits(hits: List[Hit]) -> str:
-    lines = ["possible credentials in the diff (push blocked; revoke and rotate before anything else):"]
+    lines = [
+        "possible credentials in the diff (push blocked; revoke and rotate before anything else):"
+    ]
     for h in hits:
         lines.append("  %s:%d  %s  %s" % (h.file, h.line, h.pattern, h.excerpt))
     lines.append("  false positive? add '%s' to that line" % ALLOW_MARKER)

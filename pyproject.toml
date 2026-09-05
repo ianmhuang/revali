@@ -1,0 +1,15 @@
+# Formatting is black's job, lint is ruff's; revali's preflight runs both
+# through `[project] lint` in revali.toml. The package itself has no
+# build metadata: it runs from the checkout (python revali.py).
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# pyflakes, the pycodestyle errors black does not settle, import order, bugbear
+select = ["E", "F", "I", "B"]

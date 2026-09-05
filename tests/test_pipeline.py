@@ -1,16 +1,24 @@
 """End-to-end through the CLI with fake gh, fake claude, and the fake or real local runner."""
+
 import json
 import os
 import unittest
 
-from tests.helpers import RepoCase, TEST_REVIEW_MUL, approve_response, claude_entry, git, run_cli
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK
 from revali.state import State, read_history
+from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
 
 
 def finding(sev="high", kind="correctness", fid="F1"):
-    return {"id": fid, "file": "src/calc.py", "line": 3, "severity": sev, "kind": kind,
-            "text": "mul ignores negative numbers", "suggestion": "handle them"}
+    return {
+        "id": fid,
+        "file": "src/calc.py",
+        "line": 3,
+        "severity": sev,
+        "kind": kind,
+        "text": "mul ignores negative numbers",
+        "suggestion": "handle them",
+    }
 
 
 class ApprovePath(RepoCase):
@@ -103,7 +111,13 @@ class ApprovePath(RepoCase):
         self.assertIn("chore: ignore .revali/", git(["log", "--format=%s"], self.repo))
 
     def test_existing_open_pr_reused(self):
-        self.scenario({"prs_open": [{"number": 12, "url": "https://x/pull/12", "isDraft": True, "title": "t"}]})
+        self.scenario(
+            {
+                "prs_open": [
+                    {"number": 12, "url": "https://x/pull/12", "isDraft": True, "title": "t"}
+                ]
+            }
+        )
         self.claude(claude_entry())
         run_cli(["run", "--foreground"])
         self.assertEqual(State.load(self.rdir()).pr_number, 12)
@@ -118,8 +132,17 @@ class ApprovePath(RepoCase):
         self.assertEqual(self.fake_calls("claude"), [])
 
     def test_docs_kind_needs_no_tests(self):
-        self.write(".revali/feature__mul/change.md", self.read(".revali/feature__mul/change.md").replace("kind: feature", "kind: docs"))
-        data = approve_response(tests=[], not_testable=[{"ac": "AC-1", "reason": "kind docs"}, {"ac": "AC-2", "reason": "kind docs"}])
+        self.write(
+            ".revali/feature__mul/change.md",
+            self.read(".revali/feature__mul/change.md").replace("kind: feature", "kind: docs"),
+        )
+        data = approve_response(
+            tests=[],
+            not_testable=[
+                {"ac": "AC-1", "reason": "kind docs"},
+                {"ac": "AC-2", "reason": "kind docs"},
+            ],
+        )
         self.claude(claude_entry(data, write_tests=False))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
@@ -132,7 +155,9 @@ class ApprovePath(RepoCase):
 class ChangesRequestedLoop(RepoCase):
     def test_changes_requested_then_fix_then_approve(self):
         cr = approve_response(verdict="CHANGES_REQUESTED", findings=[finding()])
-        ok = approve_response(previous_findings=[{"id": "F1", "status": "resolved", "note": "fixed"}])
+        ok = approve_response(
+            previous_findings=[{"id": "F1", "status": "resolved", "note": "fixed"}]
+        )
         self.claude(claude_entry(cr), claude_entry(ok, write_tests=False))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
@@ -142,7 +167,9 @@ class ChangesRequestedLoop(RepoCase):
         state = State.load(self.rdir())
         self.assertEqual(state.stage, "needs_action")
         self.assertEqual(state.fixes, 0)
-        self.assertEqual(len(state.test_commits), 1)  # tests are committed even on CHANGES_REQUESTED
+        self.assertEqual(
+            len(state.test_commits), 1
+        )  # tests are committed even on CHANGES_REQUESTED
 
         # rerun without changing anything: refused before spending tokens
         code, out = run_cli(["run", "--foreground"])
@@ -169,8 +196,14 @@ class ChangesRequestedLoop(RepoCase):
 
     def test_max_fixes_exhausted(self):
         cr = approve_response(verdict="CHANGES_REQUESTED", findings=[finding()])
-        self.claude(claude_entry(cr), claude_entry(cr, write_tests=False), claude_entry(cr, write_tests=False))
-        self.write("revali.toml", self.read("revali.toml").replace("max_fixes = 2", "max_fixes = 1"))
+        self.claude(
+            claude_entry(cr),
+            claude_entry(cr, write_tests=False),
+            claude_entry(cr, write_tests=False),
+        )
+        self.write(
+            "revali.toml", self.read("revali.toml").replace("max_fixes = 2", "max_fixes = 1")
+        )
         self.commit_all("limit")
         self.assertEqual(run_cli(["run", "--foreground"])[0], EXIT_ACTION)
         self.write("src/calc.py", self.read("src/calc.py") + "\n# try 1\n")
@@ -185,7 +218,9 @@ class ChangesRequestedLoop(RepoCase):
         self.assertEqual(len(self.fake_calls("claude")), 2)
 
     def test_needs_info_once_then_changes_requested(self):
-        q = approve_response(verdict="NEEDS_INFO", questions=["Should mul accept floats?"], tests=[])
+        q = approve_response(
+            verdict="NEEDS_INFO", questions=["Should mul accept floats?"], tests=[]
+        )
         self.claude(claude_entry(q, write_tests=False), claude_entry(q, write_tests=False))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
@@ -196,14 +231,16 @@ class ChangesRequestedLoop(RepoCase):
         self.assertEqual(state.fixes, 0)
         self.assertEqual(state.test_commits, [])
         self.write(".revali/feature__mul/response-1.md", "- floats: yes\n")
-        code, out = run_cli(["run", "--foreground"])   # no code change needed after a question
+        code, out = run_cli(["run", "--foreground"])  # no code change needed after a question
         self.assertEqual(code, EXIT_ACTION, out)
         self.assertIn("unanswered", out)
         self.assertEqual(State.load(self.rdir()).fixes, 0)
 
     def test_history_rewrite_restarts(self):
-        self.claude(claude_entry(approve_response(verdict="CHANGES_REQUESTED", findings=[finding()])),
-                    claude_entry())
+        self.claude(
+            claude_entry(approve_response(verdict="CHANGES_REQUESTED", findings=[finding()])),
+            claude_entry(),
+        )
         run_cli(["run", "--foreground"])
         git(["reset", "-q", "--hard", "HEAD~1"], self.repo)  # drop the reviewer's test commit
         self.write("src/calc.py", self.read("src/calc.py") + "\n# redo\n")
@@ -249,7 +286,11 @@ class ReviewerMisbehaviour(RepoCase):
     def test_unjustified_test_change_forces_changes_requested(self):
         self.write("tests/test_calc.py", self.read("tests/test_calc.py").replace("5)", "6)"))
         self.commit_all("weaken")
-        data = approve_response(test_changes=[{"file": "tests/test_calc.py", "justified": False, "reason": "assertion changed"}])
+        data = approve_response(
+            test_changes=[
+                {"file": "tests/test_calc.py", "justified": False, "reason": "assertion changed"}
+            ]
+        )
         self.claude(claude_entry(data))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
@@ -257,7 +298,16 @@ class ReviewerMisbehaviour(RepoCase):
         self.assertIn("Reviewer said APPROVE", self.read(".revali/feature__mul/review-1.md"))
 
     def test_ac_gap_bounces_once(self):
-        partial = approve_response(tests=[{"path": "tests/test_review_mul.py", "purpose": "p", "covers": ["AC-1"], "expected": "e"}])
+        partial = approve_response(
+            tests=[
+                {
+                    "path": "tests/test_review_mul.py",
+                    "purpose": "p",
+                    "covers": ["AC-1"],
+                    "expected": "e",
+                }
+            ]
+        )
         self.claude(claude_entry(partial), claude_entry(write_tests=False))
         code, out = run_cli(["run", "--foreground"])
         self.assertIn("READY TO MERGE", out)
@@ -268,15 +318,29 @@ class ReviewerMisbehaviour(RepoCase):
         self.assertEqual(json.loads(self.read(".revali/feature__mul/review-1.json"))["bounces"], 1)
 
     def test_ac_gap_persisting_forces_changes_requested(self):
-        partial = approve_response(tests=[{"path": "tests/test_review_mul.py", "purpose": "p", "covers": ["AC-1"], "expected": "e"}])
+        partial = approve_response(
+            tests=[
+                {
+                    "path": "tests/test_review_mul.py",
+                    "purpose": "p",
+                    "covers": ["AC-1"],
+                    "expected": "e",
+                }
+            ]
+        )
         self.claude(claude_entry(partial), claude_entry(partial, write_tests=False))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
         self.assertIn("AC-2", out)
 
     def test_smoke_bounce_then_ok(self):
-        self.runner_scenario({"default": 0, "results": {"smoke-r1-1": {"new_test": 2}},
-                              "outputs": {"smoke-r1-1": {"new_test": "ImportError: no module named nothing"}}})
+        self.runner_scenario(
+            {
+                "default": 0,
+                "results": {"smoke-r1-1": {"new_test": 2}},
+                "outputs": {"smoke-r1-1": {"new_test": "ImportError: no module named nothing"}},
+            }
+        )
         self.claude(claude_entry(), claude_entry())
         code, out = run_cli(["run", "--foreground"])
         self.assertIn("READY TO MERGE", out)
@@ -286,7 +350,12 @@ class ReviewerMisbehaviour(RepoCase):
         self.assertIn("ImportError", cl[1]["prompt"])
 
     def test_smoke_failing_twice_is_error(self):
-        self.runner_scenario({"default": 0, "results": {"smoke-r1-1": {"new_test": 2}, "smoke-r1-2": {"new_test": 2}}})
+        self.runner_scenario(
+            {
+                "default": 0,
+                "results": {"smoke-r1-1": {"new_test": 2}, "smoke-r1-2": {"new_test": 2}},
+            }
+        )
         self.claude(claude_entry(), claude_entry())
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
@@ -300,7 +369,10 @@ class ReviewerMisbehaviour(RepoCase):
         self.assertEqual(len(self.fake_calls("claude")), 1)
 
     def test_setup_failure_is_pipeline_error(self):
-        self.write("revali.toml", self.read("revali.toml").replace('setup = ""', 'setup = "pip install nothing"'))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace('setup = ""', 'setup = "pip install nothing"'),
+        )
         self.commit_all("setup")
         self.runner_scenario({"default": 0, "results": {"smoke-r1-1": {"setup": 1}}})
         self.claude(claude_entry())
@@ -327,7 +399,8 @@ class ReviewerMisbehaviour(RepoCase):
 
 
 class HistoryRepoTests(RepoCase):
-    """A run that stops in preflight still names its repo in history (stats grouped it as unknown)."""
+    """A run that stops in preflight still names its repo in history (stats grouped it as
+    unknown)."""
 
     def test_preflight_stop_records_repo_from_origin(self):
         git(["remote", "set-url", "origin", "https://github.com/Me/Sample.git"], self.repo)

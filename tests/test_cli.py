@@ -1,10 +1,9 @@
 import os
-import time
 import unittest
 
-from tests.helpers import RepoCase, claude_entry, run_cli
 from revali import EXIT_ERROR, EXIT_OK, VERSION
-from revali.state import State, review_dir, lock_owner_alive
+from revali.state import State, lock_owner_alive, review_dir
+from tests.helpers import RepoCase, claude_entry, run_cli
 
 
 class CliTests(RepoCase):
@@ -95,6 +94,7 @@ class CliTests(RepoCase):
 
     def test_parse_duration(self):
         from revali.pipeline import parse_duration
+
         self.assertEqual(parse_duration("9m"), 540)
         self.assertEqual(parse_duration("30s"), 30)
         self.assertEqual(parse_duration("1h"), 3600)

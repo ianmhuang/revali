@@ -7,21 +7,24 @@ contains a space (round 1, F1), and passes BatchMode=yes to every ssh / scp call
 The host is a directory served by tests/fixtures/fake_bin/ssh_stub.py and scp_stub.py;
 the sandbox script runs with the host's bash, as the WSL runner tests do.
 """
+
 import os
 import sys
 import unittest
 
-from tests.helpers import FAKE_BIN, RepoCase, _quote, git
-from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, PY
 from revali.config import PlatformCfg
 from revali.runners import RunnerError, SshRunner, WslRunner
+from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, PY
+from tests.helpers import FAKE_BIN, RepoCase, _quote, git
 
 SSH_STUB = os.path.join(FAKE_BIN, "ssh_stub.py")
 SCP_STUB = os.path.join(FAKE_BIN, "scp_stub.py")
 WSL_STUB = os.path.join(FAKE_BIN, "wsl_stub.py")
 HAVE_BASH = os.name == "nt" or os.path.exists("/bin/bash")
-NEW_TEST = ("import unittest\nfrom src.calc import mul\n\n\nclass T(unittest.TestCase):\n"
-            "    def test_m(self):\n        self.assertEqual(mul(2, 3), 6)\n")
+NEW_TEST = (
+    "import unittest\nfrom src.calc import mul\n\n\nclass T(unittest.TestCase):\n"
+    "    def test_m(self):\n        self.assertEqual(mul(2, 3), 6)\n"
+)
 
 
 def ssh_plat(**kw):
@@ -42,7 +45,11 @@ class SshTransportCase(RepoCase):
         os.environ["REVALI_SSH_CMD"] = "%s %s" % (_quote(sys.executable), _quote(SSH_STUB))
         os.environ["REVALI_SCP_CMD"] = "%s %s" % (_quote(sys.executable), _quote(SCP_STUB))
         os.environ["REVALI_WSL_CMD"] = "%s %s" % (_quote(sys.executable), _quote(WSL_STUB))
-        for knob in ("REVALI_FAKE_SSH_DOWN", "REVALI_FAKE_SSH_BASH_FAILS", "REVALI_FAKE_SSH_RM_FAILS"):
+        for knob in (
+            "REVALI_FAKE_SSH_DOWN",
+            "REVALI_FAKE_SSH_BASH_FAILS",
+            "REVALI_FAKE_SSH_RM_FAILS",
+        ):
             os.environ.pop(knob, None)
         self.head = git(["rev-parse", "HEAD"], self.repo).strip()
 
@@ -58,7 +65,9 @@ class SshTransportCase(RepoCase):
 
     def run_ssh(self, steps, extra, label, repo=None, log=None):
         logs = os.path.join(self.tmp, "logs-" + label)
-        report = SshRunner(ssh_plat()).run(repo or self.repo, self.head, steps, extra, logs, label, log=log)
+        report = SshRunner(ssh_plat()).run(
+            repo or self.repo, self.head, steps, extra, logs, label, log=log
+        )
         return report, logs
 
     def assert_host_clean_and_rm_last(self):
@@ -79,7 +88,11 @@ class Delivery(SshTransportCase):
         self.assertEqual([s.name for s in report.steps], ["setup", "test", "new_test"])
         self.assertIn("Ran 1 test", report.step("new_test").stdout)
         # one upload carried a bundle; the script clones from it, not from the source repo
-        uploads = [argv for exe, argv in self.transport_calls() if exe == "scp" and argv[-1].startswith("box:")]
+        uploads = [
+            argv
+            for exe, argv in self.transport_calls()
+            if exe == "scp" and argv[-1].startswith("box:")
+        ]
         self.assertEqual(len(uploads), 1, self.transport_calls())
         self.assertTrue(any(a.endswith("validate-r1.bundle") for a in uploads[0]), uploads[0])
         with open(os.path.join(logs, "validate-r1.sh"), "r", encoding="utf-8") as fh:
@@ -92,20 +105,40 @@ class Delivery(SshTransportCase):
         steps = [("setup", "true"), ("test", LOCAL_TEST), ("new_test", LOCAL_NEW_TEST)]
         extra = {"tests/test_review_mul.py": NEW_TEST}
         wsl_logs = os.path.join(self.tmp, "logs-wsl")
-        wsl = WslRunner(PlatformCfg(runner="wsl", distro="Ubuntu", command_timeout_min=1,
-                                    sandbox_dir="~/.revali/sandbox"))
+        wsl = WslRunner(
+            PlatformCfg(
+                runner="wsl",
+                distro="Ubuntu",
+                command_timeout_min=1,
+                sandbox_dir="~/.revali/sandbox",
+            )
+        )
         wsl_report = wsl.run(self.repo, self.head, steps, extra, wsl_logs, "validate-r1")
-        self.assertTrue(wsl_report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in wsl_report.steps])
+        self.assertTrue(
+            wsl_report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in wsl_report.steps]
+        )
         ssh_report, ssh_logs = self.run_ssh(steps, extra, "validate-r1")
-        self.assertTrue(ssh_report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in ssh_report.steps])
+        self.assertTrue(
+            ssh_report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in ssh_report.steps]
+        )
         self.assertEqual(sorted(os.listdir(ssh_logs)), sorted(os.listdir(wsl_logs)))
-        for name in ("validate-r1.results", "validate-r1-clone.log", "validate-r1-setup.log",
-                     "validate-r1-test.log", "validate-r1-new_test.log"):
+        for name in (
+            "validate-r1.results",
+            "validate-r1-clone.log",
+            "validate-r1-setup.log",
+            "validate-r1-test.log",
+            "validate-r1-new_test.log",
+        ):
             self.assertIn(name, os.listdir(ssh_logs))
         self.assertNotIn("validate-r1.bundle", os.listdir(ssh_logs))
         self.assertNotIn("validate-r1-extra", os.listdir(ssh_logs))
-        self.assertEqual([s.log_path for s in ssh_report.steps],
-                         [os.path.join(ssh_logs, "validate-r1-%s.log" % n) for n in ("setup", "test", "new_test")])
+        self.assertEqual(
+            [s.log_path for s in ssh_report.steps],
+            [
+                os.path.join(ssh_logs, "validate-r1-%s.log" % n)
+                for n in ("setup", "test", "new_test")
+            ],
+        )
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_repository_directory_with_a_space_runs_and_leaves_the_host_clean(self):
@@ -123,10 +156,17 @@ class Delivery(SshTransportCase):
             for spec in remote_specs:
                 self.assertFalse(any(ch.isspace() for ch in spec), (exe, argv))
         # nothing landed outside the sandbox root on the host, e.g. a stray "project/..."
-        self.assertFalse(os.path.exists(os.path.join(self.remote, "project")), os.listdir(self.remote))
-        self.assertFalse(os.path.exists(os.path.join(self.remote, ".revali", "sandbox", "my")),
-                         os.listdir(os.path.join(self.remote, ".revali", "sandbox"))
-                         if os.path.isdir(os.path.join(self.remote, ".revali", "sandbox")) else [])
+        self.assertFalse(
+            os.path.exists(os.path.join(self.remote, "project")), os.listdir(self.remote)
+        )
+        self.assertFalse(
+            os.path.exists(os.path.join(self.remote, ".revali", "sandbox", "my")),
+            (
+                os.listdir(os.path.join(self.remote, ".revali", "sandbox"))
+                if os.path.isdir(os.path.join(self.remote, ".revali", "sandbox"))
+                else []
+            ),
+        )
 
 
 class Cleanup(SshTransportCase):
@@ -138,7 +178,9 @@ class Cleanup(SshTransportCase):
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_failing_step_is_reported_and_the_host_is_cleaned(self):
-        report, _ = self.run_ssh([("setup", "true"), ("test", "exit 3"), ("new_test", "true")], {}, "validate-r2")
+        report, _ = self.run_ssh(
+            [("setup", "true"), ("test", "exit 3"), ("new_test", "true")], {}, "validate-r2"
+        )
         self.assertEqual([s.name for s in report.steps], ["setup", "test"])
         self.assertEqual(report.failed.name, "test")
         self.assertEqual(report.failed.returncode, 3)
@@ -150,7 +192,9 @@ class Cleanup(SshTransportCase):
             self.run_ssh([("test", "true")], {}, "validate-r3")
         self.assertIn("box", str(cm.exception))
         self.assert_host_clean_and_rm_last()
-        self.assertFalse(os.path.exists(os.path.join(self.tmp, "logs-validate-r3", "validate-r3.bundle")))
+        self.assertFalse(
+            os.path.exists(os.path.join(self.tmp, "logs-validate-r3", "validate-r3.bundle"))
+        )
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_cleanup_that_fails_on_the_host_is_named_in_the_run_log(self):
@@ -160,8 +204,13 @@ class Cleanup(SshTransportCase):
         lines = []
         report, _ = self.run_ssh([("test", "true")], {}, "validate-r6", log=lines.append)
         self.assertTrue(report.ok)
-        hits = [l for l in lines if "box" in l and "validate-r6" in l
-                and ("remove" in l.lower() or "delete" in l.lower() or "clean" in l.lower())]
+        hits = [
+            line
+            for line in lines
+            if "box" in line
+            and "validate-r6" in line
+            and ("remove" in line.lower() or "delete" in line.lower() or "clean" in line.lower())
+        ]
         self.assertTrue(hits, lines)
 
 
@@ -176,8 +225,15 @@ class NonInteractive(SshTransportCase):
         upload = [i for i, (e, a) in enumerate(calls) if e == "scp" and a[-1].startswith("box:")]
         run = [i for i, (e, a) in enumerate(calls) if e == "ssh" and a[-1].startswith("bash ")]
         download = [i for i, (e, a) in enumerate(calls) if e == "scp" and a[-1] == "."]
-        cleanup = [i for i, (e, a) in enumerate(calls) if e == "ssh" and a[-1].startswith("rm -rf ")]
-        for name, found in (("upload", upload), ("run", run), ("download", download), ("cleanup", cleanup)):
+        cleanup = [
+            i for i, (e, a) in enumerate(calls) if e == "ssh" and a[-1].startswith("rm -rf ")
+        ]
+        for name, found in (
+            ("upload", upload),
+            ("run", run),
+            ("download", download),
+            ("cleanup", cleanup),
+        ):
             self.assertEqual(len(found), 1, "%s: %r in %r" % (name, found, calls))
         self.assertLess(upload[0], run[0])
         self.assertLess(run[0], download[0])

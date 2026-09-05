@@ -1,25 +1,42 @@
 """A Reviewer session that dies (budget, crash) is reported plainly and leaves the tree clean."""
+
 import json
 import unittest
 
-from tests.helpers import RepoCase, TEST_REVIEW_MUL, git, run_cli
 from revali import EXIT_ERROR
+from tests.helpers import TEST_REVIEW_MUL, RepoCase, git, run_cli
 
 
 def budget_payload():
-    return json.dumps({
-        "type": "result", "subtype": "error_max_budget_usd", "is_error": True, "num_turns": 9,
-        "duration_ms": 90000, "total_cost_usd": 1.05, "errors": ["Reached maximum budget ($1)"],
-        "terminal_reason": "budget_exhausted", "result": None,
-        "modelUsage": {"claude-fable-5": {"costUSD": 1.05}}, "permission_denials": [],
-    })
+    return json.dumps(
+        {
+            "type": "result",
+            "subtype": "error_max_budget_usd",
+            "is_error": True,
+            "num_turns": 9,
+            "duration_ms": 90000,
+            "total_cost_usd": 1.05,
+            "errors": ["Reached maximum budget ($1)"],
+            "terminal_reason": "budget_exhausted",
+            "result": None,
+            "modelUsage": {"claude-fable-5": {"costUSD": 1.05}},
+            "permission_denials": [],
+        }
+    )
 
 
 class ReviewerDiedTests(RepoCase):
     def test_budget_exhaustion_is_named_and_leftovers_removed(self):
-        self.claude({"exit": 1, "raw_stdout": budget_payload(),
-                     "write_files": {"tests/test_review_mul.py": TEST_REVIEW_MUL,
-                                     "tests/test_review_half.py": "import unittest\n"}})
+        self.claude(
+            {
+                "exit": 1,
+                "raw_stdout": budget_payload(),
+                "write_files": {
+                    "tests/test_review_mul.py": TEST_REVIEW_MUL,
+                    "tests/test_review_half.py": "import unittest\n",
+                },
+            }
+        )
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn("reviewer ran out of budget ($1.00) after 9 turns, spent $1.05", out)
@@ -32,8 +49,13 @@ class ReviewerDiedTests(RepoCase):
         self.assertNotIn("working tree is not clean", out)
 
     def test_unusable_output_also_cleans_up(self):
-        self.claude({"exit": 0, "structured_output": {"verdict": "MAYBE"},
-                     "write_files": {"tests/test_review_mul.py": TEST_REVIEW_MUL}})
+        self.claude(
+            {
+                "exit": 0,
+                "structured_output": {"verdict": "MAYBE"},
+                "write_files": {"tests/test_review_mul.py": TEST_REVIEW_MUL},
+            }
+        )
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn("does not match the schema", out)
@@ -57,8 +79,13 @@ class ReviewerDiedTests(RepoCase):
         self.assertEqual(self.fake_calls("claude"), [])
 
     def test_untracked_files_outside_the_pattern_are_kept(self):
-        self.claude({"exit": 1, "raw_stdout": budget_payload(),
-                     "write_files": {"tests/helper_notes.txt": "keep me\n"}})
+        self.claude(
+            {
+                "exit": 1,
+                "raw_stdout": budget_payload(),
+                "write_files": {"tests/helper_notes.txt": "keep me\n"},
+            }
+        )
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertNotIn("unfinished test file", out)

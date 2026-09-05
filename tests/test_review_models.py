@@ -1,11 +1,12 @@
 """AC-3 / AC-4: model = "auto" relative to author_model, and the reason is reported."""
+
 import json
 import os
 import re
 import unittest
 
-from tests.helpers import ROOT, RepoCase, claude_entry, run_cli  # noqa: F401
 from revali import EXIT_ACTION, EXIT_OK
+from tests.helpers import ROOT, RepoCase, claude_entry, run_cli  # noqa: F401
 
 TIERS = ["haiku", "sonnet", "opus", "fable"]
 CHANGE = ".revali/feature__mul/change.md"
@@ -20,6 +21,7 @@ class AutoResolution(unittest.TestCase):
 
     def setUp(self):
         from revali import models
+
         self.m = models
 
     def reviewer(self, author, requested="auto", fallback="auto", foreign=()):
@@ -29,8 +31,10 @@ class AutoResolution(unittest.TestCase):
         return self.m.resolve(self.m.DIAGNOSER, requested, fallback, author, TIERS)
 
     def test_reviewer_is_one_tier_above_the_author(self):
-        self.assertEqual((self.reviewer("claude-sonnet-5").model, self.reviewer("claude-sonnet-5").fallback),
-                         ("opus", "sonnet,haiku"))
+        self.assertEqual(
+            (self.reviewer("claude-sonnet-5").model, self.reviewer("claude-sonnet-5").fallback),
+            ("opus", "sonnet,haiku"),
+        )
         self.assertEqual(self.reviewer("claude-opus-5").model, "fable")
         self.assertEqual(self.reviewer("claude-haiku-4-5-20251001").model, "sonnet")
 
@@ -44,11 +48,15 @@ class AutoResolution(unittest.TestCase):
             self.assertTrue(r.reason, "auto needs a reason")
 
     def test_diagnoser_is_one_tier_below_the_author(self):
-        self.assertEqual((self.diagnoser("claude-fable-5").model, self.diagnoser("claude-fable-5").fallback),
-                         ("opus", "sonnet,haiku"))
+        self.assertEqual(
+            (self.diagnoser("claude-fable-5").model, self.diagnoser("claude-fable-5").fallback),
+            ("opus", "sonnet,haiku"),
+        )
         self.assertEqual(self.diagnoser("claude-opus-5").model, "sonnet")
-        self.assertEqual((self.diagnoser("claude-sonnet-5").model, self.diagnoser("claude-sonnet-5").fallback),
-                         ("haiku", ""))
+        self.assertEqual(
+            (self.diagnoser("claude-sonnet-5").model, self.diagnoser("claude-sonnet-5").fallback),
+            ("haiku", ""),
+        )
         self.assertEqual(self.diagnoser("claude-haiku-4-5").model, "haiku")
         self.assertEqual(self.diagnoser("fixture").model, "opus")
         self.assertEqual(self.diagnoser("").model, "opus")
@@ -87,7 +95,7 @@ class PipelineUsesAuto(RepoCase):
         self.assertEqual(meta["model_reason"], "auto: one tier above author claude-sonnet-5")
 
     def test_unknown_author_reviewer_is_top_tier(self):
-        self.claude(claude_entry())   # fixture author_model is "fixture"
+        self.claude(claude_entry())  # fixture author_model is "fixture"
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
         argv = self.fake_calls("claude")[0]["argv"]
@@ -97,10 +105,22 @@ class PipelineUsesAuto(RepoCase):
 
     def test_diagnoser_model_and_reason(self):
         self.set_author("claude-opus-5")
-        self.runner_scenario({"default": 0, "results": {"validate-r1": {"new_test": 1}},
-                              "outputs": {"validate-r1": {"new_test": "AssertionError: 12 != 7"}}})
-        diag = {"summary": "product wrong", "cause": "code", "failures": [], "recommendation": "return a * b"}
-        self.claude(claude_entry(), claude_entry(diag, write_tests=False, model="claude-sonnet-5", cost=0.2))
+        self.runner_scenario(
+            {
+                "default": 0,
+                "results": {"validate-r1": {"new_test": 1}},
+                "outputs": {"validate-r1": {"new_test": "AssertionError: 12 != 7"}},
+            }
+        )
+        diag = {
+            "summary": "product wrong",
+            "cause": "code",
+            "failures": [],
+            "recommendation": "return a * b",
+        }
+        self.claude(
+            claude_entry(), claude_entry(diag, write_tests=False, model="claude-sonnet-5", cost=0.2)
+        )
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
         reviewer, diagnoser = [c["argv"] for c in self.fake_calls("claude")]
@@ -108,19 +128,31 @@ class PipelineUsesAuto(RepoCase):
         self.assertEqual(argv_after(diagnoser, "--model"), "sonnet")
         self.assertEqual(argv_after(diagnoser, "--fallback-model"), "haiku")
         self.assertIn("diagnoser sonnet (auto: one tier below author claude-opus-5)", out)
-        self.assertIn("diagnoser sonnet (auto: one tier below author claude-opus-5)",
-                      self.read(".revali/feature__mul/logs/revali.log"))
+        self.assertIn(
+            "diagnoser sonnet (auto: one tier below author claude-opus-5)",
+            self.read(".revali/feature__mul/logs/revali.log"),
+        )
         meta = json.loads(self.read(".revali/feature__mul/diagnose-1.json"))["meta"]
         self.assertEqual(meta["model_requested"], "sonnet")
         self.assertEqual(meta["model_reason"], "auto: one tier below author claude-opus-5")
 
     def test_explicit_models_from_the_user_layer_pass_through(self):
         with open(os.path.join(self.home, "config.toml"), "w", encoding="utf-8") as fh:
-            fh.write('[review]\nmodel = "claude-opus-5"\nfallback_model = "sonnet"\n'
-                     '[validate]\nmodel = "opus"\nfallback_model = ""\n')
+            fh.write(
+                '[review]\nmodel = "claude-opus-5"\nfallback_model = "sonnet"\n'
+                '[validate]\nmodel = "opus"\nfallback_model = ""\n'
+            )
         self.runner_scenario({"default": 0, "results": {"validate-r1": {"new_test": 1}}})
-        diag = {"summary": "product wrong", "cause": "code", "failures": [], "recommendation": "return a * b"}
-        self.claude(claude_entry(model="claude-opus-5"), claude_entry(diag, write_tests=False, model="claude-opus-5"))
+        diag = {
+            "summary": "product wrong",
+            "cause": "code",
+            "failures": [],
+            "recommendation": "return a * b",
+        }
+        self.claude(
+            claude_entry(model="claude-opus-5"),
+            claude_entry(diag, write_tests=False, model="claude-opus-5"),
+        )
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
         reviewer, diagnoser = [c["argv"] for c in self.fake_calls("claude")]
@@ -145,7 +177,10 @@ class PipelineUsesAuto(RepoCase):
         self.assertIn("(auto: one tier above author claude-sonnet-5)", state["message"])
 
     def test_dry_run_with_an_explicit_model_has_no_reason(self):
-        self.write("revali.toml", self.read("revali.toml").replace("[review]\n", '[review]\nmodel = "opus"\n'))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace("[review]\n", '[review]\nmodel = "opus"\n'),
+        )
         self.commit_all("pin")
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)

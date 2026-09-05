@@ -1,4 +1,5 @@
 """Thin wrappers over git and gh. Every call goes through procs.run (UTF-8, logged)."""
+
 import fnmatch
 import json
 import os
@@ -150,7 +151,7 @@ def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = Non
 
 def changed_files(base: str, head: str, cwd: str) -> List[str]:
     res = git_ok(["diff", "--name-only", "%s...%s" % (base, head)], cwd)
-    return [l.strip() for l in res.stdout.splitlines() if l.strip()]
+    return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
 
 def matches_any(path: str, patterns: List[str]) -> bool:
@@ -171,8 +172,15 @@ def trailer_commits(base: str, head: str, key: str, cwd: str) -> List[Tuple[str,
     """(sha, value) of the commits in base..head whose message carries the trailer `key`,
     oldest first; several values of one trailer are joined with commas. Needs git 2.22
     (`%(trailers:key=...)`)."""
-    res = git_ok(["log", "--reverse", "--format=%H%x1f%(trailers:key=" + key + ",valueonly,separator=%x2c)",
-                  "%s..%s" % (base, head)], cwd)
+    res = git_ok(
+        [
+            "log",
+            "--reverse",
+            "--format=%H%x1f%(trailers:key=" + key + ",valueonly,separator=%x2c)",
+            "%s..%s" % (base, head),
+        ],
+        cwd,
+    )
     out = []
     for line in res.stdout.splitlines():
         sha, _, value = line.partition("\x1f")
@@ -184,8 +192,19 @@ def trailer_commits(base: str, head: str, key: str, cwd: str) -> List[Tuple[str,
 def commit_paths(sha: str, cwd: str, diff_filter: str = "AM") -> List[str]:
     """Paths one commit touches, filtered like `git diff --diff-filter` (default: added or
     modified), forward slashes, NUL-separated so a path with spaces arrives unquoted."""
-    res = git_ok(["diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--root",
-                  "--diff-filter=" + diff_filter, sha], cwd)
+    res = git_ok(
+        [
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "-z",
+            "--root",
+            "--diff-filter=" + diff_filter,
+            sha,
+        ],
+        cwd,
+    )
     return [p.replace("\\", "/") for p in res.stdout.split("\0") if p]
 
 
@@ -199,7 +218,7 @@ def worktree_holding(branch: str, cwd: str) -> str:
     path = ""
     for line in res.stdout.splitlines():
         if line.startswith("worktree "):
-            path = os.path.normpath(line[len("worktree "):].strip())
+            path = os.path.normpath(line[len("worktree ") :].strip())
         elif line.strip() == "branch refs/heads/%s" % branch and path and path != here:
             return path
     return ""
@@ -230,7 +249,7 @@ def ensure_gitignore(repo: str, entry: str) -> bool:
     if os.path.isfile(path):
         with open(path, "r", encoding="utf-8", newline="") as fh:
             lines = fh.read().splitlines()
-    if any(l.strip() in (entry, entry.rstrip("/")) for l in lines):
+    if any(line.strip() in (entry, entry.rstrip("/")) for line in lines):
         return False
     with open(path, "a", encoding="utf-8", newline="\n") as fh:
         if lines and lines[-1].strip():
@@ -241,11 +260,12 @@ def ensure_gitignore(repo: str, entry: str) -> bool:
 
 # ---- gh ---------------------------------------------------------------------
 
+
 @dataclass
 class RepoInfo:
     owner: str
     name: str
-    visibility: str      # PRIVATE / PUBLIC / INTERNAL
+    visibility: str  # PRIVATE / PUBLIC / INTERNAL
     default_branch: str
     url: str = ""
 
@@ -280,7 +300,7 @@ def gh_repo_info(cwd: str, log: Logger = None) -> RepoInfo:
     try:
         data = json.loads(res.stdout)
     except ValueError as exc:
-        raise GhError("gh repo view returned invalid JSON: %s" % exc)
+        raise GhError("gh repo view returned invalid JSON: %s" % exc) from exc
     owner = data.get("owner") or {}
     default_ref = data.get("defaultBranchRef") or {}
     return RepoInfo(
@@ -293,7 +313,11 @@ def gh_repo_info(cwd: str, log: Logger = None) -> RepoInfo:
 
 
 def gh_pr_open(branch: str, cwd: str, log: Logger = None) -> Optional[dict]:
-    res = _gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,title"], cwd, log)
+    res = _gh(
+        ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,title"],
+        cwd,
+        log,
+    )
     if not res.ok:
         raise GhError("gh pr list failed: %s" % res.text.strip())
     try:
@@ -304,7 +328,11 @@ def gh_pr_open(branch: str, cwd: str, log: Logger = None) -> Optional[dict]:
 
 
 def gh_pr_any(branch: str, cwd: str, log: Logger = None) -> List[dict]:
-    res = _gh(["pr", "list", "--head", branch, "--state", "all", "--json", "number,url,state,mergedAt"], cwd, log)
+    res = _gh(
+        ["pr", "list", "--head", branch, "--state", "all", "--json", "number,url,state,mergedAt"],
+        cwd,
+        log,
+    )
     if not res.ok:
         return []
     try:

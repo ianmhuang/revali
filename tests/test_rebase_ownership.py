@@ -2,25 +2,48 @@
 state) the reviewer's own test files are recognised again from the commits on the branch
 that carry the `Revali-Round` trailer, so the reviewer may update them; a rewrite that
 drops the trailer leaves them protected."""
+
 import json
 import os
 import unittest
 
-from tests.helpers import RepoCase, TEST_REVIEW_MUL, approve_response, claude_entry, git, run_cli
 from revali import EXIT_OK
 from revali.state import State
+from tests.helpers import TEST_REVIEW_MUL, RepoCase, approve_response, claude_entry, git, run_cli
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-UPDATED = TEST_REVIEW_MUL.replace("mul(9, 0), 0", "mul(9, 0), 0)\n        self.assertEqual(mul(0, 9), 0")
-HOLLOW = "import unittest\n\n\nclass Hollow(unittest.TestCase):\n    def test_nothing(self):\n        pass\n"
-HIGH = {"id": "F1", "file": "src/calc.py", "line": 3, "severity": "high", "kind": "correctness",
-        "text": "wrong for negatives", "suggestion": ""}
+UPDATED = TEST_REVIEW_MUL.replace(
+    "mul(9, 0), 0", "mul(9, 0), 0)\n        self.assertEqual(mul(0, 9), 0"
+)
+HOLLOW = (
+    "import unittest\n\n\n"
+    "class Hollow(unittest.TestCase):\n"
+    "    def test_nothing(self):\n"
+    "        pass\n"
+)
+HIGH = {
+    "id": "F1",
+    "file": "src/calc.py",
+    "line": 3,
+    "severity": "high",
+    "kind": "correctness",
+    "text": "wrong for negatives",
+    "suggestion": "",
+}
 EARLIER = "Test files you wrote in earlier rounds"
 NOT_YOURS = "are not yours"
 
 
 def trailer_commits(repo):
-    out = git(["log", "--reverse", "--format=%H %(trailers:key=Revali-Round,valueonly)", "origin/main..HEAD"], repo)
+    out = git(
+        [
+            "log",
+            "--reverse",
+            "--format=%H %(trailers:key=Revali-Round,valueonly)",
+            "origin/main..HEAD",
+        ],
+        repo,
+    )
     return [line.split()[0] for line in out.splitlines() if len(line.split()) == 2]
 
 
@@ -68,23 +91,23 @@ class RebaseKeepsOwnership(RewriteCase):
         self.assertEqual(len(rebased), 1)
         self.assertNotEqual(rebased[0], self.first_commit)
         second = claude_entry(approve_response())
-        second["write_files"]["tests/test_review_mul.py"] = UPDATED     # its own file, updated
+        second["write_files"]["tests/test_review_mul.py"] = UPDATED  # its own file, updated
         self.claude(second)
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("starts over", out)
-        self.assertIn("recovered", out)                                              # AC-2: logged
+        self.assertIn("recovered", out)  # AC-2: logged
         self.assertIn(rebased[0][:10], out)
         self.assertIn("tests/test_review_mul.py", out.split("recovered", 1)[1].split("\n", 1)[0])
         ps = prompts(self)
-        self.assertEqual(len(ps), 1, "no bounce")                                    # AC-1
+        self.assertEqual(len(ps), 1, "no bounce")  # AC-1
         self.assertIn("tests/test_review_mul.py", section(ps[0], EARLIER))
         self.assertNotIn("tests/test_review_mul.py", section(ps[0], NOT_YOURS))
         self.assertEqual(self.read("tests/test_review_mul.py"), UPDATED)
         state = State.load(self.rdir())
         self.assertEqual(state.test_files, ["tests/test_review_mul.py"])
-        self.assertEqual(state.test_commits[0], rebased[0])                         # AC-2: recovered
-        self.assertEqual(len(state.test_commits), 2)                                 # plus round 1's
+        self.assertEqual(state.test_commits[0], rebased[0])  # AC-2: recovered
+        self.assertEqual(len(state.test_commits), 2)  # plus round 1's
         self.assertEqual(git(["status", "--porcelain", "--", "tests"], self.repo).strip(), "")
 
     def test_second_rewrite_is_detected_again(self):
@@ -100,7 +123,7 @@ class RebaseKeepsOwnership(RewriteCase):
         self.claude(claude_entry(approve_response()))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertIn("starts over", out)                                            # AC-2
+        self.assertIn("starts over", out)  # AC-2
         state = State.load(self.rdir())
         self.assertEqual(state.test_files, ["tests/test_review_mul.py"])
         self.assertEqual(state.test_commits, trailer_commits(self.repo))
@@ -113,23 +136,35 @@ class SquashDropsOwnership(RewriteCase):
         self.first_round()
         original = self.read("tests/test_review_mul.py")
         git(["reset", "-q", "--soft", "origin/main"], self.repo)
-        self.commit_all("Add mul with tests")          # the author folded the reviewer's commit in
+        self.commit_all("Add mul with tests")  # the author folded the reviewer's commit in
         self.assertEqual(trailer_commits(self.repo), [])
         first = claude_entry(approve_response())
         first["write_files"]["tests/test_review_mul.py"] = HOLLOW
-        second = claude_entry(approve_response(tests=[{"path": "tests/test_review_mul2.py", "purpose": "p",
-                                                       "covers": ["AC-1", "AC-2"], "expected": "e"}]),
-                              write_tests=False)
-        second["write_files"] = {"tests/test_review_mul2.py": TEST_REVIEW_MUL.replace("MulTests", "MulTests2")}
+        second = claude_entry(
+            approve_response(
+                tests=[
+                    {
+                        "path": "tests/test_review_mul2.py",
+                        "purpose": "p",
+                        "covers": ["AC-1", "AC-2"],
+                        "expected": "e",
+                    }
+                ]
+            ),
+            write_tests=False,
+        )
+        second["write_files"] = {
+            "tests/test_review_mul2.py": TEST_REVIEW_MUL.replace("MulTests", "MulTests2")
+        }
         self.claude(first, second)
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("starts over", out)
-        self.assertIn("Revali-Round", out)                                           # AC-3: says so
+        self.assertIn("Revali-Round", out)  # AC-3: says so
         self.assertNotIn("recovered", out)
-        self.assertEqual(self.read("tests/test_review_mul.py"), original)            # restored
+        self.assertEqual(self.read("tests/test_review_mul.py"), original)  # restored
         ps = prompts(self)
-        self.assertEqual(len(ps), 2)                                                 # bounced once
+        self.assertEqual(len(ps), 2)  # bounced once
         self.assertIn("tests/test_review_mul.py", section(ps[0], NOT_YOURS))
         self.assertNotIn(EARLIER, ps[0])
         self.assertIn("tests/test_review_mul.py", ps[1].split("Corrections required", 1)[1])
@@ -148,7 +183,7 @@ class FreshStateRecovers(RewriteCase):
         self.claude(entry)
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertIn("recovered", out)                                              # AC-4
+        self.assertIn("recovered", out)  # AC-4
         ps = prompts(self)
         self.assertEqual(len(ps), 1)
         self.assertIn("tests/test_review_mul.py", section(ps[0], EARLIER))
@@ -175,7 +210,7 @@ class FreshStateRecovers(RewriteCase):
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertNotIn("starts over", out)
-        self.assertIn("recovered", out)                                              # AC-7
+        self.assertIn("recovered", out)  # AC-7
         self.assertEqual(len(prompts(self)), 1)
         self.assertIn("tests/test_review_mul.py", section(prompts(self)[0], EARLIER))
         self.assertEqual(self.read("tests/test_review_mul.py"), UPDATED)
@@ -190,7 +225,7 @@ class FreshStateRecovers(RewriteCase):
         self.claude(claude_entry(approve_response()))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertNotIn("recovered", out)                                           # AC-7
+        self.assertNotIn("recovered", out)  # AC-7
         self.assertNotIn("Revali-Round", out)
         self.assertEqual(State.load(self.rdir()).test_files, ["tests/test_review_mul.py"])
 
@@ -213,20 +248,22 @@ class DeletedFileNotRecovered(RewriteCase):
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("starts over", out)
-        self.assertIn("none of", out)                                                # AC-5
+        self.assertIn("none of", out)  # AC-5
         ps = prompts(self)
         self.assertNotIn(EARLIER, ps[0])
         state = State.load(self.rdir())
-        self.assertEqual(state.test_files, ["tests/test_review_mul.py"])             # written anew
-        self.assertEqual(len(state.test_commits), 2)                                 # the old one still counts
+        self.assertEqual(state.test_files, ["tests/test_review_mul.py"])  # written anew
+        self.assertEqual(len(state.test_commits), 2)  # the old one still counts
 
 
 class ReadmeStatesTheRule(unittest.TestCase):
     def test_readme_names_the_trailer(self):
-        with open(os.path.join(os.path.dirname(HERE), "docs", "side-effects.md"), "r", encoding="utf-8") as fh:
+        with open(
+            os.path.join(os.path.dirname(HERE), "docs", "side-effects.md"), "r", encoding="utf-8"
+        ) as fh:
             text = fh.read()
         part = text.split("# What revali does to your repository", 1)[1].split("\n## ", 1)[0]
-        self.assertIn("Revali-Round", part)                                          # AC-6
+        self.assertIn("Revali-Round", part)  # AC-6
         self.assertIn("rebase", part)
 
 

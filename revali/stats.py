@@ -1,4 +1,5 @@
 """`revali stats`: what history.jsonl says about how the pipeline is doing."""
+
 from collections import defaultdict
 from typing import List
 
@@ -35,7 +36,10 @@ def summarise(rows: List[dict]) -> str:
     for r in runs:
         by_repo[r.get("repo") or "(unknown repo)"].append(r)
     out = ["history rows: %d, pipelines: %d" % (len(rows), len(runs)), ""]
-    header = "| repo | runs | reached verdict | first-try pass | merged | needs human | fallback | mean rounds | cost |"
+    header = (
+        "| repo | runs | reached verdict | first-try pass | merged | needs human "
+        "| fallback | mean rounds | cost |"
+    )
     out += [header, "|---|---|---|---|---|---|---|---|---|"]
     for repo, items in sorted(by_repo.items()):
         terminal = [r for r in items if r.get("stage") in TERMINAL]
@@ -48,14 +52,29 @@ def summarise(rows: List[dict]) -> str:
         cost = sum(float(r.get("cost_usd", 0) or 0) for r in items)
         rate = ("%d/%d" % (len(first_try), len(passed))) if passed else "-"
         mean_rounds = ("%.1f" % (sum(rounds) / len(rounds))) if rounds else "-"
-        out.append("| %s | %d | %d | %s | %d | %d | %d | %s | $%.2f |" % (
-            repo, len(items), len(terminal), rate, len(merged), len(human), len(fallback), mean_rounds, cost))
+        out.append(
+            "| %s | %d | %d | %s | %d | %d | %d | %s | $%.2f |"
+            % (
+                repo,
+                len(items),
+                len(terminal),
+                rate,
+                len(merged),
+                len(human),
+                len(fallback),
+                mean_rounds,
+                cost,
+            )
+        )
     models = defaultdict(int)
     for r in runs:
         for m in r.get("models", []) or []:
             models[m] += 1
     if models:
-        out += ["", "models seen: " + ", ".join("%s (%d)" % (m, n) for m, n in sorted(models.items()))]
+        out += [
+            "",
+            "models seen: " + ", ".join("%s (%d)" % (m, n) for m, n in sorted(models.items())),
+        ]
     verdicts = defaultdict(int)
     for r in runs:
         verdicts[r.get("last_verdict") or "-"] += 1
@@ -65,6 +84,7 @@ def summarise(rows: List[dict]) -> str:
 
 def cmd_stats(args) -> int:
     from revali.config import ConfigError, history_path, load_user_config
+
     try:
         path = history_path(load_user_config())
     except ConfigError:

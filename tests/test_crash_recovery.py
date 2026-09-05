@@ -1,5 +1,6 @@
 """A state.json write that races a reader, a run that dies without a result, and the
 rerun that continues at validation instead of paying for another review."""
+
 import contextlib
 import io
 import json
@@ -9,9 +10,9 @@ import time
 import unittest
 from unittest import mock
 
-from tests.helpers import RepoCase, claude_entry, git, run_cli
 from revali import EXIT_ERROR, EXIT_OK
 from revali.state import State, lock_owner_alive, lock_path, read_history, write_json_atomic
+from tests.helpers import RepoCase, claude_entry, git, run_cli
 
 
 def _tmp_files(directory):
@@ -22,6 +23,7 @@ class AtomicWriteRetry(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="revali race ")
         from tests.helpers import rmtree_force
+
         self.addCleanup(rmtree_force, self.tmp)
         self.path = os.path.join(self.tmp, "state.json")
 
@@ -55,7 +57,9 @@ class AtomicWriteRetry(unittest.TestCase):
         self.assertEqual(_tmp_files(self.tmp), [])
 
     def test_other_errors_are_not_retried(self):
-        with mock.patch("revali.state.os.replace", side_effect=IsADirectoryError(21, "Is a directory")) as rep:
+        with mock.patch(
+            "revali.state.os.replace", side_effect=IsADirectoryError(21, "Is a directory")
+        ) as rep:
             with self.assertRaises(IsADirectoryError):
                 write_json_atomic(self.path, {"a": 1}, retry_s=2.0)
         self.assertEqual(rep.call_count, 1)
@@ -63,6 +67,7 @@ class AtomicWriteRetry(unittest.TestCase):
 
     def test_default_window_comes_from_defaults_toml(self):
         from revali.config import load_defaults, paths_for
+
         configured = load_defaults()["paths"]["write_retry_s"]
         self.assertGreater(configured, 0)
         self.assertEqual(paths_for(self.tmp).write_retry_s, configured)
@@ -119,8 +124,13 @@ class DeadRunReporting(RepoCase):
     """The process vanished (kill, power) before any handler could record a result."""
 
     def _dead_state(self, stage="review", last_exit=-1):
-        st = State(branch="feature/mul", base="main", stage=stage, message="reviewer round 1",
-                   last_exit=last_exit)
+        st = State(
+            branch="feature/mul",
+            base="main",
+            stage=stage,
+            message="reviewer round 1",
+            last_exit=last_exit,
+        )
         st.save(self.rdir())
 
     def test_wait_reports_a_dead_run_without_a_lock(self):
@@ -161,7 +171,9 @@ class DeadRunReporting(RepoCase):
         self.write("src/calc.py", self.read("src/calc.py") + "\n# dirty\n")
         writes = []
 
-        def deny_after_the_first(src, dst):  # the "no result yet" save lands, the refusal's does not
+        def deny_after_the_first(
+            src, dst
+        ):  # the "no result yet" save lands, the refusal's does not
             if os.path.basename(dst) == "state.json":
                 writes.append(dst)
                 if len(writes) > 1:
@@ -204,7 +216,9 @@ class DeadRunReporting(RepoCase):
         self._dead_state(stage="preflight", last_exit=0)
         self.claude(claude_entry())
         with mock.patch("revali.pipeline.preflight", side_effect=KeyboardInterrupt):
-            code, out = run_cli(["run", "--foreground"])  # cli.main turns Ctrl-C into "interrupted", exit 1
+            code, out = run_cli(
+                ["run", "--foreground"]
+            )  # cli.main turns Ctrl-C into "interrupted", exit 1
         self.assertEqual(code, EXIT_ERROR)
         self.assertIn("interrupted", out)
         state = State.load(self.rdir())
@@ -252,17 +266,29 @@ class ResumeAtValidation(RepoCase):
         self.assertEqual(labels, ["baseline", "smoke-r1-1", "validate-r1"])
         # one review comment from the first run, one validation comment from the second
         self.assertEqual(len(self._comments()), 2)
-        self.assertTrue(any(a[:2] == ["pr", "ready"] for a in (c["argv"] for c in self.fake_calls("gh"))))
+        self.assertTrue(
+            any(a[:2] == ["pr", "ready"] for a in (c["argv"] for c in self.fake_calls("gh")))
+        )
         rows = read_history(os.path.join(self.home, "history.jsonl"))
         self.assertEqual([r["exit"] for r in rows], [EXIT_ERROR, EXIT_OK])
 
     def test_resumed_validation_can_still_fail(self):
         self._approve_then_die_before_validation()
-        self.runner_scenario({"default": 0, "results": {"validate-r1": {"test": 1}},
-                              "outputs": {"validate-r1": {"test": "FAIL: test_add"}}})
-        diagnosis = {"summary": "add regressed.", "cause": "code",
-                     "failures": [{"test": "tests/test_calc.py::test_add", "cause": "code", "note": "7 != 12"}],
-                     "recommendation": "fix add"}
+        self.runner_scenario(
+            {
+                "default": 0,
+                "results": {"validate-r1": {"test": 1}},
+                "outputs": {"validate-r1": {"test": "FAIL: test_add"}},
+            }
+        )
+        diagnosis = {
+            "summary": "add regressed.",
+            "cause": "code",
+            "failures": [
+                {"test": "tests/test_calc.py::test_add", "cause": "code", "note": "7 != 12"}
+            ],
+            "recommendation": "fix add",
+        }
         self.claude(claude_entry(diagnosis, write_tests=False, model="claude-opus-5", cost=0.2))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, 2, out)
@@ -296,9 +322,17 @@ class ResumeAtValidation(RepoCase):
         self.assertEqual(len(self.fake_calls("claude")), 2)
 
     def test_changes_requested_round_is_not_resumed(self):
-        finding = {"id": "F1", "file": "src/calc.py", "line": 3, "severity": "high", "kind": "correctness",
-                   "text": "mul ignores negative numbers", "suggestion": "handle them"}
+        finding = {
+            "id": "F1",
+            "file": "src/calc.py",
+            "line": 3,
+            "severity": "high",
+            "kind": "correctness",
+            "text": "mul ignores negative numbers",
+            "suggestion": "handle them",
+        }
         from tests.helpers import approve_response
+
         self.claude(claude_entry(approve_response(verdict="CHANGES_REQUESTED", findings=[finding])))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, 2, out)
@@ -330,14 +364,18 @@ class ConfiguredWindow(RepoCase):
         self.assertLess(elapsed, 1.0)  # the 2.0 s default would still be retrying
         # the same write outside any repository keeps the default
         from revali.config import load_defaults
+
         outside = tempfile.mkdtemp(prefix="revali outside ")
         from tests.helpers import rmtree_force
+
         self.addCleanup(rmtree_force, outside)
         started = time.monotonic()
         with mock.patch("revali.state.os.replace", side_effect=self._deny_state_json):
             with self.assertRaises(PermissionError):
                 write_json_atomic(os.path.join(outside, "state.json"), {"a": 1})
-        self.assertGreaterEqual(time.monotonic() - started, load_defaults()["paths"]["write_retry_s"])
+        self.assertGreaterEqual(
+            time.monotonic() - started, load_defaults()["paths"]["write_retry_s"]
+        )
 
     def test_state_write_failure_in_the_crash_handler_is_contained(self):
         self.claude(claude_entry())

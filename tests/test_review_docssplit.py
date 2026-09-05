@@ -2,13 +2,14 @@
 docs/, checked as text against the repository files (AC-1, AC-2, AC-4, AC-5, AC-10, AC-11).
 AC-3 is sampled: sentences the old README carried must appear, unwrapped and unchanged, in one
 of the docs/ files and no longer in the README. Nothing here runs a pipeline."""
+
 import glob
 import os
 import re
 import unittest
 
-from tests.helpers import ROOT, run_cli
 from revali import EXIT_OK, VERSION
+from tests.helpers import ROOT, run_cli
 
 DOCS = ("workflow.md", "configuration.md", "files.md", "sandbox.md", "side-effects.md")
 
@@ -39,10 +40,23 @@ class ReadmeIsAFrontPage(unittest.TestCase):
         self.assertLessEqual(len(self.text.splitlines()), 170)
 
     def test_the_parts_come_in_the_stated_order(self):
-        markers = ["- **Developer**", "- **Reviewer**", "- **Validator**", "**Why separate sessions.**",
-                   "```mermaid", "sequenceDiagram", "| Role |", "Three user actions", "Exit codes:",
-                   "\nStatus:", "\n## Requirements\n", "\n## Usage\n", "\n## Documentation\n",
-                   "\n## Development\n", "\n## License\n"]
+        markers = [
+            "- **Developer**",
+            "- **Reviewer**",
+            "- **Validator**",
+            "**Why separate sessions.**",
+            "```mermaid",
+            "sequenceDiagram",
+            "| Role |",
+            "Three user actions",
+            "Exit codes:",
+            "\nStatus:",
+            "\n## Requirements\n",
+            "\n## Usage\n",
+            "\n## Documentation\n",
+            "\n## Development\n",
+            "\n## License\n",
+        ]
         positions = []
         for marker in markers:
             self.assertIn(marker, self.text, marker)
@@ -65,15 +79,26 @@ class ReadmeIsAFrontPage(unittest.TestCase):
             self.assertIn("`docs/%s`" % name, index, name)
 
     def test_the_moved_sections_are_no_longer_readme_headings(self):
-        for heading in ("\n## Configuration\n", "\n## Files\n", "\n## Workflow\n", "\n## Sandbox\n",
-                        "\n## Project setup\n", "\n## What revali does to your repository\n",
-                        "\n## Several agents on one repository\n"):
+        for heading in (
+            "\n## Configuration\n",
+            "\n## Files\n",
+            "\n## Workflow\n",
+            "\n## Sandbox\n",
+            "\n## Project setup\n",
+            "\n## What revali does to your repository\n",
+            "\n## Several agents on one repository\n",
+        ):
             self.assertNotIn(heading, self.text, heading)
 
     def test_gates_and_exit_codes_stay_on_the_front_page(self):
         para = unwrap(self.text.split("Three user actions", 1)[1].split("\n\n", 1)[0])
-        for code in ("`0` done / ready to merge", "`1` pipeline error", "`2` the Developer must act",
-                     "`3` a human must decide", "`4` (`wait` only) still running"):
+        for code in (
+            "`0` done / ready to merge",
+            "`1` pipeline error",
+            "`2` the Developer must act",
+            "`3` a human must decide",
+            "`4` (`wait` only) still running",
+        ):
             self.assertIn(code, para, code)
 
 
@@ -83,7 +108,12 @@ class DocsHoldTheFormerSections(unittest.TestCase):
     def test_workflow_doc(self):
         text = read("docs", "workflow.md")
         self.assertTrue(text.startswith("# Workflow\n"), text[:40])
-        for title in ("Why separate sessions", "Workflow", "Several agents on one repository", "Project setup"):
+        for title in (
+            "Why separate sessions",
+            "Workflow",
+            "Several agents on one repository",
+            "Project setup",
+        ):
             self.assertIn("\n## %s\n" % title, text, title)
         why = unwrap(h2(text, "Why separate sessions"))
         # the two clauses the README's short version dropped are what make it the full paragraph
@@ -91,41 +121,61 @@ class DocsHoldTheFormerSections(unittest.TestCase):
         self.assertIn("derives its tests from the criteria", why)
         self.assertIn("it does not remove blind spots the models share", why)
         whole = unwrap(text)
-        self.assertIn("`repo: <working tree root>  branch: <branch>`", text)       # the identity line
-        self.assertIn("`run` takes `.revali/tree.lock`", whole)                     # the tree lock
-        self.assertIn("After exit code 2 the author fixes or answers", whole)      # exit 2
-        self.assertIn("A run that stops without a result", whole)                  # a dead run
+        self.assertIn("`repo: <working tree root>  branch: <branch>`", text)  # the identity line
+        self.assertIn("`run` takes `.revali/tree.lock`", whole)  # the tree lock
+        self.assertIn("After exit code 2 the author fixes or answers", whole)  # exit 2
+        self.assertIn("A run that stops without a result", whole)  # a dead run
         self.assertIn("status: draft", h2(text, "Workflow"))
         self.assertIn("`templates/revali.toml`", h2(text, "Project setup"))
 
     def test_sandbox_doc(self):
         text = read("docs", "sandbox.md")
         self.assertTrue(text.startswith("# Sandbox\n"), text[:40])
-        for phrase in ('`[validate.linux] runner = "wsl"`', '`runner = "ssh"`', '`runner = "local"`',
-                       "`connect_timeout_s`", "`transfer_timeout_min`", "BatchMode=yes"):
+        for phrase in (
+            '`[validate.linux] runner = "wsl"`',
+            '`runner = "ssh"`',
+            '`runner = "local"`',
+            "`connect_timeout_s`",
+            "`transfer_timeout_min`",
+            "BatchMode=yes",
+        ):
             self.assertIn(phrase, text, phrase)
 
     def test_side_effects_doc(self):
         text = read("docs", "side-effects.md")
         self.assertTrue(text.startswith("# What revali does to your repository\n"), text[:60])
-        whole = unwrap(text)   # phrases may cross a line wrap
-        for phrase in ("Read this before the first run.", "appends the state directory (`.revali/`)",
-                       "`gh pr merge --<method> --delete-branch`", "never merges on its own"):
+        whole = unwrap(text)  # phrases may cross a line wrap
+        for phrase in (
+            "Read this before the first run.",
+            "appends the state directory (`.revali/`)",
+            "`gh pr merge --<method> --delete-branch`",
+            "never merges on its own",
+        ):
             self.assertIn(phrase, whole, phrase)
 
     def test_files_doc(self):
         text = read("docs", "files.md")
         self.assertTrue(text.startswith("# Files\n"), text[:40])
         self.assertIn("| Document | Written by | Read by | Default location | Config key |", text)
-        self.assertTrue(any(l.startswith("| `tree.lock`") for l in text.splitlines()), "no tree.lock row")
+        self.assertTrue(
+            any(line.startswith("| `tree.lock`") for line in text.splitlines()), "no tree.lock row"
+        )
         self.assertIn("Branch `feature/x` maps to directory `feature__x`.", unwrap(text))
-        self.assertIn("`~/.revali/` itself moves with the `REVALI_HOME` environment variable.", unwrap(text))
+        self.assertIn(
+            "`~/.revali/` itself moves with the `REVALI_HOME` environment variable.", unwrap(text)
+        )
 
     def test_configuration_doc(self):
         text = read("docs", "configuration.md")
         self.assertTrue(text.startswith("# Configuration\n"), text[:40])
-        for phrase in ("Three layers, the most specific wins", "1. `defaults.toml`", "2. `~/.revali/config.toml`",
-                       "3. `revali.toml`", 'Models: `model = "auto"`', "`REVALI_DISABLE=1`"):
+        for phrase in (
+            "Three layers, the most specific wins",
+            "1. `defaults.toml`",
+            "2. `~/.revali/config.toml`",
+            "3. `revali.toml`",
+            'Models: `model = "auto"`',
+            "`REVALI_DISABLE=1`",
+        ):
             self.assertIn(phrase, text, phrase)
 
 
@@ -135,31 +185,61 @@ class MovedTextIsVerbatim(unittest.TestCase):
 
     SENTENCES = (
         ("workflow.md", "The acceptance criteria come before the code."),
-        ("workflow.md", "Approval means deleting the `status: draft` line; preflight refuses a draft "
-                        "(`change.md: status is 'draft'; review it and remove the status line`), so nothing "
-                        "runs on unapproved criteria."),
-        ("workflow.md", "A working tree runs one pipeline at a time: `run` takes `.revali/tree.lock` next to "
-                        "the branch lock, and a second `run` in the same checkout, on any branch, is refused "
-                        "with the running branch and pid."),
-        ("workflow.md", "Two clones with the same branch checked out are not a supported layout: they would "
-                        "share the PR and the sandbox directory."),
-        ("workflow.md", "Fresh context removes the author's bias toward its own change; it does not remove "
-                        "blind spots the models share, which is why `revali stats` tracks the first-try "
-                        "approval rate."),
-        ("workflow.md", "User-level options live in `~/.revali/config.toml` (see `templates/user-config.toml`); "
-                        "`REVALI_HOME` overrides the directory."),
+        (
+            "workflow.md",
+            "Approval means deleting the `status: draft` line; preflight refuses a draft "
+            "(`change.md: status is 'draft'; review it and remove the status line`), so nothing "
+            "runs on unapproved criteria.",
+        ),
+        (
+            "workflow.md",
+            "A working tree runs one pipeline at a time: `run` takes `.revali/tree.lock` next to "
+            "the branch lock, and a second `run` in the same checkout, on any branch, is refused "
+            "with the running branch and pid.",
+        ),
+        (
+            "workflow.md",
+            "Two clones with the same branch checked out are not a supported layout: they would "
+            "share the PR and the sandbox directory.",
+        ),
+        (
+            "workflow.md",
+            "Fresh context removes the author's bias toward its own change; it does not remove "
+            "blind spots the models share, which is why `revali stats` tracks the first-try "
+            "approval rate.",
+        ),
+        (
+            "workflow.md",
+            "User-level options live in `~/.revali/config.toml` "
+            "(see `templates/user-config.toml`); `REVALI_HOME` overrides the directory.",
+        ),
         ("configuration.md", "Unknown keys are errors in every layer."),
-        ("configuration.md", "`fallback_model = \"auto\"` is the tiers below the chosen one, strongest first."),
-        ("files.md", "Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves with the "
-                     "`REVALI_HOME` environment variable."),
-        ("sandbox.md", "Every call runs with `BatchMode=yes`: nothing prompts, so key-based login must already "
-                       "work and the host key must be known (run `ssh <host>` once by hand)."),
-        ("sandbox.md", "`runner = \"local\"` uses a git worktree on the host with no isolation."),
-        ("side-effects.md", "It never modifies files outside `test_dir` and the state directory, never commits a "
-                            "change to a test file the reviewer did not write, never merges on its own, and "
-                            "never runs on a repo you do not own."),
-        ("side-effects.md", "This is the only deletion inside `test_dir` revali performs, so keep your own files "
-                            "off `test_file_pattern`"),
+        (
+            "configuration.md",
+            '`fallback_model = "auto"` is the tiers below the chosen one, strongest first.',
+        ),
+        (
+            "files.md",
+            "Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves with the "
+            "`REVALI_HOME` environment variable.",
+        ),
+        (
+            "sandbox.md",
+            "Every call runs with `BatchMode=yes`: nothing prompts, so key-based login "
+            "must already work and the host key must be known (run `ssh <host>` once by hand).",
+        ),
+        ("sandbox.md", '`runner = "local"` uses a git worktree on the host with no isolation.'),
+        (
+            "side-effects.md",
+            "It never modifies files outside `test_dir` and the state directory, never commits a "
+            "change to a test file the reviewer did not write, never merges on its own, and "
+            "never runs on a repo you do not own.",
+        ),
+        (
+            "side-effects.md",
+            "This is the only deletion inside `test_dir` revali performs, so keep your own files "
+            "off `test_file_pattern`",
+        ),
     )
 
     def test_sentences_moved_unchanged(self):
@@ -173,8 +253,15 @@ class MovedTextIsVerbatim(unittest.TestCase):
 class CrossReferencesFollowTheMove(unittest.TestCase):
     """AC-4"""
 
-    MOVED = ("Configuration", "Files", "Workflow", "Sandbox", "Project setup",
-             "What revali does to your repository", "Several agents on one repository")
+    MOVED = (
+        "Configuration",
+        "Files",
+        "Workflow",
+        "Sandbox",
+        "Project setup",
+        "What revali does to your repository",
+        "Several agents on one repository",
+    )
 
     def test_conventions_name_the_docs(self):
         text = read("CONVENTIONS.md")
@@ -216,9 +303,9 @@ class VersionIs020(unittest.TestCase):
 
     def test_status_line_names_the_new_version_only(self):
         text = read("README.md")
-        status = [l for l in text.splitlines() if l.startswith("Status:")]
+        status = [line for line in text.splitlines() if line.startswith("Status:")]
         self.assertEqual(len(status), 1, status)
-        para = unwrap(text[text.index(status[0]):].split("\n\n", 1)[0])
+        para = unwrap(text[text.index(status[0]) :].split("\n\n", 1)[0])
         self.assertIn("0.2.0", para)
         self.assertNotIn("0.1.0", text)
 
@@ -239,18 +326,18 @@ class SshVerificationRecord(unittest.TestCase):
         text = read("docs", "sandbox.md")
         self.assertIn("\n## Verification record\n", text)
         record = unwrap(h2(text, "Verification record"))
-        self.assertRegex(record, r"\b20\d\d-\d\d-\d\d\b")                    # date
-        self.assertIn("sshd", record)                                         # the sshd setup
+        self.assertRegex(record, r"\b20\d\d-\d\d-\d\d\b")  # date
+        self.assertIn("sshd", record)  # the sshd setup
         self.assertIn("key-only login", record)
-        self.assertRegex(record, r"private repository|private GitHub repository")   # repository kind
-        self.assertIn("`runner = \"ssh\"`", record)
-        for outcome in ("APPROVE", "PASS", "`revali merge`"):                 # the run outcome
+        self.assertRegex(record, r"private repository|private GitHub repository")  # repository kind
+        self.assertIn('`runner = "ssh"`', record)
+        for outcome in ("APPROVE", "PASS", "`revali merge`"):  # the run outcome
             self.assertIn(outcome, record, outcome)
 
     def test_readme_status_points_at_the_record(self):
         text = read("README.md")
-        status = next(l for l in text.splitlines() if l.startswith("Status:"))
-        para = unwrap(text[text.index(status):].split("\n\n", 1)[0])
+        status = next(line for line in text.splitlines() if line.startswith("Status:"))
+        para = unwrap(text[text.index(status) :].split("\n\n", 1)[0])
         self.assertIn("`docs/sandbox.md`", para)
 
 

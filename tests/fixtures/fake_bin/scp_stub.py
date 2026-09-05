@@ -2,6 +2,7 @@
 Local names are relative to the working directory, as revali passes them. Records every
 call to $REVALI_FAKE_LOG. Use via REVALI_SCP_CMD="<python> <this file>".
 """
+
 import json
 import os
 import shutil
@@ -9,7 +10,9 @@ import sys
 
 
 def remote_root():
-    return os.environ.get("REVALI_FAKE_REMOTE") or os.path.join(os.path.expanduser("~"), "fake-remote")
+    return os.environ.get("REVALI_FAKE_REMOTE") or os.path.join(
+        os.path.expanduser("~"), "fake-remote"
+    )
 
 
 def is_remote(spec):
@@ -28,7 +31,9 @@ def copy_into(src, dst_dir):
     """Copy a file or a directory tree into dst_dir (scp -r semantics)."""
     os.makedirs(dst_dir, exist_ok=True)
     if os.path.isdir(src):
-        shutil.copytree(src, os.path.join(dst_dir, os.path.basename(src.rstrip("/"))), dirs_exist_ok=True)
+        shutil.copytree(
+            src, os.path.join(dst_dir, os.path.basename(src.rstrip("/"))), dirs_exist_ok=True
+        )
     else:
         shutil.copy2(src, os.path.join(dst_dir, os.path.basename(src)))
 

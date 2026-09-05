@@ -7,6 +7,7 @@ Creates: src/calc.py, tests/test_calc.py, revali.toml, CONVENTIONS.md,
 main branch is pushed to, and a feature branch `feature/mul` with a change and
 a filled-in .revali/feature__mul/change.md.
 """
+
 import json
 import os
 import shutil
@@ -27,13 +28,13 @@ def sub(a, b):
     return a - b
 '''
 
-CALC_WITH_MUL = CALC + '''
+CALC_WITH_MUL = CALC + """
 
 def mul(a, b):
     return a * b
-'''
+"""
 
-TEST_CALC = '''import unittest
+TEST_CALC = """import unittest
 
 from src.calc import add, sub
 
@@ -44,9 +45,9 @@ class CalcTests(unittest.TestCase):
 
     def test_sub(self):
         self.assertEqual(sub(5, 3), 2)
-'''
+"""
 
-CONFIG = '''[project]
+CONFIG = """[project]
 config_version = 1
 base_branch = "main"
 platforms = ["linux"]
@@ -67,7 +68,7 @@ budget_usd = 0.5
 
 [merge]
 method = "squash"
-'''
+"""
 
 PLATFORM_WSL = '''runner = "wsl"
 distro = "Ubuntu"
@@ -87,12 +88,12 @@ def toml_str(value):
     return json.dumps(value)
 
 
-PLATFORM_LOCAL = '''runner = "local"
+PLATFORM_LOCAL = """runner = "local"
 setup = ""
 test = %s
-new_test = %s''' % (toml_str(LOCAL_TEST), toml_str(LOCAL_NEW_TEST))
+new_test = %s""" % (toml_str(LOCAL_TEST), toml_str(LOCAL_NEW_TEST))
 
-CHANGE_MD = '''---
+CHANGE_MD = """---
 title: Add mul to calc
 kind: feature
 author_model: fixture
@@ -119,7 +120,7 @@ Division.
 
 ## Dependencies
 none
-'''
+"""
 
 
 def git(args, cwd):
@@ -174,8 +175,12 @@ def main(argv):
     if not argv or argv[0].startswith("-"):
         print(__doc__)
         return 2
-    info = create(argv[0], with_remote="--no-remote" not in argv, with_branch="--no-branch" not in argv,
-                  runner="local" if "--local" in argv else "wsl")
+    info = create(
+        argv[0],
+        with_remote="--no-remote" not in argv,
+        with_branch="--no-branch" not in argv,
+        runner="local" if "--local" in argv else "wsl",
+    )
     print("repo: %s" % info["repo"])
     if info["remote"]:
         print("remote: %s" % info["remote"])

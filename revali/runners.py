@@ -5,6 +5,7 @@
 `ssh`    fresh clone from a git bundle on a host reached over ssh; same script as wsl.
 `fake`   scenario-driven, selected by REVALI_FAKE_RUNNER=<json path> (tests).
 """
+
 import json
 import os
 import re
@@ -88,9 +89,17 @@ class Runner:
     def __init__(self, plat: PlatformCfg):
         self.plat = plat
 
-    def run(self, repo_root: str, ref: str, steps: List[Tuple[str, str]],
-            extra_files: Dict[str, str], logs_dir: str, label: str,
-            log: Logger = None, scope: str = "") -> RunReport:
+    def run(
+        self,
+        repo_root: str,
+        ref: str,
+        steps: List[Tuple[str, str]],
+        extra_files: Dict[str, str],
+        logs_dir: str,
+        label: str,
+        log: Logger = None,
+        scope: str = "",
+    ) -> RunReport:
         """`scope` is the run's branch as a directory name (`feature__x`): the sandbox and
         ssh runners clone under <sandbox_dir>/<repo>/<scope>/<label> so worktrees of one
         repository can run side by side; empty keeps <repo>/<label>."""
@@ -104,6 +113,7 @@ def sandbox_dir(*parts: str) -> str:
 
 class LocalRunner(Runner):
     """git worktree on the host. Every step runs through the host shell."""
+
     name = "local"
 
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope=""):
@@ -111,7 +121,12 @@ class LocalRunner(Runner):
         tmp = tempfile.mkdtemp(prefix="revali-%s-" % label)
         wt = os.path.join(tmp, "wt")
         git = resolve("git")
-        res = run(git + ["worktree", "add", "--detach", "--quiet", wt, ref], cwd=repo_root, log=log, timeout=300)
+        res = run(
+            git + ["worktree", "add", "--detach", "--quiet", wt, ref],
+            cwd=repo_root,
+            log=log,
+            timeout=300,
+        )
         if not res.ok:
             shutil.rmtree(tmp, ignore_errors=True)
             raise RunnerError("git worktree add failed: %s" % res.text.strip())
@@ -128,17 +143,34 @@ class LocalRunner(Runner):
                 start = time.monotonic()
                 try:
                     r = run_shell(cmd, cwd=wt, timeout=timeout, log=None)
-                    step = StepResult(name=name, cmd=cmd, returncode=r.returncode, stdout=r.stdout,
-                                      stderr=r.stderr, duration=r.duration)
+                    step = StepResult(
+                        name=name,
+                        cmd=cmd,
+                        returncode=r.returncode,
+                        stdout=r.stdout,
+                        stderr=r.stderr,
+                        duration=r.duration,
+                    )
                 except ProcTimeout:
-                    step = StepResult(name=name, cmd=cmd, returncode=-1, timed_out=True,
-                                      duration=time.monotonic() - start)
+                    step = StepResult(
+                        name=name,
+                        cmd=cmd,
+                        returncode=-1,
+                        timed_out=True,
+                        duration=time.monotonic() - start,
+                    )
                 step.log_path = os.path.join(logs_dir, "%s-%s.log" % (label, name))
-                write_text(step.log_path, "$ %s\n(exit %d%s)\n\n%s" % (
-                    cmd, step.returncode, ", timed out" if step.timed_out else "", step.text))
+                write_text(
+                    step.log_path,
+                    "$ %s\n(exit %d%s)\n\n%s"
+                    % (cmd, step.returncode, ", timed out" if step.timed_out else "", step.text),
+                )
                 report.steps.append(step)
                 if log:
-                    log("[%s] %s -> exit %d in %.0fs" % (label, name, step.returncode, step.duration))
+                    log(
+                        "[%s] %s -> exit %d in %.0fs"
+                        % (label, name, step.returncode, step.duration)
+                    )
                 if not step.ok:
                     break
         finally:
@@ -149,7 +181,9 @@ class LocalRunner(Runner):
 
 
 class FakeRunner(Runner):
-    """Scenario file: {"default": 0, "results": {"<label>": {"<step>": <exit>}}, "outputs": {...}}."""
+    """Scenario file: {"default": 0, "results": {"<label>": {"<step>": <exit>}}, "outputs":
+    {...}}."""
+
     name = "fake"
 
     def __init__(self, plat: PlatformCfg, scenario_path: str):
@@ -169,9 +203,19 @@ class FakeRunner(Runner):
         log_file = os.environ.get("REVALI_FAKE_LOG")
         if log_file:
             with open(log_file, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps({"exe": "runner", "label": label, "ref": ref, "scope": scope,
-                                     "steps": [n for n, c in steps if c.strip()],
-                                     "extra_files": sorted(extra_files or {})}) + "\n")
+                fh.write(
+                    json.dumps(
+                        {
+                            "exe": "runner",
+                            "label": label,
+                            "ref": ref,
+                            "scope": scope,
+                            "steps": [n for n, c in steps if c.strip()],
+                            "extra_files": sorted(extra_files or {}),
+                        }
+                    )
+                    + "\n"
+                )
         report = RunReport(label=label)
         results = (sc.get("results") or {}).get(label, {})
         outputs = (sc.get("outputs") or {}).get(label, {})
@@ -180,8 +224,13 @@ class FakeRunner(Runner):
                 continue
             rc = int(results.get(name, sc.get("default", 0)))
             out = outputs.get(name, "fake %s output\n" % name)
-            step = StepResult(name=name, cmd=cmd, returncode=rc, stdout=out,
-                              log_path=os.path.join(logs_dir, "%s-%s.log" % (label, name)))
+            step = StepResult(
+                name=name,
+                cmd=cmd,
+                returncode=rc,
+                stdout=out,
+                log_path=os.path.join(logs_dir, "%s-%s.log" % (label, name)),
+            )
             write_text(step.log_path, "$ %s\n(exit %d)\n\n%s" % (cmd, rc, out))
             report.steps.append(step)
             if rc != 0:
@@ -189,7 +238,7 @@ class FakeRunner(Runner):
         return report
 
 
-SANDBOX_SCRIPT = r'''#!/usr/bin/env bash
+SANDBOX_SCRIPT = r"""#!/usr/bin/env bash
 # generated by revali; runs one sandbox session and reports per-step exit codes
 set -u
 SB="__SANDBOX__"
@@ -228,7 +277,7 @@ run_step() {
 __STEPS__
 cleanup
 exit 0
-'''
+"""  # noqa: E501  (two bash lines of the template run long; splitting them changes the script)
 
 
 def sandbox_root(plat: PlatformCfg) -> Tuple[str, str]:
@@ -258,8 +307,18 @@ def shell_path(path: str) -> str:
     return shlex.quote(path)
 
 
-def render_script(source: str, logs: str, extra: str, ref: str, steps: List[Tuple[str, str]],
-                  label: str, sandbox: str, timeout_s: int, cmds: str = "", scope: str = "") -> str:
+def render_script(
+    source: str,
+    logs: str,
+    extra: str,
+    ref: str,
+    steps: List[Tuple[str, str]],
+    label: str,
+    sandbox: str,
+    timeout_s: int,
+    cmds: str = "",
+    scope: str = "",
+) -> str:
     """The sandbox script with its placeholders filled; `source` is what git clone reads
     (a repository path or a bundle file); `logs`, `extra` and `cmds` (where the per-step
     .cmd files sit, default `logs`) are paths on the executing side."""
@@ -268,16 +327,25 @@ def render_script(source: str, logs: str, extra: str, ref: str, steps: List[Tupl
         if cmd.strip():
             step_lines.append("run_step %s || { cleanup; exit 0; }" % name)
     text = SANDBOX_SCRIPT
-    for key, value in (("__SANDBOX__", sandbox), ("__HOST__", source), ("__LOGS__", logs),
-                       ("__CMDS__", cmds or logs), ("__EXTRA__", extra), ("__LABEL__", label), ("__REF__", ref),
-                       ("__TIMEOUT__", str(int(timeout_s))), ("__STEPS__", "\n".join(step_lines)),
-                       ("__SCOPE__", scope)):
+    for key, value in (
+        ("__SANDBOX__", sandbox),
+        ("__HOST__", source),
+        ("__LOGS__", logs),
+        ("__CMDS__", cmds or logs),
+        ("__EXTRA__", extra),
+        ("__LABEL__", label),
+        ("__REF__", ref),
+        ("__TIMEOUT__", str(int(timeout_s))),
+        ("__STEPS__", "\n".join(step_lines)),
+        ("__SCOPE__", scope),
+    ):
         text = text.replace(key, value)
     return text
 
 
-def stage_inputs(logs_dir: str, label: str, steps: List[Tuple[str, str]],
-                 extra_files: Dict[str, str]) -> Tuple[List[Tuple[str, str]], str]:
+def stage_inputs(
+    logs_dir: str, label: str, steps: List[Tuple[str, str]], extra_files: Dict[str, str]
+) -> Tuple[List[Tuple[str, str]], str]:
     """Write one .cmd file per non-empty step and the extra files under logs_dir; drop a
     stale results file. Returns (non-empty steps, extra dir)."""
     os.makedirs(logs_dir, exist_ok=True)
@@ -295,8 +363,9 @@ def stage_inputs(logs_dir: str, label: str, steps: List[Tuple[str, str]],
     return steps, extra_dir
 
 
-def report_from_results(logs_dir: str, label: str, steps: List[Tuple[str, str]],
-                        log: Logger = None) -> RunReport:
+def report_from_results(
+    logs_dir: str, label: str, steps: List[Tuple[str, str]], log: Logger = None
+) -> RunReport:
     """Build the report from <label>.results and the per-step logs the script wrote."""
     results_path = os.path.join(logs_dir, "%s.results" % label)
     rows = []
@@ -314,20 +383,32 @@ def report_from_results(logs_dir: str, label: str, steps: List[Tuple[str, str]],
                 text = fh.read()
         if name == "clone":
             raise RunnerError("sandbox clone/checkout failed; see %s" % log_path)
-        step = StepResult(name=name, cmd=cmds.get(name, ""), returncode=int(rc), stdout=text,
-                          timed_out=(to == "1"), log_path=log_path)
+        step = StepResult(
+            name=name,
+            cmd=cmds.get(name, ""),
+            returncode=int(rc),
+            stdout=text,
+            timed_out=(to == "1"),
+            log_path=log_path,
+        )
         report.steps.append(step)
         if log:
-            log("[%s] %s -> exit %d%s" % (label, name, step.returncode, ", timed out" if step.timed_out else ""))
+            log(
+                "[%s] %s -> exit %d%s"
+                % (label, name, step.returncode, ", timed out" if step.timed_out else "")
+            )
     if not report.steps and steps:
-        raise RunnerError("the sandbox script produced no results; see %s"
-                          % os.path.join(logs_dir, "%s-clone.log" % label))
+        raise RunnerError(
+            "the sandbox script produced no results; see %s"
+            % os.path.join(logs_dir, "%s-clone.log" % label)
+        )
     return report
 
 
 class WslRunner(Runner):
     """Fresh clone inside the WSL distro's own filesystem, steps run by a generated
     bash script; per-step logs and exit codes come back through the host logs dir."""
+
     name = "wsl"
 
     def __init__(self, plat: PlatformCfg):
@@ -343,11 +424,21 @@ class WslRunner(Runner):
             raise RunnerError("wslpath failed for %s: %s" % (host_path, res.text.strip()))
         return res.stdout.strip()
 
-    def script(self, host_repo_wsl: str, logs_wsl: str, extra_wsl: str, ref: str,
-               steps: List[Tuple[str, str]], label: str, sandbox: str, timeout_s: int,
-               scope: str = "") -> str:
-        return render_script(host_repo_wsl, logs_wsl, extra_wsl, ref, steps, label, sandbox, timeout_s,
-                             scope=scope)
+    def script(
+        self,
+        host_repo_wsl: str,
+        logs_wsl: str,
+        extra_wsl: str,
+        ref: str,
+        steps: List[Tuple[str, str]],
+        label: str,
+        sandbox: str,
+        timeout_s: int,
+        scope: str = "",
+    ) -> str:
+        return render_script(
+            host_repo_wsl, logs_wsl, extra_wsl, ref, steps, label, sandbox, timeout_s, scope=scope
+        )
 
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope=""):
         steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files)
@@ -355,23 +446,37 @@ class WslRunner(Runner):
         root, _ = sandbox_root(self.plat)
         sandbox = sandbox_dir(root, repo_name, scope, label)
         timeout_s = self.plat.command_timeout_min * 60
-        script = self.script(self.wslpath(repo_root), self.wslpath(logs_dir), self.wslpath(extra_dir), ref,
-                             steps, label, sandbox, timeout_s, scope=scope)
+        script = self.script(
+            self.wslpath(repo_root),
+            self.wslpath(logs_dir),
+            self.wslpath(extra_dir),
+            ref,
+            steps,
+            label,
+            sandbox,
+            timeout_s,
+            scope=scope,
+        )
         script_path = os.path.join(logs_dir, "%s.sh" % label)
         write_text(script_path, script)
         results_path = os.path.join(logs_dir, "%s.results" % label)
         if log:
             log("[%s] wsl %s: %d step(s) on %s" % (label, self.distro, len(steps), ref[:10]))
         try:
-            res = self._wsl(["bash", self.wslpath(script_path)],
-                            timeout=timeout_s * max(1, len(steps)) + 300, log=log)
-        except ProcTimeout:
-            raise RunnerError("wsl session for %s did not finish in time" % label)
+            res = self._wsl(
+                ["bash", self.wslpath(script_path)],
+                timeout=timeout_s * max(1, len(steps)) + 300,
+                log=log,
+            )
+        except ProcTimeout as exc:
+            raise RunnerError("wsl session for %s did not finish in time" % label) from exc
         finally:
             shutil.rmtree(extra_dir, ignore_errors=True)
         if not res.ok and not os.path.isfile(results_path):
-            raise RunnerError("wsl could not start the sandbox script (exit %d): %s"
-                              % (res.returncode, res.text.strip()[:400]))
+            raise RunnerError(
+                "wsl could not start the sandbox script (exit %d): %s"
+                % (res.returncode, res.text.strip()[:400])
+            )
         return report_from_results(logs_dir, label, steps, log)
 
 
@@ -380,6 +485,7 @@ class SshRunner(Runner):
     step commands, extra files) go up with scp, the script runs under bash there, the
     per-step logs come back with scp, and the staging directories are removed whatever
     happened. Port, user and key come from ~/.ssh/config; nothing here prompts."""
+
     name = "ssh"
 
     def __init__(self, plat: PlatformCfg):
@@ -397,40 +503,71 @@ class SshRunner(Runner):
         return run(resolve("ssh") + self._opts() + [self.host, command], timeout=timeout, log=log)
 
     def _scp(self, args: list, cwd: str, timeout: float, log: Logger = None):
-        return run(resolve("scp") + self._opts() + ["-q", "-r"] + args, cwd=cwd, timeout=timeout, log=log)
+        return run(
+            resolve("scp") + self._opts() + ["-q", "-r"] + args, cwd=cwd, timeout=timeout, log=log
+        )
 
     def _short(self) -> float:
         """Budget for a call that only connects and runs a trivial command."""
         return max(self.plat.connect_timeout_s, 0) + SHORT_MARGIN_S
 
     def _failure(self, what: str, res) -> str:
-        return "ssh: %s host '%s' (exit %d): %s" % (what, self.host, res.returncode,
-                                                   res.text.strip()[:400] or "no output")
+        return "ssh: %s host '%s' (exit %d): %s" % (
+            what,
+            self.host,
+            res.returncode,
+            res.text.strip()[:400] or "no output",
+        )
 
     def probe(self):
-        resolve("scp")   # the transport needs both; report a missing scp before anything is pushed
+        resolve("scp")  # the transport needs both; report a missing scp before anything is pushed
         return self._ssh(SSH_PROBE, timeout=self._short())
 
-    def script(self, bundle: str, logs: str, extra: str, ref: str, steps: List[Tuple[str, str]],
-               label: str, sandbox: str, timeout_s: int, scope: str = "") -> str:
+    def script(
+        self,
+        bundle: str,
+        logs: str,
+        extra: str,
+        ref: str,
+        steps: List[Tuple[str, str]],
+        label: str,
+        sandbox: str,
+        timeout_s: int,
+        scope: str = "",
+    ) -> str:
         # the .cmd files travel with the bundle, so they live in the inbox, not the logs dir
-        return render_script(bundle, logs, extra, ref, steps, label, sandbox, timeout_s,
-                             cmds=os.path.dirname(bundle), scope=scope)
+        return render_script(
+            bundle,
+            logs,
+            extra,
+            ref,
+            steps,
+            label,
+            sandbox,
+            timeout_s,
+            cmds=os.path.dirname(bundle),
+            scope=scope,
+        )
 
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope=""):
         steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files)
         bundle = "%s.bundle" % label
         bundle_path = os.path.join(logs_dir, bundle)
-        # --all: a bare sha has no ref name and git refuses to bundle it; the script checks out `ref`
-        res = run(resolve("git") + ["bundle", "create", "--quiet", bundle_path, "--all"], cwd=repo_root,
-                  timeout=BUNDLE_TIMEOUT_S, log=log)
+        # --all: a bare sha has no ref name and git refuses to bundle it; the script checks out
+        # `ref`
+        res = run(
+            resolve("git") + ["bundle", "create", "--quiet", bundle_path, "--all"],
+            cwd=repo_root,
+            timeout=BUNDLE_TIMEOUT_S,
+            log=log,
+        )
         if not res.ok:
             shutil.rmtree(extra_dir, ignore_errors=True)
             raise RunnerError("git bundle create failed: %s" % res.text.strip()[:400])
         repo_name = remote_name(repo_root)
         shell_root, scp_root = sandbox_root(self.plat)
         repo_base = "%s/%s" % (shell_root, repo_name)
-        base = sandbox_dir(repo_base, scope)           # <root>/<repo>/<branch>, or <root>/<repo>
+        base = sandbox_dir(repo_base, scope)  # <root>/<repo>/<branch>, or <root>/<repo>
         inbox = "%s/%s-in" % (base, label)
         rlogs = "%s/%s-logs" % (base, label)
         sandbox = "%s/%s" % (base, label)
@@ -438,41 +575,70 @@ class SshRunner(Runner):
         scp_inbox = "%s/%s-in" % (scp_base, label)
         scp_logs = "%s/%s-logs" % (scp_base, label)
         timeout_s = self.plat.command_timeout_min * 60
-        script = self.script("%s/%s" % (inbox, bundle), rlogs, "%s/%s" % (inbox, os.path.basename(extra_dir)),
-                             ref, steps, label, sandbox, timeout_s, scope=scope)
+        script = self.script(
+            "%s/%s" % (inbox, bundle),
+            rlogs,
+            "%s/%s" % (inbox, os.path.basename(extra_dir)),
+            ref,
+            steps,
+            label,
+            sandbox,
+            timeout_s,
+            scope=scope,
+        )
         script_name = "%s.sh" % label
         write_text(os.path.join(logs_dir, script_name), script)
-        uploads = [bundle, script_name, os.path.basename(extra_dir)] + ["%s-%s.cmd" % (label, n) for n, _ in steps]
+        uploads = [bundle, script_name, os.path.basename(extra_dir)] + [
+            "%s-%s.cmd" % (label, n) for n, _ in steps
+        ]
         results_path = os.path.join(logs_dir, "%s.results" % label)
         if log:
             log("[%s] ssh %s: %d step(s) on %s" % (label, self.host, len(steps), ref[:10]))
-        transfer_s = self.plat.transfer_timeout_min * 60 or None   # None: no limit
+        transfer_s = self.plat.transfer_timeout_min * 60 or None  # None: no limit
         res = None
         try:
-            r = self._ssh("mkdir -p %s %s" % (shell_path(inbox), shell_path(rlogs)), timeout=self._short(), log=log)
+            r = self._ssh(
+                "mkdir -p %s %s" % (shell_path(inbox), shell_path(rlogs)),
+                timeout=self._short(),
+                log=log,
+            )
             if not r.ok:
                 raise RunnerError(self._failure("could not reach", r))
-            r = self._scp(uploads + ["%s:%s/" % (self.host, scp_inbox)], cwd=logs_dir, timeout=transfer_s, log=log)
+            r = self._scp(
+                uploads + ["%s:%s/" % (self.host, scp_inbox)],
+                cwd=logs_dir,
+                timeout=transfer_s,
+                log=log,
+            )
             if not r.ok:
                 raise RunnerError(self._failure("could not copy the inputs to", r))
             try:
-                res = self._ssh("bash %s" % shell_path("%s/%s" % (inbox, script_name)),
-                                timeout=timeout_s * max(1, len(steps)) + SESSION_MARGIN_S, log=log)
-            except ProcTimeout:
-                raise RunnerError("ssh session on %s for %s did not finish in time" % (self.host, label))
-            r = self._scp(["%s:%s/." % (self.host, scp_logs), "."], cwd=logs_dir, timeout=transfer_s, log=log)
+                res = self._ssh(
+                    "bash %s" % shell_path("%s/%s" % (inbox, script_name)),
+                    timeout=timeout_s * max(1, len(steps)) + SESSION_MARGIN_S,
+                    log=log,
+                )
+            except ProcTimeout as exc:
+                raise RunnerError(
+                    "ssh session on %s for %s did not finish in time" % (self.host, label)
+                ) from exc
+            r = self._scp(
+                ["%s:%s/." % (self.host, scp_logs), "."], cwd=logs_dir, timeout=transfer_s, log=log
+            )
             if not r.ok and not os.path.isfile(results_path):
                 raise RunnerError(self._failure("could not copy the logs back from", r))
         except ExeNotFound as exc:
-            raise RunnerError(str(exc))
+            raise RunnerError(str(exc)) from exc
         finally:
             self._cleanup([inbox, rlogs, sandbox], [base, repo_base] if scope else [base], log)
             shutil.rmtree(extra_dir, ignore_errors=True)
             if os.path.isfile(bundle_path):
                 os.remove(bundle_path)
         if res is not None and not res.ok and not os.path.isfile(results_path):
-            raise RunnerError("the sandbox script on %s could not start (exit %d): %s"
-                              % (self.host, res.returncode, res.text.strip()[:400]))
+            raise RunnerError(
+                "the sandbox script on %s could not start (exit %d): %s"
+                % (self.host, res.returncode, res.text.strip()[:400])
+            )
         return report_from_results(logs_dir, label, steps, log)
 
     def _cleanup(self, paths: List[str], parents: List[str], log: Logger = None) -> None:
@@ -480,7 +646,9 @@ class SshRunner(Runner):
         first) when nothing else is in them; a failure is logged, never raised."""
         # the exit code is rm's
         command = "rm -rf %s && rmdir --ignore-fail-on-non-empty %s" % (
-            " ".join(shell_path(p) for p in paths), " ".join(shell_path(p) for p in parents))
+            " ".join(shell_path(p) for p in paths),
+            " ".join(shell_path(p) for p in parents),
+        )
         try:
             r = self._ssh(command, timeout=self._short())
         except (ProcTimeout, ExeNotFound) as exc:
@@ -492,28 +660,42 @@ class SshRunner(Runner):
             if r is not None and r.ok:
                 log("[ssh] removed %s on %s" % (", ".join(paths), self.host))
             else:
-                log("[ssh] could not remove %s on %s (left for you to delete): %s"
-                    % (", ".join(paths), self.host, reason or "no output"))
+                log(
+                    "[ssh] could not remove %s on %s (left for you to delete): %s"
+                    % (", ".join(paths), self.host, reason or "no output")
+                )
 
 
 def probe_runner(plat: PlatformCfg) -> str:
-    """Return "" when the runner can start, else one line for preflight. The fake runner always can."""
+    """Return "" when the runner can start, else one line for preflight. The fake runner always
+    can."""
     if os.environ.get(FAKE_ENV):
         return ""
     try:
         if plat.runner == "ssh":
             res = SshRunner(plat).probe()
             if not res.ok:
-                return ("ssh host '%s' is unreachable or lacks git, bash or coreutils timeout (exit %d, ssh = %s): %s; "
-                        "if the host is new, run `ssh %s` once by hand to accept its key"
-                        % (plat.host, res.returncode, resolve("ssh")[0], res.text.strip()[:300] or "no output",
-                           plat.host))
+                return (
+                    "ssh host '%s' is unreachable or lacks git, bash or coreutils timeout "
+                    "(exit %d, ssh = %s): %s; if the host is new, run `ssh %s` once by hand "
+                    "to accept its key"
+                    % (
+                        plat.host,
+                        res.returncode,
+                        resolve("ssh")[0],
+                        res.text.strip()[:300] or "no output",
+                        plat.host,
+                    )
+                )
         elif plat.runner == "wsl":
             runner = WslRunner(plat)
             res = runner._wsl(["bash", "-c", SSH_PROBE], timeout=plat.connect_timeout_s + 60)
             if not res.ok:
-                return ("WSL distro '%s' did not start or lacks git, bash or coreutils timeout (exit %d): %s"
-                        % (runner.distro, res.returncode, res.text.strip()[:300] or "no output"))
+                return (
+                    "WSL distro '%s' did not start or lacks git, bash or coreutils timeout "
+                    "(exit %d): %s"
+                    % (runner.distro, res.returncode, res.text.strip()[:300] or "no output")
+                )
     except ExeNotFound as exc:
         return str(exc)
     except ProcTimeout as exc:

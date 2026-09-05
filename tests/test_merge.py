@@ -1,10 +1,10 @@
 import os
 import unittest
 
-from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.state import State, read_history
 from revali.stats import summarise
+from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
 
 
 class MergeTests(RepoCase):
@@ -21,8 +21,24 @@ class MergeTests(RepoCase):
         code, out = run_cli(["merge"])
         self.assertEqual(code, EXIT_ERROR)
         self.assertIn("not ready to merge", out)
-        self.claude(claude_entry(approve_response(verdict="CHANGES_REQUESTED", findings=[
-            {"id": "F1", "file": "src/calc.py", "line": 1, "severity": "high", "kind": "correctness", "text": "t", "suggestion": ""}])))
+        self.claude(
+            claude_entry(
+                approve_response(
+                    verdict="CHANGES_REQUESTED",
+                    findings=[
+                        {
+                            "id": "F1",
+                            "file": "src/calc.py",
+                            "line": 1,
+                            "severity": "high",
+                            "kind": "correctness",
+                            "text": "t",
+                            "suggestion": "",
+                        }
+                    ],
+                )
+            )
+        )
         run_cli(["run", "--foreground"])
         code, out = run_cli(["merge"])
         self.assertEqual(code, EXIT_ERROR)
@@ -47,8 +63,14 @@ class MergeTests(RepoCase):
 
     def test_failing_checks_block(self):
         self.ready()
-        self.scenario({"checks": [{"name": "ci", "state": "FAILURE", "bucket": "fail"},
-                                  {"name": "lint", "state": "SUCCESS", "bucket": "pass"}]})
+        self.scenario(
+            {
+                "checks": [
+                    {"name": "ci", "state": "FAILURE", "bucket": "fail"},
+                    {"name": "lint", "state": "SUCCESS", "bucket": "pass"},
+                ]
+            }
+        )
         code, out = run_cli(["merge"])
         self.assertEqual(code, EXIT_ACTION, out)
         self.assertIn("CI checks failed: ci", out)
@@ -57,14 +79,25 @@ class MergeTests(RepoCase):
 
     def test_pending_checks_then_green(self):
         self.ready()
-        self.scenario({"checks_sequence": [[{"name": "ci", "state": "PENDING", "bucket": "pending"}],
-                                           [{"name": "ci", "state": "SUCCESS", "bucket": "pass"}]]})
+        self.scenario(
+            {
+                "checks_sequence": [
+                    [{"name": "ci", "state": "PENDING", "bucket": "pending"}],
+                    [{"name": "ci", "state": "SUCCESS", "bucket": "pass"}],
+                ]
+            }
+        )
         code, out = run_cli(["merge"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertGreaterEqual(len([c for c in self.fake_calls("gh") if c["argv"][:2] == ["pr", "checks"]]), 2)
+        self.assertGreaterEqual(
+            len([c for c in self.fake_calls("gh") if c["argv"][:2] == ["pr", "checks"]]), 2
+        )
 
     def test_pending_checks_timeout(self):
-        self.write("revali.toml", self.read("revali.toml").replace("[merge]", "[merge]\nchecks_timeout_min = 0"))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace("[merge]", "[merge]\nchecks_timeout_min = 0"),
+        )
         self.commit_all("timeout")
         self.ready()
         self.scenario({"checks": [{"name": "ci", "state": "PENDING", "bucket": "pending"}]})
@@ -73,7 +106,10 @@ class MergeTests(RepoCase):
         self.assertIn("still pending", out)
 
     def test_checks_disabled(self):
-        self.write("revali.toml", self.read("revali.toml").replace("[merge]", "[merge]\nwait_for_checks = false"))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace("[merge]", "[merge]\nwait_for_checks = false"),
+        )
         self.commit_all("no wait")
         self.ready()
         self.scenario({"checks": [{"name": "ci", "state": "FAILURE", "bucket": "fail"}]})
@@ -95,14 +131,21 @@ class MergeTests(RepoCase):
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn("gh pr merge failed", out)
         self.assertEqual(State.load(self.rdir()).stage, "ready_to_merge")
-        self.assertEqual(git(["rev-parse", "--abbrev-ref", "HEAD"], self.repo).strip(), "feature/mul")
+        self.assertEqual(
+            git(["rev-parse", "--abbrev-ref", "HEAD"], self.repo).strip(), "feature/mul"
+        )
 
     def test_merge_method_from_config(self):
-        self.write("revali.toml", self.read("revali.toml").replace('method = "squash"', 'method = "rebase"'))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace('method = "squash"', 'method = "rebase"'),
+        )
         self.commit_all("rebase")
         self.ready()
         run_cli(["merge"])
-        self.assertTrue(any(c["argv"][:4] == ["pr", "merge", "7", "--rebase"] for c in self.fake_calls("gh")))
+        self.assertTrue(
+            any(c["argv"][:4] == ["pr", "merge", "7", "--rebase"] for c in self.fake_calls("gh"))
+        )
 
 
 class StatsTests(RepoCase):
@@ -120,17 +163,64 @@ class StatsTests(RepoCase):
         # branch a: rejected, fixed, passed on a fallback model, then merged; rows are cumulative
         # branch b: passed first try, not merged yet; repo s: gave up
         rows = [
-            {"repo": "r", "branch": "a", "pr": 1, "stage": "needs_action", "fixes": 0, "rounds": 1, "last_verdict": "CHANGES_REQUESTED", "cost_usd": 0.5},
-            {"repo": "r", "branch": "a", "pr": 1, "stage": "ready_to_merge", "fixes": 1, "rounds": 2, "last_verdict": "PASS", "cost_usd": 1.0, "fallback": True},
-            {"repo": "r", "branch": "a", "pr": 1, "stage": "merged", "fixes": 1, "rounds": 2, "last_verdict": "PASS", "cost_usd": 1.0},
-            {"repo": "r", "branch": "b", "pr": 2, "stage": "ready_to_merge", "fixes": 0, "rounds": 1, "last_verdict": "PASS", "cost_usd": 0.7},
-            {"repo": "s", "branch": "c", "pr": 3, "stage": "needs_human", "fixes": 3, "rounds": 3, "last_verdict": "FAIL", "cost_usd": 3.0},
+            {
+                "repo": "r",
+                "branch": "a",
+                "pr": 1,
+                "stage": "needs_action",
+                "fixes": 0,
+                "rounds": 1,
+                "last_verdict": "CHANGES_REQUESTED",
+                "cost_usd": 0.5,
+            },
+            {
+                "repo": "r",
+                "branch": "a",
+                "pr": 1,
+                "stage": "ready_to_merge",
+                "fixes": 1,
+                "rounds": 2,
+                "last_verdict": "PASS",
+                "cost_usd": 1.0,
+                "fallback": True,
+            },
+            {
+                "repo": "r",
+                "branch": "a",
+                "pr": 1,
+                "stage": "merged",
+                "fixes": 1,
+                "rounds": 2,
+                "last_verdict": "PASS",
+                "cost_usd": 1.0,
+            },
+            {
+                "repo": "r",
+                "branch": "b",
+                "pr": 2,
+                "stage": "ready_to_merge",
+                "fixes": 0,
+                "rounds": 1,
+                "last_verdict": "PASS",
+                "cost_usd": 0.7,
+            },
+            {
+                "repo": "s",
+                "branch": "c",
+                "pr": 3,
+                "stage": "needs_human",
+                "fixes": 3,
+                "rounds": 3,
+                "last_verdict": "FAIL",
+                "cost_usd": 3.0,
+            },
         ]
         text = summarise(rows)
         self.assertIn("history rows: 5, pipelines: 3", text)
         self.assertIn("| r | 2 | 2 | 1/2 | 1 | 0 | 1 | 1.5 | $1.70 |", text)
         self.assertIn("| s | 1 | 1 | - | 0 | 1 | 0 | 3.0 | $3.00 |", text)
         self.assertIn("last verdicts: FAIL 1, PASS 2", text)
+
 
 if __name__ == "__main__":
     unittest.main()

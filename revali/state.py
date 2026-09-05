@@ -1,4 +1,5 @@
 """Per-branch state under <state_dir>/<branch>/: state.json, lock, logs, history append."""
+
 import json
 import os
 import re
@@ -7,12 +8,20 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import List, Optional
 
-from revali import STATE_VERSION, VERSION, PROMPT_VERSION
+from revali import PROMPT_VERSION, STATE_VERSION, VERSION
 from revali.procs import pid_alive
 
 STAGES = (
-    "preflight", "pr", "review", "validate", "ready_to_merge", "merged",
-    "needs_action", "needs_human", "error", "stopped",
+    "preflight",
+    "pr",
+    "review",
+    "validate",
+    "ready_to_merge",
+    "merged",
+    "needs_action",
+    "needs_human",
+    "error",
+    "stopped",
 )
 TERMINAL_STAGES = ("ready_to_merge", "merged", "needs_action", "needs_human", "error", "stopped")
 
@@ -36,7 +45,7 @@ class State:
     version: int = STATE_VERSION
     revali_version: str = VERSION
     prompt_version: str = PROMPT_VERSION
-    repo: str = ""               # owner/name from gh
+    repo: str = ""  # owner/name from gh
     branch: str = ""
     base: str = ""
     stage: str = "preflight"
@@ -46,21 +55,30 @@ class State:
     pr_url: str = ""
     head_sha: str = ""
     base_sha: str = ""
-    rounds: List[dict] = field(default_factory=list)   # per round: head_sha, base_sha, verdict, model
-    validations: List[dict] = field(default_factory=list)  # per validation run: result, failed_step, cause
+    rounds: List[dict] = field(
+        default_factory=list
+    )  # per round: head_sha, base_sha, verdict, model
+    validations: List[dict] = field(
+        default_factory=list
+    )  # per validation run: result, failed_step, cause
     test_commits: List[str] = field(default_factory=list)
     test_files: List[str] = field(default_factory=list)
     cost_usd: float = 0.0
     models_used: List[str] = field(default_factory=list)
     fallback: bool = False
     no_tests: bool = False
-    pending_effect: str = ""     # write-ahead marker for commit/push/comment
+    pending_effect: str = ""  # write-ahead marker for commit/push/comment
     needs_info_used: bool = False
-    force_push: bool = False     # set after a detected history rewrite; cleared by the next push
-    last_verdict: str = ""       # APPROVE | CHANGES_REQUESTED | NEEDS_INFO | PASS | FAIL
-    reviewer_running: bool = False  # a reviewer session may have left files in test_dir (STATE_VERSION 2)
-    pending_test_files: List[str] = field(default_factory=list)  # left uncommitted by a NEEDS_INFO round;
-    # the clean-tree check tolerates exactly these until the next round commits or removes them (STATE_VERSION 3)
+    force_push: bool = False  # set after a detected history rewrite; cleared by the next push
+    last_verdict: str = ""  # APPROVE | CHANGES_REQUESTED | NEEDS_INFO | PASS | FAIL
+    reviewer_running: bool = (
+        False  # a reviewer session may have left files in test_dir (STATE_VERSION 2)
+    )
+    pending_test_files: List[str] = field(
+        default_factory=list
+    )  # left uncommitted by a NEEDS_INFO round;
+    # the clean-tree check tolerates exactly these until the next round commits or removes them
+    # (STATE_VERSION 3)
     last_exit: int = -1
     message: str = ""
     started_at: str = ""
@@ -90,7 +108,9 @@ class State:
         self.updated_at = now_iso()
         write_json_atomic(self.path(rdir), asdict(self))
 
-    def set_stage(self, rdir: str, stage: str, message: str = "", exit_code: Optional[int] = None) -> None:
+    def set_stage(
+        self, rdir: str, stage: str, message: str = "", exit_code: Optional[int] = None
+    ) -> None:
         assert stage in STAGES, stage
         self.stage = stage
         self.message = message
@@ -105,6 +125,7 @@ def write_retry_s(path: str) -> float:
     files can change it), the defaults.toml value for a file outside any repository. Imported
     lazily: config does not know state."""
     from revali.config import load_defaults, paths_for
+
     directory = os.path.dirname(os.path.abspath(path))
     while True:
         if os.path.exists(os.path.join(directory, ".git")):
@@ -170,6 +191,7 @@ def read_text(path: str) -> str:
 
 # ---- lock -------------------------------------------------------------------
 
+
 class LockHeld(Exception):
     def __init__(self, pid: int, since: str):
         self.pid = pid
@@ -221,11 +243,14 @@ def lock_owner_alive(rdir: str) -> Optional[int]:
 # One checkout has one HEAD, so it runs one pipeline at a time whatever branch each session
 # has checked out. The branch lock above keys the state; this one keys the tree.
 
+
 class TreeLockHeld(Exception):
     def __init__(self, pid: int, branch: str, since: str):
         self.pid, self.branch, self.since = pid, branch, since
-        super().__init__("another revali run holds this working tree (branch %s, pid %d since %s)"
-                         % (branch, pid, since))
+        super().__init__(
+            "another revali run holds this working tree (branch %s, pid %d since %s)"
+            % (branch, pid, since)
+        )
 
 
 def tree_lock_path(repo_root: str, state_dir: str) -> str:
@@ -256,7 +281,9 @@ def acquire_tree_lock(path: str, branch: str, pid: Optional[int] = None) -> None
     """Same contract as acquire_lock: a record carrying the caller's pid or `pid` is ours."""
     owner = tree_lock_owner(path)
     if owner and int(owner.get("pid", 0)) not in (os.getpid(), pid or 0):
-        raise TreeLockHeld(int(owner["pid"]), str(owner.get("branch", "?")), str(owner.get("since", "?")))
+        raise TreeLockHeld(
+            int(owner["pid"]), str(owner.get("branch", "?")), str(owner.get("since", "?"))
+        )
     os.makedirs(os.path.dirname(path), exist_ok=True)
     write_json_atomic(path, {"pid": pid or os.getpid(), "branch": branch, "since": now_iso()})
 
@@ -268,13 +295,21 @@ def release_tree_lock(path: str) -> None:
 
 # ---- logs -------------------------------------------------------------------
 
+
 class RunLog:
     """Timestamped stage lines to stdout and <state_dir>/<branch>/<logs_dir>/revali.log."""
 
-    def __init__(self, rdir: Optional[str] = None, verbose: bool = False, quiet: bool = False,
-                 logs_dir: Optional[str] = None):
+    def __init__(
+        self,
+        rdir: Optional[str] = None,
+        verbose: bool = False,
+        quiet: bool = False,
+        logs_dir: Optional[str] = None,
+    ):
         if rdir and not logs_dir:
-            raise TypeError("RunLog needs logs_dir (the configured [paths] logs_dir) when rdir is given")
+            raise TypeError(
+                "RunLog needs logs_dir (the configured [paths] logs_dir) when rdir is given"
+            )
         self.path = os.path.join(rdir, logs_dir, "revali.log") if rdir else None
         self.verbose = verbose
         self.quiet = quiet
@@ -300,6 +335,7 @@ class RunLog:
 
 
 # ---- history ----------------------------------------------------------------
+
 
 def append_history(path: str, record: dict) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

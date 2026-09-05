@@ -3,19 +3,19 @@ on the WSL and ssh runners and its cleanup (AC-1), the round record's head_sha (
 the README wording (AC-7). Black-box: the runners are driven through their public `run`
 and the pipeline through the CLI; the scripts execute under the host's bash via the stubs.
 """
+
 import os
 import shutil
 import sys
 import tempfile
 import unittest
 
-from tests.helpers import FAKE_BIN, RepoCase, _quote, claude_entry, git, run_cli
-from tests.test_ssh_runner import HAVE_BASH, SshCase, plat
-from revali import EXIT_OK
-from revali import gitops
+from revali import EXIT_OK, gitops
 from revali.config import PlatformCfg
 from revali.runners import SshRunner, WslRunner
 from revali.state import State
+from tests.helpers import FAKE_BIN, RepoCase, _quote, claude_entry, git, run_cli
+from tests.test_ssh_runner import HAVE_BASH, SshCase, plat
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -31,6 +31,7 @@ class WslScopeCleanupTests(RepoCase):
     """AC-1 on the WSL runner: the script really clones under <repo>/<branch>/<label>, and
     its cleanup removes <label>, then <branch> and <repo> when empty, but never a sibling
     branch's directory."""
+
     runner = "wsl"
 
     def setUp(self):
@@ -42,8 +43,14 @@ class WslScopeCleanupTests(RepoCase):
         self.addCleanup(shutil.rmtree, self.sand, True)
 
     def make_runner(self):
-        return WslRunner(PlatformCfg(runner="wsl", distro="Ubuntu", command_timeout_min=1,
-                                     sandbox_dir=bash_form(self.sand)))
+        return WslRunner(
+            PlatformCfg(
+                runner="wsl",
+                distro="Ubuntu",
+                command_timeout_min=1,
+                sandbox_dir=bash_form(self.sand),
+            )
+        )
 
     def sand_path(self, *parts):
         return os.path.join(self.sand, *parts)
@@ -55,12 +62,15 @@ class WslScopeCleanupTests(RepoCase):
         marker = os.path.join(logs, "seen.txt")
         # the step records where it ran: proof the clone sat under <repo>/<branch>/<label>
         step = 'pwd > "%s"' % bash_form(marker)
-        report = self.make_runner().run(self.repo, head, [("test", step)], {}, logs, "validate-r1",
-                                        scope="feature__mul")
+        report = self.make_runner().run(
+            self.repo, head, [("test", step)], {}, logs, "validate-r1", scope="feature__mul"
+        )
         self.assertTrue(report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in report.steps])
         with open(marker, encoding="utf-8") as fh:
             where = fh.read().strip()
-        self.assertTrue(where.replace("\\", "/").endswith("/sample/feature__mul/validate-r1/repo"), where)
+        self.assertTrue(
+            where.replace("\\", "/").endswith("/sample/feature__mul/validate-r1/repo"), where
+        )
         # cleanup: <label>, then <branch>, then <repo>; the sandbox root itself stays
         self.assertFalse(os.path.exists(self.sand_path("sample", "feature__mul", "validate-r1")))
         self.assertFalse(os.path.exists(self.sand_path("sample", "feature__mul")))
@@ -76,20 +86,27 @@ class WslScopeCleanupTests(RepoCase):
             fh.write("x")
         head = git(["rev-parse", "HEAD"], self.repo).strip()
         logs = os.path.join(self.rdir(), "logs")
-        report = self.make_runner().run(self.repo, head, [("test", "true")], {}, logs, "validate-r1",
-                                        scope="feature__mul")
+        report = self.make_runner().run(
+            self.repo, head, [("test", "true")], {}, logs, "validate-r1", scope="feature__mul"
+        )
         self.assertTrue(report.ok)
         self.assertFalse(os.path.exists(self.sand_path("sample", "feature__mul")))
-        self.assertTrue(os.path.isfile(os.path.join(other, "busy")))     # untouched
-        self.assertTrue(os.path.isdir(self.sand_path("sample")))         # not empty, so kept
+        self.assertTrue(os.path.isfile(os.path.join(other, "busy")))  # untouched
+        self.assertTrue(os.path.isdir(self.sand_path("sample")))  # not empty, so kept
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_failed_step_still_cleans_the_branch_and_repo_dirs(self):
         head = git(["rev-parse", "HEAD"], self.repo).strip()
         logs = os.path.join(self.rdir(), "logs")
-        report = self.make_runner().run(self.repo, head,
-                                        [("setup", "true"), ("test", "exit 3"), ("new_test", "true")],
-                                        {}, logs, "validate-r2", scope="feature__mul")
+        report = self.make_runner().run(
+            self.repo,
+            head,
+            [("setup", "true"), ("test", "exit 3"), ("new_test", "true")],
+            {},
+            logs,
+            "validate-r2",
+            scope="feature__mul",
+        )
         self.assertEqual(report.failed.name, "test")
         self.assertEqual(report.failed.returncode, 3)
         self.assertFalse(os.path.exists(self.sand_path("sample", "feature__mul")))
@@ -100,8 +117,9 @@ class WslScopeCleanupTests(RepoCase):
         head = git(["rev-parse", "HEAD"], self.repo).strip()
         logs = os.path.join(self.rdir(), "logs")
         marker = os.path.join(logs, "seen.txt")
-        report = self.make_runner().run(self.repo, head, [("test", 'pwd > "%s"' % bash_form(marker))], {}, logs,
-                                        "validate-r1")
+        report = self.make_runner().run(
+            self.repo, head, [("test", 'pwd > "%s"' % bash_form(marker))], {}, logs, "validate-r1"
+        )
         self.assertTrue(report.ok)
         with open(marker, encoding="utf-8") as fh:
             where = fh.read().strip()
@@ -121,8 +139,15 @@ class SshScopeTests(SshCase):
         r = SshRunner(plat())
         logs = os.path.join(self.rdir(), "logs")
         head = git(["rev-parse", "HEAD"], self.repo).strip()
-        report = r.run(self.repo, head, [("setup", "true"), ("test", "true")], {}, logs, "validate-r1",
-                       scope="feature__mul")
+        report = r.run(
+            self.repo,
+            head,
+            [("setup", "true"), ("test", "true")],
+            {},
+            logs,
+            "validate-r1",
+            scope="feature__mul",
+        )
         self.assertTrue(report.ok, [(s.name, s.returncode) for s in report.steps])
         calls = self.calls()
         self.assertEqual([c[0] for c in calls], ["ssh", "scp", "ssh", "scp", "ssh"])
@@ -130,7 +155,9 @@ class SshScopeTests(SshCase):
         self.assertIn("sandbox/sample/feature__mul/validate-r1-in", mkdir)
         self.assertIn("sandbox/sample/feature__mul/validate-r1-logs", mkdir)
         self.assertEqual(calls[1][1][-1], "box:.revali/sandbox/sample/feature__mul/validate-r1-in/")
-        self.assertEqual(calls[3][1][-2], "box:.revali/sandbox/sample/feature__mul/validate-r1-logs/.")
+        self.assertEqual(
+            calls[3][1][-2], "box:.revali/sandbox/sample/feature__mul/validate-r1-logs/."
+        )
         cleanup = calls[4][1][-1]
         rm, _, rmdir = cleanup.partition("&&")
         self.assertTrue(rm.startswith("rm -rf "), cleanup)
@@ -153,7 +180,9 @@ class SshScopeTests(SshCase):
         r = SshRunner(plat())
         logs = os.path.join(self.rdir(), "logs")
         head = git(["rev-parse", "HEAD"], self.repo).strip()
-        report = r.run(self.repo, head, [("test", "true")], {}, logs, "validate-r1", scope="feature__mul")
+        report = r.run(
+            self.repo, head, [("test", "true")], {}, logs, "validate-r1", scope="feature__mul"
+        )
         self.assertTrue(report.ok)
         self.assertTrue(os.path.isfile(os.path.join(other, "busy")))
         self.assertFalse(os.path.exists(self.remote_dir("sample", "feature__mul")))
@@ -194,11 +223,11 @@ class PipelineScopeAndRecordTests(RepoCase):
         self.assertEqual(len(state.rounds), 1)
         record = state.rounds[0]
         test_commit = gitops.rev_parse("HEAD", self.repo)
-        self.assertNotEqual(reviewed, test_commit)                 # the round did commit tests
-        self.assertEqual(record["head_sha"], reviewed)             # what the reviewer saw
-        self.assertEqual(record["test_commit"], test_commit)       # what the round made
+        self.assertNotEqual(reviewed, test_commit)  # the round did commit tests
+        self.assertEqual(record["head_sha"], reviewed)  # what the reviewer saw
+        self.assertEqual(record["test_commit"], test_commit)  # what the round made
         self.assertEqual(state.test_commits, [test_commit])
-        self.assertEqual(state.head_sha, test_commit)              # the run's own latest commit
+        self.assertEqual(state.head_sha, test_commit)  # the run's own latest commit
         self.assertEqual(state.stage, "ready_to_merge")
 
     def test_round_without_a_test_commit_records_head_as_both(self):
@@ -226,14 +255,14 @@ class ReadmeLayoutTests(unittest.TestCase):
     def section(self, text, heading):
         start = text.index(heading)
         end = text.find("\n## ", start + 1)
-        return text[start:end if end >= 0 else len(text)]
+        return text[start : end if end >= 0 else len(text)]
 
     def test_files_table_and_sandbox_section_show_the_branch_level(self):
         self.assertIn("`~/.revali/sandbox/<repo>/<branch>/<label>/`", self.text)
         self.assertNotIn("sandbox/<repo>/<label>/", self.text)
         section = self.section(self.text, "# Sandbox")
         self.assertIn("<repo>/<branch>/<label>", section)
-        self.assertIn("__", section)   # how <branch> is written
+        self.assertIn("__", section)  # how <branch> is written
 
     def test_what_revali_does_says_merge_holds_the_tree_lock(self):
         section = self.section(self.effects, "# What revali does to your repository")

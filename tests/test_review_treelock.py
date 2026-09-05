@@ -10,6 +10,7 @@ Black-box through the CLI on the fixture repository (fake gh / claude / runner, 
 The tree lock is written directly, as the AC defines it, to stage a busy tree; the only
 patches are seams to look at the lock while a foreground run holds it. On the base branch
 there is no tree lock, so every test here fails there."""
+
 import json
 import os
 import subprocess
@@ -17,15 +18,16 @@ import sys
 import unittest
 from unittest import mock
 
-from tests.helpers import RepoCase, claude_entry, git, run_cli
-from revali import EXIT_ERROR, EXIT_OK
-from revali import gitops, pipeline, review
+from revali import EXIT_ERROR, EXIT_OK, gitops, pipeline, review
 from revali.preflight import Stop
 from revali.state import State, lock_path
+from tests.helpers import RepoCase, claude_entry, git, run_cli
 
-DEAD_PID = 999999999            # no such process on any host
-TREE_MSG = ("ERROR: a revali run is already in progress in this working tree on branch %s (pid %d); "
-            "use `revali wait --branch %s` or `revali stop`")
+DEAD_PID = 999999999  # no such process on any host
+TREE_MSG = (
+    "ERROR: a revali run is already in progress in this working tree on branch %s (pid %d); "
+    "use `revali wait --branch %s` or `revali stop`"
+)
 
 
 class TreeLockCase(RepoCase):
@@ -52,27 +54,30 @@ class TreeLockCase(RepoCase):
         return "repo: %s  branch: %s" % (root or self.root(), branch)
 
     def live_child(self):
-        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
-                                 start_new_session=True)
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(120)"], start_new_session=True
+        )
         self.addCleanup(lambda: child.poll() is None and child.kill())
         return child
 
 
 class ASecondRunInTheSameTreeIsRefused(TreeLockCase):
-    def test_detached_run_from_another_branch(self):                                  # AC-1
+    def test_detached_run_from_another_branch(self):  # AC-1
         self.hold_tree_lock("feature/other", os.getpid())
         code, out = run_cli(["run"])
         self.assertEqual(code, EXIT_ERROR, out)
         lines = out.splitlines()
         self.assertEqual(lines[0], self.identity())
         self.assertEqual(lines[1], TREE_MSG % ("feature/other", os.getpid(), "feature/other"))
-        self.assertNotIn("started revali run", out)                                    # nothing was spawned
-        self.assertFalse(os.path.isfile(lock_path(self.rdir())))                       # no branch lock reserved
-        self.assertIsNone(State.load(self.rdir()))                                     # no state written
-        self.assertEqual(self.read_tree_lock()["pid"], os.getpid())                    # the owner's lock is left alone
+        self.assertNotIn("started revali run", out)  # nothing was spawned
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))  # no branch lock reserved
+        self.assertIsNone(State.load(self.rdir()))  # no state written
+        self.assertEqual(
+            self.read_tree_lock()["pid"], os.getpid()
+        )  # the owner's lock is left alone
 
-    def test_foreground_and_dry_run_are_refused_the_same_way(self):                    # AC-1
-        child = self.live_child()                                                      # a pid that is not ours
+    def test_foreground_and_dry_run_are_refused_the_same_way(self):  # AC-1
+        child = self.live_child()  # a pid that is not ours
         self.hold_tree_lock("feature/other", child.pid)
         for argv in (["run", "--foreground"], ["run", "--dry-run"]):
             with self.subTest(argv=argv):
@@ -82,20 +87,22 @@ class ASecondRunInTheSameTreeIsRefused(TreeLockCase):
                 self.assertEqual(lines[0], self.identity())
                 self.assertEqual(lines[1], TREE_MSG % ("feature/other", child.pid, "feature/other"))
                 self.assertNotIn("DRY RUN OK", out)
-                self.assertFalse(os.path.isfile(lock_path(self.rdir())))               # the branch lock is let go
+                self.assertFalse(
+                    os.path.isfile(lock_path(self.rdir()))
+                )  # the branch lock is let go
                 self.assertEqual(self.read_tree_lock()["pid"], child.pid)
 
-    def test_a_dead_owner_is_removed_and_ignored(self):                                # AC-1
+    def test_a_dead_owner_is_removed_and_ignored(self):  # AC-1
         self.hold_tree_lock("feature/other", DEAD_PID)
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("DRY RUN OK", out)
         self.assertNotIn("already in progress", out)
-        self.assertFalse(os.path.isfile(self.tree_lock()))                             # stale file gone, own lock released
+        self.assertFalse(os.path.isfile(self.tree_lock()))  # stale file gone, own lock released
 
 
 class TheRunHoldsAndReleasesBothLocks(TreeLockCase):
-    def test_held_while_the_reviewer_runs_and_released_at_the_end(self):              # AC-1
+    def test_held_while_the_reviewer_runs_and_released_at_the_end(self):  # AC-1
         self.claude(claude_entry())
         seen = {}
         real = review.spawn_reviewer
@@ -109,14 +116,14 @@ class TheRunHoldsAndReleasesBothLocks(TreeLockCase):
             code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIsNotNone(seen.get("tree"), "tree.lock was not held while the reviewer ran")
-        self.assertEqual(seen["tree"]["pid"], os.getpid())                             # the foreground run's pid
+        self.assertEqual(seen["tree"]["pid"], os.getpid())  # the foreground run's pid
         self.assertEqual(seen["tree"]["branch"], "feature/mul")
         self.assertIn("since", seen["tree"])
-        self.assertTrue(seen["branch_lock"])                                           # together with the branch lock
-        self.assertFalse(os.path.isfile(self.tree_lock()))                             # released ...
-        self.assertFalse(os.path.isfile(lock_path(self.rdir())))                       # ... both
+        self.assertTrue(seen["branch_lock"])  # together with the branch lock
+        self.assertFalse(os.path.isfile(self.tree_lock()))  # released ...
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))  # ... both
 
-    def test_released_when_the_pipeline_stops_early(self):                             # AC-1
+    def test_released_when_the_pipeline_stops_early(self):  # AC-1
         seen = {}
 
         def look_then_stop(*a, **kw):
@@ -129,20 +136,22 @@ class TheRunHoldsAndReleasesBothLocks(TreeLockCase):
         self.assertIn("stopped by the test during preflight", out)
         self.assertIsNotNone(seen.get("tree"), "tree.lock was not held during preflight")
         self.assertEqual(seen["tree"]["pid"], os.getpid())
-        self.assertFalse(os.path.isfile(self.tree_lock()))                             # whichever way it ends
+        self.assertFalse(os.path.isfile(self.tree_lock()))  # whichever way it ends
         self.assertFalse(os.path.isfile(lock_path(self.rdir())))
 
 
 class ASecondWorktreeIsIndependent(TreeLockCase):
-    def test_the_other_worktree_has_its_own_lock(self):                                # AC-1
-        child = self.live_child()                                                      # a run that is not this process
-        self.hold_tree_lock("feature/mul", child.pid)                                  # the primary tree is busy
+    def test_the_other_worktree_has_its_own_lock(self):  # AC-1
+        child = self.live_child()  # a run that is not this process
+        self.hold_tree_lock("feature/mul", child.pid)  # the primary tree is busy
         wt = os.path.join(self.tmp, "wt")
         git(["worktree", "add", "--quiet", "-b", "feature/wt", wt, "feature/mul"], self.repo)
 
         def drop_worktree():
-            os.chdir(self.repo)                                                        # not from inside it
-            subprocess.run(["git", "worktree", "remove", "--force", wt], cwd=self.repo, capture_output=True)
+            os.chdir(self.repo)  # not from inside it
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", wt], cwd=self.repo, capture_output=True
+            )
 
         self.addCleanup(drop_worktree)
         with open(self.change_md(), "r", encoding="utf-8", newline="") as fh:
@@ -152,19 +161,21 @@ class ASecondWorktreeIsIndependent(TreeLockCase):
         with open(target, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(doc)
 
-        code, out = run_cli(["run", "--dry-run"])                                      # the primary tree: refused
+        code, out = run_cli(["run", "--dry-run"])  # the primary tree: refused
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn(TREE_MSG % ("feature/mul", child.pid, "feature/mul"), out)
 
-        os.chdir(wt)                                                                   # the second worktree: not
+        os.chdir(wt)  # the second worktree: not
         wt_root = gitops.repo_root(wt)
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertEqual(out.splitlines()[0], self.identity("feature/wt", root=wt_root))
         self.assertIn("DRY RUN OK", out)
         self.assertNotIn("already in progress", out)
-        self.assertFalse(os.path.isfile(self.tree_lock(wt_root)))                      # its own lock, released
-        self.assertEqual(self.read_tree_lock()["branch"], "feature/mul")               # the primary's is untouched
+        self.assertFalse(os.path.isfile(self.tree_lock(wt_root)))  # its own lock, released
+        self.assertEqual(
+            self.read_tree_lock()["branch"], "feature/mul"
+        )  # the primary's is untouched
 
 
 if __name__ == "__main__":

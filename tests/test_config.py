@@ -1,8 +1,8 @@
 import os
 import unittest
 
-from tests.helpers import ROOT
 from revali.config import ConfigError, parse_project_config
+from tests.helpers import ROOT
 
 
 def template_text():
@@ -46,15 +46,21 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(any("unknown section [deploy]" in p for p in cm.exception.problems))
 
     def test_windows_platform_rejected_in_v1(self):
-        text = MINIMAL.replace("[validate.linux]", '[project]\nplatforms = ["linux", "windows"]\n[validate.linux]')
-        text = text.replace("[project]\nconfig_version = 1\n[project]", "[project]\nconfig_version = 1")
+        text = MINIMAL.replace(
+            "[validate.linux]", '[project]\nplatforms = ["linux", "windows"]\n[validate.linux]'
+        )
+        text = text.replace(
+            "[project]\nconfig_version = 1\n[project]", "[project]\nconfig_version = 1"
+        )
         with self.assertRaises(ConfigError) as cm:
             parse_project_config(text)
         self.assertTrue(any("windows" in p and "not supported" in p for p in cm.exception.problems))
 
     def test_new_test_required(self):
         with self.assertRaises(ConfigError) as cm:
-            parse_project_config("[project]\nconfig_version = 1\n[validate.linux]\ntest = 'pytest'\n")
+            parse_project_config(
+                "[project]\nconfig_version = 1\n[validate.linux]\ntest = 'pytest'\n"
+            )
         self.assertTrue(any("new_test is required" in p for p in cm.exception.problems))
 
     def test_missing_platform_table(self):
@@ -89,7 +95,11 @@ class ConfigTests(unittest.TestCase):
             parse_project_config(MINIMAL + "\n[review]\nengine = 'hybrid'\n")
         self.assertTrue(any("engine" in p for p in cm.exception.problems))
         with self.assertRaises(ConfigError) as cm:
-            parse_project_config(MINIMAL.replace("config_version = 1", "config_version = 1\nchange_source = 'openspec'"))
+            parse_project_config(
+                MINIMAL.replace(
+                    "config_version = 1", "config_version = 1\nchange_source = 'openspec'"
+                )
+            )
         self.assertTrue(any("change_source" in p for p in cm.exception.problems))
 
     def test_all_problems_reported_together(self):

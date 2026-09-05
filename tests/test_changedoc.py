@@ -1,9 +1,9 @@
 import os
 import unittest
 
-from tests.helpers import ROOT  # noqa: F401  (sys.path setup)
-from tests.fixtures.make_sample_repo import CHANGE_MD
 from revali.changedoc import parse, validate
+from tests.fixtures.make_sample_repo import CHANGE_MD
+from tests.helpers import ROOT  # noqa: F401  (sys.path setup)
 
 
 class ChangeDocTests(unittest.TestCase):
@@ -24,11 +24,15 @@ class ChangeDocTests(unittest.TestCase):
         self.assertEqual(doc.title, "Heading title")
 
     def test_missing_request(self):
-        doc = parse(CHANGE_MD.replace("add a mul(a, b) function to calc that multiplies two numbers", ""))
+        doc = parse(
+            CHANGE_MD.replace("add a mul(a, b) function to calc that multiplies two numbers", "")
+        )
         self.assertTrue(any("Request" in p for p in validate(doc)))
 
     def test_missing_ac(self):
-        text = CHANGE_MD.replace("- AC-1: mul(a, b) returns the product of a and b for integers\n", "")
+        text = CHANGE_MD.replace(
+            "- AC-1: mul(a, b) returns the product of a and b for integers\n", ""
+        )
         text = text.replace("- AC-2: mul with zero returns zero\n", "")
         self.assertTrue(any("at least one" in p for p in validate(parse(text))))
 
@@ -41,7 +45,9 @@ class ChangeDocTests(unittest.TestCase):
         self.assertTrue(any("too short" in p for p in validate(parse(text))))
 
     def test_draft_refused(self):
-        text = CHANGE_MD.replace("author_model: fixture\n", "author_model: fixture\nstatus: draft\n")
+        text = CHANGE_MD.replace(
+            "author_model: fixture\n", "author_model: fixture\nstatus: draft\n"
+        )
         self.assertTrue(any("draft" in p for p in validate(parse(text))))
 
     def test_kind_not_in_v1(self):
@@ -67,7 +73,9 @@ class ChangeDocTests(unittest.TestCase):
         self.assertTrue(any("draft" in p for p in problems), problems)
         # Approval = the status line goes; placeholders replaced by real AC text
         approved = "".join(line for line in text.splitlines(True) if not line.startswith("status:"))
-        approved = approved.replace("<another one; every AC maps to at least one test>", "second observable behaviour")
+        approved = approved.replace(
+            "<another one; every AC maps to at least one test>", "second observable behaviour"
+        )
         doc = parse(approved)
         self.assertEqual(doc.ac_ids, ["AC-1", "AC-2"])
         self.assertEqual(validate(doc), [])

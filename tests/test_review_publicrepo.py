@@ -8,12 +8,13 @@ finding text, suggestions, questions, scope notes, failure output and
 diagnosis text never reach the comment. A PRIVATE repository still gets the
 full text. Black-box through the CLI and the fake gh / claude / runner.
 """
+
 import os
 import unittest
 
-from tests.helpers import RepoCase, approve_response, claude_entry, run_cli
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.preflight import Stop, preflight
+from tests.helpers import RepoCase, approve_response, claude_entry, run_cli
 
 FINDING_TEXT = "mul silently truncates floats to int before multiplying"
 SUGGESTION = "multiply the operands as given and let the caller convert"
@@ -29,26 +30,56 @@ RECOMMENDATION = "return a * b instead of a + b"
 def changes_requested():
     return approve_response(
         verdict="CHANGES_REQUESTED",
-        findings=[{"id": "F1", "severity": "high", "kind": "correctness", "file": "src/calc.py", "line": 3,
-                   "text": FINDING_TEXT, "suggestion": SUGGESTION},
-                  {"id": "F2", "severity": "low", "kind": "convention", "file": "src/calc.py", "line": 1,
-                   "text": LOW_TEXT, "suggestion": ""}],
-        scope_mismatch=[SCOPE_NOTE])
+        findings=[
+            {
+                "id": "F1",
+                "severity": "high",
+                "kind": "correctness",
+                "file": "src/calc.py",
+                "line": 3,
+                "text": FINDING_TEXT,
+                "suggestion": SUGGESTION,
+            },
+            {
+                "id": "F2",
+                "severity": "low",
+                "kind": "convention",
+                "file": "src/calc.py",
+                "line": 1,
+                "text": LOW_TEXT,
+                "suggestion": "",
+            },
+        ],
+        scope_mismatch=[SCOPE_NOTE],
+    )
 
 
 def needs_info():
-    return approve_response(verdict="NEEDS_INFO", questions=[QUESTION, QUESTION + " (and for ints?)"])
+    return approve_response(
+        verdict="NEEDS_INFO", questions=[QUESTION, QUESTION + " (and for ints?)"]
+    )
 
 
 def diagnosis():
-    return {"summary": DIAG_SUMMARY, "cause": "code",
-            "failures": [{"test": "tests/test_review_mul.py::MulTests::test_product", "cause": "code",
-                          "note": DIAG_NOTE}],
-            "recommendation": RECOMMENDATION}
+    return {
+        "summary": DIAG_SUMMARY,
+        "cause": "code",
+        "failures": [
+            {
+                "test": "tests/test_review_mul.py::MulTests::test_product",
+                "cause": "code",
+                "note": DIAG_NOTE,
+            }
+        ],
+        "recommendation": RECOMMENDATION,
+    }
 
 
-FAILING_VALIDATION = {"default": 0, "results": {"validate-r1": {"new_test": 1}},
-                      "outputs": {"validate-r1": {"new_test": FAILURE_OUTPUT + "\n"}}}
+FAILING_VALIDATION = {
+    "default": 0,
+    "results": {"validate-r1": {"new_test": 1}},
+    "outputs": {"validate-r1": {"new_test": FAILURE_OUTPUT + "\n"}},
+}
 
 
 class CommentCase(RepoCase):
@@ -66,6 +97,7 @@ class CommentCase(RepoCase):
 
 
 # ---- AC-1 -------------------------------------------------------------------
+
 
 class PreflightAcceptsOwnNonPrivateRepo(RepoCase):
     def test_public_repo_passes_preflight(self):
@@ -104,10 +136,13 @@ class PreflightAcceptsOwnNonPrivateRepo(RepoCase):
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("summaries", out)
-        self.assertEqual([c for c in self.fake_calls("gh") if c["argv"][:2] == ["pr", "create"]], [])
+        self.assertEqual(
+            [c for c in self.fake_calls("gh") if c["argv"][:2] == ["pr", "create"]], []
+        )
 
 
 # ---- AC-2: public repository -------------------------------------------------
+
 
 class PublicRepoReviewComment(CommentCase):
     def setUp(self):
@@ -179,7 +214,9 @@ class PublicRepoValidationComment(CommentCase):
         self.assertNotIn("fake test output", v)
         self.assertNotIn("fake new_test output", v)
         self.assertNotIn(".log", v)
-        self.assertEqual(self.posted_comment_files(), ["comment-review-1.md", "comment-validate-1.md"])
+        self.assertEqual(
+            self.posted_comment_files(), ["comment-review-1.md", "comment-validate-1.md"]
+        )
 
     def test_fail_comment_names_the_cause_without_the_text(self):
         self.runner_scenario(FAILING_VALIDATION)
@@ -222,6 +259,7 @@ class InternalRepoGetsSummariesToo(CommentCase):
 
 
 # ---- AC-2: private repository unchanged -------------------------------------
+
 
 class PrivateRepoStillPostsFullText(CommentCase):
     def test_review_comment_has_the_full_text(self):

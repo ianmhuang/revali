@@ -2,15 +2,25 @@ import os
 import tempfile
 import unittest
 
+from revali.state import (
+    LockHeld,
+    State,
+    acquire_lock,
+    append_history,
+    lock_owner_alive,
+    read_history,
+    release_lock,
+    safe_branch,
+    write_json_atomic,
+)
 from tests.helpers import ROOT  # noqa: F401
-from revali.state import (LockHeld, State, acquire_lock, append_history, lock_owner_alive,
-                          read_history, release_lock, safe_branch, write_json_atomic)
 
 
 class StateTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="revali state ")
         from tests.helpers import rmtree_force
+
         self.addCleanup(rmtree_force, self.tmp)
 
     def test_safe_branch(self):
@@ -19,7 +29,9 @@ class StateTests(unittest.TestCase):
         self.assertEqual(safe_branch("main"), "main")
 
     def test_roundtrip(self):
-        st = State(branch="feature/mul", base="main", stage="review", round=2, fixes=1, cost_usd=0.42)
+        st = State(
+            branch="feature/mul", base="main", stage="review", round=2, fixes=1, cost_usd=0.42
+        )
         st.rounds.append({"head_sha": "abc", "verdict": "APPROVE"})
         st.save(self.tmp)
         loaded = State.load(self.tmp)
@@ -67,7 +79,8 @@ class StateTests(unittest.TestCase):
         release_lock(self.tmp)
 
     def test_lock_held_by_live_pid(self):
-        # Our own pid as "someone else": simulate by writing it then acquiring with another pid value.
+        # Our own pid as "someone else": simulate by writing it then acquiring with another pid
+        # value.
         write_json_atomic(os.path.join(self.tmp, "lock"), {"pid": os.getpid(), "since": "x"})
         with self.assertRaises(LockHeld):
             _acquire_as_other(self.tmp)
@@ -85,6 +98,7 @@ class StateTests(unittest.TestCase):
 def _acquire_as_other(rdir):
     """acquire_lock treats the current pid as re-entrant; fake a different caller."""
     import revali.state as st
+
     real = os.getpid
     try:
         os.getpid = lambda: real() + 1

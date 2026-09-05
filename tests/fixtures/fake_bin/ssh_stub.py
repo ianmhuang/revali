@@ -6,6 +6,7 @@ Every call is appended to $REVALI_FAKE_LOG. Use via REVALI_SSH_CMD="<python> <th
 Knobs: REVALI_FAKE_SSH_DOWN=1 refuses every connection (exit 255);
 REVALI_FAKE_SSH_BASH_FAILS=1 makes `bash` fail before the script starts.
 """
+
 import json
 import os
 import shlex
@@ -15,7 +16,9 @@ import sys
 
 
 def remote_root():
-    return os.environ.get("REVALI_FAKE_REMOTE") or os.path.join(os.path.expanduser("~"), "fake-remote")
+    return os.environ.get("REVALI_FAKE_REMOTE") or os.path.join(
+        os.path.expanduser("~"), "fake-remote"
+    )
 
 
 def local(path):
@@ -38,10 +41,10 @@ def record(argv):
 
 def one(words):
     name = words[0]
-    if name == "git":            # the preflight probe
+    if name == "git":  # the preflight probe
         print("git version 2.43.0 (fake)")
         return 0
-    if name == "command":        # command -v <tool>
+    if name == "command":  # command -v <tool>
         print("/usr/bin/%s" % words[-1])
         return 0
     if name == "true":
@@ -60,7 +63,7 @@ def one(words):
                 shutil.rmtree(local(p), ignore_errors=True)
         return 0
     if name == "rmdir":
-        for p in [w for w in words[1:] if not w.startswith("-")]:   # in order, like rmdir
+        for p in [w for w in words[1:] if not w.startswith("-")]:  # in order, like rmdir
             try:
                 os.rmdir(local(p))
             except OSError:

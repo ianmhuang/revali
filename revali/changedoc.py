@@ -12,6 +12,7 @@ Format:
     ## What / ## Why / ## Goal / ## Acceptance criteria / ## Out of scope / ## Dependencies
     Acceptance criteria are lines "- AC-1: ..." (numbering must be unique).
 """
+
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
@@ -99,10 +100,14 @@ def validate(doc: ChangeDoc, allowed_kinds=V1_KINDS) -> List[str]:
     if not doc.kind:
         problems.append("change.md: missing 'kind:' (one of %s)" % ", ".join(ALL_KINDS))
     elif doc.kind not in ALL_KINDS:
-        problems.append("change.md: unknown kind '%s' (one of %s)" % (doc.kind, ", ".join(ALL_KINDS)))
+        problems.append(
+            "change.md: unknown kind '%s' (one of %s)" % (doc.kind, ", ".join(ALL_KINDS))
+        )
     elif doc.kind not in allowed_kinds:
-        problems.append("change.md: kind '%s' is not available in this version (v1.0: %s)"
-                        % (doc.kind, ", ".join(allowed_kinds)))
+        problems.append(
+            "change.md: kind '%s' is not available in this version (v1.0: %s)"
+            % (doc.kind, ", ".join(allowed_kinds))
+        )
     if doc.status == "draft":
         problems.append("change.md: status is 'draft'; review it and remove the status line")
     if not doc.section("request"):

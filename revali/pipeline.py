@@ -2,6 +2,7 @@
 status, reset, clean, stop. Review / validate / merge stages plug in here in
 later milestones; until then `run` stops after preflight with a clear message.
 """
+
 import os
 import shutil
 import sys
@@ -9,15 +10,29 @@ import time
 import traceback
 from typing import Optional
 
-from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION
-from revali import gitops
-from revali.config import history_path, load_user_config, paths_for, ConfigError
+from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION, gitops
+from revali.config import ConfigError, history_path, load_user_config, paths_for
 from revali.preflight import Stop, check_tree_unmoved, locate, preflight
 from revali.procs import kill_tree, pid_alive, python_exe, spawn_detached
-from revali.state import (LockHeld, RunLog, State, TreeLockHeld, acquire_lock, acquire_tree_lock,
-                          append_history, lock_owner_alive, read_lock, read_tree_lock, release_lock,
-                          release_tree_lock, review_dir, run_died, safe_branch, tree_lock_owner,
-                          tree_lock_path)
+from revali.state import (
+    LockHeld,
+    RunLog,
+    State,
+    TreeLockHeld,
+    acquire_lock,
+    acquire_tree_lock,
+    append_history,
+    lock_owner_alive,
+    read_lock,
+    read_tree_lock,
+    release_lock,
+    release_tree_lock,
+    review_dir,
+    run_died,
+    safe_branch,
+    tree_lock_owner,
+    tree_lock_path,
+)
 
 
 def _interrupted(state: State) -> bool:
@@ -46,7 +61,7 @@ def _locate_run(cwd: str, branch: str = "", allow_detached: bool = False) -> tup
         try:
             branch = gitops.current_branch(root)
         except gitops.GitError as exc:
-            raise Stop(EXIT_ERROR, "not inside a git repository (%s)" % exc)
+            raise Stop(EXIT_ERROR, "not inside a git repository (%s)" % exc) from exc
         if branch == "HEAD" and not allow_detached:
             raise Stop(EXIT_ERROR, "detached HEAD; check out a branch first")
     return root, branch, review_dir(root, branch, paths_for(root).state_dir)
@@ -73,9 +88,11 @@ def _tree_lock_path(root: str) -> str:
 
 
 def _tree_held_message(owner: dict) -> str:
-    return ("ERROR: a revali run is already in progress in this working tree on branch %s (pid %d); "
-            "use `revali wait --branch %s` or `revali stop`"
-            % (owner.get("branch", "?"), int(owner.get("pid", 0)), owner.get("branch", "?")))
+    return (
+        "ERROR: a revali run is already in progress in this working tree on branch %s (pid %d); "
+        "use `revali wait --branch %s` or `revali stop`"
+        % (owner.get("branch", "?"), int(owner.get("pid", 0)), owner.get("branch", "?"))
+    )
 
 
 def _print_identity(root: str, branch: str) -> None:
@@ -90,11 +107,13 @@ def _run_log_path(rdir: str) -> str:
 
 def _print_stop(stop: Stop) -> None:
     label = {EXIT_ACTION: "ACTION NEEDED", EXIT_HUMAN: "NEEDS A HUMAN", EXIT_ERROR: "ERROR"}.get(
-        stop.exit_code, "STOP")
+        stop.exit_code, "STOP"
+    )
     print("%s: %s" % (label, stop.message))
 
 
 # ---- run --------------------------------------------------------------------
+
 
 def cmd_run(args) -> int:
     if args.foreground or args.dry_run:  # a dry run spawns nothing, not even itself
@@ -111,7 +130,10 @@ def _run_detached(args) -> int:
     _print_identity(root, branch)
     pid = lock_owner_alive(rdir)
     if pid:
-        print("ERROR: a revali run is already in progress (pid %d); use `revali wait` or `revali stop`" % pid)
+        print(
+            "ERROR: a revali run is already in progress (pid %d); "
+            "use `revali wait` or `revali stop`" % pid
+        )
         return EXIT_ERROR
     tpath = _tree_lock_path(root)
     owner = tree_lock_owner(tpath)
@@ -182,7 +204,9 @@ def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         return _record_stop(state, rdir, log, "error", stop, started)
     except Stop as stop:
         _print_stop(stop)
-        return _record_stop(state, rdir, log, STAGE_FOR_EXIT.get(stop.exit_code, "error"), stop, started)
+        return _record_stop(
+            state, rdir, log, STAGE_FOR_EXIT.get(stop.exit_code, "error"), stop, started
+        )
     except Exception as exc:  # a bug or an OS error: record it so the next run can continue
         tb = traceback.format_exc()
         print(tb, file=sys.stderr, end="")  # the detached child's stderr is run.log
@@ -190,12 +214,16 @@ def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
             log.detail(line)
         # until _stages records its first stage, state.stage is still the previous run's
         where = "last recorded stage '%s'" % state.stage if started else "before its first stage"
-        stop = Stop(EXIT_ERROR, "the run stopped with %s: %s (%s)" % (type(exc).__name__, exc, where))
+        stop = Stop(
+            EXIT_ERROR, "the run stopped with %s: %s (%s)" % (type(exc).__name__, exc, where)
+        )
         _print_stop(stop)
         return _record_stop(state, rdir, log, "error", stop, started)
 
 
-def _record_stop(state: State, rdir: str, log: RunLog, stage: str, stop: Stop, started: bool) -> int:
+def _record_stop(
+    state: State, rdir: str, log: RunLog, stage: str, stop: Stop, started: bool
+) -> int:
     """Persist a run's outcome. When the state file itself cannot be written, say what `wait`
     will show instead of escaping with a traceback; the exit code stands either way."""
     try:
@@ -218,12 +246,23 @@ def _record_history(state: State, exit_code: int) -> None:
     except ConfigError:
         path = history_path(None)
     try:
-        append_history(path, {
-            "repo": state.repo, "branch": state.branch, "base": state.base, "stage": state.stage, "exit": exit_code,
-            "rounds": len(state.rounds), "fixes": state.fixes, "last_verdict": state.last_verdict,
-            "cost_usd": round(state.cost_usd, 4), "models": state.models_used, "fallback": state.fallback,
-            "pr": state.pr_number,
-        })
+        append_history(
+            path,
+            {
+                "repo": state.repo,
+                "branch": state.branch,
+                "base": state.base,
+                "stage": state.stage,
+                "exit": exit_code,
+                "rounds": len(state.rounds),
+                "fixes": state.fixes,
+                "last_verdict": state.last_verdict,
+                "cost_usd": round(state.cost_usd, 4),
+                "models": state.models_used,
+                "fallback": state.fallback,
+                "pr": state.pr_number,
+            },
+        )
     except OSError:
         pass
 
@@ -234,13 +273,19 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
     read back into the state, so the reviewer may update its own files whatever SHAs they now
     sit under: after a rewrite, after `revali reset`, or with a state that forgot them."""
     from revali import review
+
     cfg = ctx.cfg.review
     rewritten = False
     if state.rounds:
-        missing = [c for c in state.test_commits if c and not gitops.head_contains(c, ctx.repo_root)]
+        missing = [
+            c for c in state.test_commits if c and not gitops.head_contains(c, ctx.repo_root)
+        ]
         if missing:
-            log.stage("run", "the reviewer's test commits are no longer in HEAD (rebase or reset); "
-                             "the review starts over from round 1")
+            log.stage(
+                "run",
+                "the reviewer's test commits are no longer in HEAD (rebase or reset); "
+                "the review starts over from round 1",
+            )
             state.rounds, state.test_commits, state.test_files = [], [], []
             state.fixes, state.needs_info_used, state.last_verdict = 0, False, ""
             state.force_push = True  # the remote still has the dropped commits
@@ -248,19 +293,28 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
         elif state.stage == "needs_action":
             if state.last_verdict in (review.CHANGES_REQUESTED, "FAIL"):
                 if ctx.head_sha == state.head_sha:
-                    raise Stop(EXIT_ACTION, "nothing changed since the last review (HEAD %s); "
-                                            "fix, commit, then run again" % ctx.head_sha[:10])
+                    raise Stop(
+                        EXIT_ACTION,
+                        "nothing changed since the last review (HEAD %s); "
+                        "fix, commit, then run again" % ctx.head_sha[:10],
+                    )
                 state.fixes += 1
                 log.stage("run", "fix cycle %d of %d" % (state.fixes, cfg.max_fixes))
     commits, _ = review.recover_test_ownership(ctx, state, log)
     if rewritten and not commits:
-        log.stage("run", "no commit between %s and HEAD carries a %s trailer; the reviewer's earlier "
-                         "test files, if any, now count as existing files it must not modify"
-                  % (ctx.base_ref, review.TRAILER))
+        log.stage(
+            "run",
+            "no commit between %s and HEAD carries a %s trailer; the reviewer's earlier "
+            "test files, if any, now count as existing files it must not modify"
+            % (ctx.base_ref, review.TRAILER),
+        )
     if state.fixes > cfg.max_fixes:
-        raise Stop(EXIT_HUMAN, "%d fix cycles used (limit %d); a human decides how to proceed. "
-                               "Latest review: %s" % (state.fixes, cfg.max_fixes,
-                                                       os.path.join(rdir, "review-%d.md" % len(state.rounds))))
+        raise Stop(
+            EXIT_HUMAN,
+            "%d fix cycles used (limit %d); a human decides how to proceed. "
+            "Latest review: %s"
+            % (state.fixes, cfg.max_fixes, os.path.join(rdir, "review-%d.md" % len(state.rounds))),
+        )
 
 
 def _approved_round_awaiting_validation(ctx, state: State) -> int:
@@ -269,6 +323,7 @@ def _approved_round_awaiting_validation(ctx, state: State) -> int:
     the reviewed HEAD when it committed none. 0 otherwise. Called before the state takes the
     new HEAD."""
     from revali.review import APPROVE
+
     if not state.rounds:
         return 0
     last = state.rounds[-1]
@@ -288,8 +343,7 @@ def _model_label(chosen) -> str:
 
 def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     from revali import pr as prstage
-    from revali import review
-    from revali import validate
+    from revali import review, validate
 
     if not state.repo:
         # so a run that stops in preflight still names its repo in history
@@ -297,8 +351,15 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     first_pass = not state.rounds and not args.dry_run
     baseline_hook = (lambda ctx: validate.baseline(ctx, rdir, log)) if first_pass else None
     cleanup_hook = review.interruption_cleanup(state, rdir, log) if not args.dry_run else None
-    ctx = preflight(cwd, base_override=args.base or "", dry_run=args.dry_run, log=log, baseline=baseline_hook,
-                    before_tree=cleanup_hook, tolerate=state.pending_test_files)
+    ctx = preflight(
+        cwd,
+        base_override=args.base or "",
+        dry_run=args.dry_run,
+        log=log,
+        baseline=baseline_hook,
+        before_tree=cleanup_hook,
+        tolerate=state.pending_test_files,
+    )
     _rerun_bookkeeping(ctx, state, rdir, log)
     resume_round = _approved_round_awaiting_validation(ctx, state)
     state.branch, state.base = ctx.branch, ctx.base
@@ -308,9 +369,16 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     state.set_stage(rdir, "preflight", "preflight passed")
 
     if args.dry_run:
-        msg = ("dry run: would push %s, open a draft PR against %s, run reviewer %s (round %d), "
-               "then stop" % (ctx.branch, ctx.base, _model_label(review.planned_reviewer(ctx)),
-                              len(state.rounds) + 1))
+        msg = (
+            "dry run: would push %s, open a draft PR against %s, run reviewer %s (round %d), "
+            "then stop"
+            % (
+                ctx.branch,
+                ctx.base,
+                _model_label(review.planned_reviewer(ctx)),
+                len(state.rounds) + 1,
+            )
+        )
         log.stage("run", msg)
         state.set_stage(rdir, "preflight", msg, EXIT_OK)
         print("DRY RUN OK: " + msg)
@@ -321,11 +389,21 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     state.head_sha = ctx.head_sha
 
     if resume_round:
-        log.stage("run", "round %d was approved at %s but the previous run stopped before validation; "
-                         "continuing there without a new review" % (resume_round, ctx.head_sha[:10]))
+        log.stage(
+            "run",
+            "round %d was approved at %s but the previous run stopped before validation; "
+            "continuing there without a new review" % (resume_round, ctx.head_sha[:10]),
+        )
         record = state.rounds[-1]
-        return _validate_and_finish(ctx, state, rdir, log, resume_round, record.get("data", {}),
-                                    os.path.join(rdir, "review-%d.md" % resume_round))
+        return _validate_and_finish(
+            ctx,
+            state,
+            rdir,
+            log,
+            resume_round,
+            record.get("data", {}),
+            os.path.join(rdir, "review-%d.md" % resume_round),
+        )
 
     state.set_stage(rdir, "review", "reviewer round %d" % (len(state.rounds) + 1))
     outcome = review.run_round(ctx, state, rdir, log)
@@ -340,9 +418,15 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         state.head_sha = outcome.commit_sha
     comment = outcome.review_md
     if prstage.is_public(ctx):
-        comment = review.render_review_summary(outcome.data, outcome.verdict, outcome.round_no,
-                                               outcome.model_actual, outcome.cost, [a[0] for a in ctx.doc.acs],
-                                               ctx.cfg.paths.state_dir)
+        comment = review.render_review_summary(
+            outcome.data,
+            outcome.verdict,
+            outcome.round_no,
+            outcome.model_actual,
+            outcome.cost,
+            [a[0] for a in ctx.doc.acs],
+            ctx.cfg.paths.state_dir,
+        )
     prstage.post_comment(ctx, state, rdir, "review-%d" % outcome.round_no, comment, log)
 
     counts = review.counts_label(outcome.data, outcome.review_path)
@@ -351,38 +435,68 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         questions = "\n".join("  - " + q for q in outcome.data.get("questions", []))
         pending = ""
         if state.pending_test_files:
-            pending = ("\nThe reviewer's draft test files stay uncommitted in %s until the next round; "
-                       "leave them alone and do not commit them:\n%s"
-                       % (ctx.cfg.project.test_dir, "\n".join("  - " + p for p in state.pending_test_files)))
-        state.set_stage(rdir, "needs_action", "reviewer needs information (%s)" % counts, EXIT_ACTION)
+            pending = (
+                "\nThe reviewer's draft test files stay uncommitted in %s until the next round; "
+                "leave them alone and do not commit them:\n%s"
+                % (
+                    ctx.cfg.project.test_dir,
+                    "\n".join("  - " + p for p in state.pending_test_files),
+                )
+            )
+        state.set_stage(
+            rdir, "needs_action", "reviewer needs information (%s)" % counts, EXIT_ACTION
+        )
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION)
-        print("ACTION NEEDED: the reviewer has questions (round %d). Answer them in %s, adjust "
-              "change.md if the acceptance criteria were unclear, then run again.\n%s%s%s"
-              % (outcome.round_no, os.path.join(rdir, "response-%d.md" % outcome.round_no), questions,
-                 pending, others))
+        print(
+            "ACTION NEEDED: the reviewer has questions (round %d). Answer them in %s, adjust "
+            "change.md if the acceptance criteria were unclear, then run again.\n%s%s%s"
+            % (
+                outcome.round_no,
+                os.path.join(rdir, "response-%d.md" % outcome.round_no),
+                questions,
+                pending,
+                others,
+            )
+        )
         return EXIT_ACTION
     if outcome.verdict == review.CHANGES_REQUESTED:
         reasons = "\n".join("  - " + r for r in outcome.reasons)
-        state.set_stage(rdir, "needs_action", "changes requested in round %d (%s)" % (outcome.round_no, counts),
-                        EXIT_ACTION)
+        state.set_stage(
+            rdir,
+            "needs_action",
+            "changes requested in round %d (%s)" % (outcome.round_no, counts),
+            EXIT_ACTION,
+        )
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION)
-        print("ACTION NEEDED: changes requested (round %d, fix cycle %d of %d). Full review: %s\n"
-              "Fix what blocks, or answer each finding in %s (fixed / wontfix: <reason>), commit, run again.\n%s%s"
-              % (outcome.round_no, state.fixes, ctx.cfg.review.max_fixes, outcome.review_path,
-                 os.path.join(rdir, "response-%d.md" % outcome.round_no), reasons, others))
+        print(
+            "ACTION NEEDED: changes requested (round %d, fix cycle %d of %d). Full review: %s\n"
+            "Fix what blocks, or answer each finding in %s (fixed / wontfix: <reason>), "
+            "commit, run again.\n%s%s"
+            % (
+                outcome.round_no,
+                state.fixes,
+                ctx.cfg.review.max_fixes,
+                outcome.review_path,
+                os.path.join(rdir, "response-%d.md" % outcome.round_no),
+                reasons,
+                others,
+            )
+        )
         return EXIT_ACTION
 
-    return _validate_and_finish(ctx, state, rdir, log, outcome.round_no, outcome.data, outcome.review_path)
+    return _validate_and_finish(
+        ctx, state, rdir, log, outcome.round_no, outcome.data, outcome.review_path
+    )
 
 
-def _validate_and_finish(ctx, state: State, rdir: str, log: RunLog, round_no: int, data: dict,
-                         review_path: str) -> int:
+def _validate_and_finish(
+    ctx, state: State, rdir: str, log: RunLog, round_no: int, data: dict, review_path: str
+) -> int:
     """After an APPROVE (this run's, or one a previous run recorded and never validated)."""
     from revali import pr as prstage
-    from revali import review
-    from revali import validate
+    from revali import review, validate
 
     counts = review.counts_label(data, review_path)
     others = review.non_blocking_note(data, round_no, review_path, rdir)
@@ -397,13 +511,19 @@ def _validate_and_finish(ctx, state: State, rdir: str, log: RunLog, round_no: in
 
     if vout.result == validate.FAIL:
         summary = validate.summary_for_author(vout, rdir)
-        state.set_stage(rdir, "needs_action", "validation %d failed at %s (%s)"
-                        % (vout.number, vout.failed_step, counts), EXIT_ACTION)
+        state.set_stage(
+            rdir,
+            "needs_action",
+            "validation %d failed at %s (%s)" % (vout.number, vout.failed_step, counts),
+            EXIT_ACTION,
+        )
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION)
-        print("ACTION NEEDED: %s\nFix (or correct the test if the diagnosis says the test is wrong, and say so "
-              "in %s), commit, run again.%s"
-              % (summary, os.path.join(rdir, "response-%d.md" % round_no), others))
+        print(
+            "ACTION NEEDED: %s\nFix (or correct the test if the diagnosis says the test is wrong, "
+            "and say so in %s), commit, run again.%s"
+            % (summary, os.path.join(rdir, "response-%d.md" % round_no), others)
+        )
         return EXIT_ACTION
 
     state.set_stage(rdir, "ready_to_merge", "validation %d passed" % vout.number, EXIT_OK)
@@ -415,28 +535,48 @@ def _validate_and_finish(ctx, state: State, rdir: str, log: RunLog, round_no: in
         flags.append("a reviewer round ran on a fallback model")
     if not state.test_files and ctx.doc.kind in ("feature", "fix"):
         flags.append("no runnable tests were written")
-    print("READY TO MERGE: %s (PR %s)\n  review rounds: %d, fix cycles: %d, validation: %s%s\n"
-          "  tests landing: %s\n  cost: $%.2f, models: %s\n  merge with: revali merge; "
-          "the PR is no longer a draft%s"
-          % (ctx.doc.title, state.pr_url or "#%d" % state.pr_number, len(state.rounds), state.fixes,
-             vout.result, " (%s)" % vout.skipped_reason if vout.skipped_reason else "",
-             ", ".join(state.test_files) or "none", state.cost_usd, ", ".join(state.models_used) or "-",
-             "\n  note: " + "; ".join(flags) if flags else ""))
+    print(
+        "READY TO MERGE: %s (PR %s)\n  review rounds: %d, fix cycles: %d, validation: %s%s\n"
+        "  tests landing: %s\n  cost: $%.2f, models: %s\n  merge with: revali merge; "
+        "the PR is no longer a draft%s"
+        % (
+            ctx.doc.title,
+            state.pr_url or "#%d" % state.pr_number,
+            len(state.rounds),
+            state.fixes,
+            vout.result,
+            " (%s)" % vout.skipped_reason if vout.skipped_reason else "",
+            ", ".join(state.test_files) or "none",
+            state.cost_usd,
+            ", ".join(state.models_used) or "-",
+            "\n  note: " + "; ".join(flags) if flags else "",
+        )
+    )
     return EXIT_OK
 
 
 # ---- preflight --------------------------------------------------------------
 
+
 def cmd_preflight(args) -> int:
     cwd = os.getcwd()
     rdir = _rdir_for(cwd)
     root = gitops.repo_root(cwd)
-    log = RunLog(rdir if rdir and os.path.isdir(rdir) else None, verbose=args.verbose,
-                 logs_dir=paths_for(root).logs_dir if root else "")
+    log = RunLog(
+        rdir if rdir and os.path.isdir(rdir) else None,
+        verbose=args.verbose,
+        logs_dir=paths_for(root).logs_dir if root else "",
+    )
     state = (State.load(rdir) if rdir else None) or State()
     try:
         # the same view of the tree as `run`: a NEEDS_INFO round's files may be dirty
-        preflight(cwd, base_override=args.base or "", dry_run=True, log=log, tolerate=state.pending_test_files)
+        preflight(
+            cwd,
+            base_override=args.base or "",
+            dry_run=True,
+            log=log,
+            tolerate=state.pending_test_files,
+        )
     except Stop as stop:
         _print_stop(stop)
         return stop.exit_code
@@ -445,6 +585,7 @@ def cmd_preflight(args) -> int:
 
 
 # ---- wait / status / reset / clean / stop -----------------------------------
+
 
 def parse_duration(text: str) -> float:
     text = str(text).strip().lower()
@@ -474,9 +615,14 @@ def cmd_wait(args) -> int:
             if run_died(state):
                 lock = read_lock(rdir)  # stale when present: nobody alive owns it
                 release_lock(rdir)
-                print("error: the run%s died at stage '%s' without a result; see %s"
-                      % (" (pid %s)" % lock.get("pid") if lock else "", state.stage,
-                         _run_log_path(rdir)))
+                print(
+                    "error: the run%s died at stage '%s' without a result; see %s"
+                    % (
+                        " (pid %s)" % lock.get("pid") if lock else "",
+                        state.stage,
+                        _run_log_path(rdir),
+                    )
+                )
                 return EXIT_ERROR
             print("%s: %s" % (state.stage, state.message))
             return state.last_exit if state.last_exit >= 0 else EXIT_ERROR
@@ -506,8 +652,10 @@ def cmd_status(args) -> int:
     else:
         print("stage: %s" % state.stage)
         if not pid and run_died(state):
-            print("running: no; the last run stopped at stage '%s' without a result (see %s)"
-                  % (state.stage, _run_log_path(rdir)))
+            print(
+                "running: no; the last run stopped at stage '%s' without a result (see %s)"
+                % (state.stage, _run_log_path(rdir))
+            )
         if state.message:
             print("message: %s" % state.message)
         print("round: %d, fixes: %d, cost: $%.2f" % (state.round, state.fixes, state.cost_usd))
@@ -521,9 +669,16 @@ def cmd_status(args) -> int:
         res = gitops._git(["for-each-ref", "--format=%(refname:short)", "refs/heads/"], root)
         for line in res.stdout.splitlines():
             existing.add(safe_branch(line.strip()))
-        stale = [d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d)) and d not in existing]
+        stale = [
+            d
+            for d in os.listdir(base)
+            if os.path.isdir(os.path.join(base, d)) and d not in existing
+        ]
         if stale:
-            print("stale review dirs (branch no longer exists): %s  -> `revali clean <name>`" % ", ".join(stale))
+            print(
+                "stale review dirs (branch no longer exists): %s  -> `revali clean <name>`"
+                % ", ".join(stale)
+            )
     return EXIT_OK
 
 
@@ -555,14 +710,19 @@ def _reset_test_dir(state: State, rdir: str) -> None:
     untracked drafts deleted, a modified tracked file of the reviewer's own restored from HEAD.
     Without a usable project (config, change.md) the paths are printed for the author instead."""
     from revali import review
+
     cwd = os.getcwd()
     pending = list(state.pending_test_files)
 
     def by_hand(reason: str, paths) -> None:
-        listed = list(paths) or ["(the interrupted session's untracked files under test_dir "
-                                 "matching test_file_pattern)"]
-        print("could not clean up the reviewer's uncommitted test files (%s); delete them by hand "
-              "before the next run:\n  %s" % (reason, "\n  ".join(listed)))
+        listed = list(paths) or [
+            "(the interrupted session's untracked files under test_dir "
+            "matching test_file_pattern)"
+        ]
+        print(
+            "could not clean up the reviewer's uncommitted test files (%s); delete them by hand "
+            "before the next run:\n  %s" % (reason, "\n  ".join(listed))
+        )
 
     try:
         ctx = locate(cwd)
@@ -570,8 +730,9 @@ def _reset_test_dir(state: State, rdir: str) -> None:
         # an interrupted session's files are not known, so that case sweeps the whole pattern;
         # otherwise only the pending list is the reviewer's, an author's own draft stays
         only = None if state.reviewer_running else pending
-        review.discard_round_leftovers(ctx, state, log, "the reviewer", stage="reset", only=only,
-                                       tolerated_next_run=False)
+        review.discard_round_leftovers(
+            ctx, state, log, "the reviewer", stage="reset", only=only, tolerated_next_run=False
+        )
     except (Stop, gitops.GitError) as exc:
         message = exc.message if isinstance(exc, Stop) else str(exc)
         by_hand(message.splitlines()[0], pending)
@@ -617,7 +778,7 @@ def cmd_stop(args) -> int:
         # of a run that died; on a branch, a stale record for another branch is ignored and
         # removed as before. Read it before tree_lock_owner removes it.
         record = read_tree_lock(tpath) if branch == "HEAD" else None
-        owner = tree_lock_owner(tpath)   # a stale file goes here
+        owner = tree_lock_owner(tpath)  # a stale file goes here
         named = owner or record
         if named and named.get("branch"):
             branch = str(named["branch"])
@@ -634,11 +795,17 @@ def cmd_stop(args) -> int:
             # and `status` stop reporting a death. Only the outcome fields change; what the
             # next run needs (reviewer_running, pending files, rounds, head_sha) stays.
             died_at = state.stage
-            if not _close_stopped(state, rdir,
-                                  "found dead at stage '%s' with no result recorded; marked stopped "
-                                  "by `revali stop`" % died_at):
+            if not _close_stopped(
+                state,
+                rdir,
+                "found dead at stage '%s' with no result recorded; marked stopped "
+                "by `revali stop`" % died_at,
+            ):
                 return EXIT_ERROR
-            print("no live process; the run found dead at stage '%s' is now recorded as stopped" % died_at)
+            print(
+                "no live process; the run found dead at stage '%s' is now recorded as stopped"
+                % died_at
+            )
             return EXIT_OK
         print("no run in progress")
         return EXIT_OK
@@ -651,7 +818,9 @@ def cmd_stop(args) -> int:
     release_tree_lock(tpath)
     state = State.load(rdir)
     print("stopped pid %d" % pid)
-    if state is not None and not _close_stopped(state, rdir, "stopped by user at stage '%s'" % state.stage):
+    if state is not None and not _close_stopped(
+        state, rdir, "stopped by user at stage '%s'" % state.stage
+    ):
         return EXIT_ERROR
     return EXIT_OK
 
@@ -667,8 +836,10 @@ def _close_stopped(state: State, rdir: str, message: str) -> bool:
     except OSError as exc:
         # set_stage assigns the outcome, and save stamps the timestamps, before the write
         state.stage, state.message, state.last_exit, state.started_at, state.updated_at = before
-        print("ERROR: the state file could not be updated (%s); `wait` and `status` will report "
-              "the run as dead; run `revali stop` again once the file is free" % exc)
+        print(
+            "ERROR: the state file could not be updated (%s); `wait` and `status` will report "
+            "the run as dead; run `revali stop` again once the file is free" % exc
+        )
         return False
     _record_history(state, EXIT_ERROR)
     return True
@@ -676,6 +847,7 @@ def _close_stopped(state: State, rdir: str, message: str) -> bool:
 
 def cmd_merge(args) -> int:
     from revali import merge
+
     cwd = os.getcwd()
     found = _located(cwd)
     if not found:
@@ -684,20 +856,22 @@ def cmd_merge(args) -> int:
     _print_identity(root, branch)
     state = State.load(rdir)
     if state is None or state.stage != "ready_to_merge":
-        print("ERROR: this branch is not ready to merge (stage: %s); run `revali run` first"
-              % (state.stage if state else "none"))
+        print(
+            "ERROR: this branch is not ready to merge (stage: %s); run `revali run` first"
+            % (state.stage if state else "none")
+        )
         return EXIT_ERROR
     tpath = _tree_lock_path(root)
     if lock_owner_alive(rdir) or tree_lock_owner(tpath):
         print("ERROR: a run is in progress")
         return EXIT_ERROR
     try:
-        acquire_lock(rdir)   # a `run` may have taken it since the check above
+        acquire_lock(rdir)  # a `run` may have taken it since the check above
     except LockHeld as exc:
         print("ERROR: %s" % exc)
         return EXIT_ERROR
     try:
-        acquire_tree_lock(tpath, branch)   # the checkout and pull below must not race a `run`
+        acquire_tree_lock(tpath, branch)  # the checkout and pull below must not race a `run`
     except TreeLockHeld as exc:
         release_lock(rdir)
         print(_tree_held_message({"pid": exc.pid, "branch": exc.branch}))

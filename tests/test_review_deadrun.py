@@ -7,15 +7,16 @@ as the file is released, and still ends the run with `ERROR:` lines and exit 1 w
 never is (round 1, F2). A run that dies before recording its first stage is a death even
 when the stage on disk is a previous run's terminal one, and the handler's message says
 which case it is in (round 2, F1); a `Stop` whose record is blocked keeps its exit code."""
+
 import contextlib
 import io
 import os
 import unittest
 from unittest import mock
 
-from tests.helpers import RepoCase, claude_entry, run_cli
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.state import State, lock_path, read_history, write_json_atomic
+from tests.helpers import RepoCase, claude_entry, run_cli
 
 
 class DeadRunCase(RepoCase):
@@ -23,13 +24,20 @@ class DeadRunCase(RepoCase):
         return os.path.join(self.rdir(), "logs", "run.log")
 
     def revali_log(self):
-        with open(os.path.join(self.rdir(), "logs", "revali.log"), "r", encoding="utf-8", newline="") as fh:
+        with open(
+            os.path.join(self.rdir(), "logs", "revali.log"), "r", encoding="utf-8", newline=""
+        ) as fh:
             return fh.read()
 
     def dead_state(self, stage, last_exit=-1):
         """What a killed process leaves: a non-terminal stage, no handler ran, no lock."""
-        State(branch="feature/mul", base="main", stage=stage, message="previous run at %s" % stage,
-              last_exit=last_exit).save(self.rdir())
+        State(
+            branch="feature/mul",
+            base="main",
+            stage=stage,
+            message="previous run at %s" % stage,
+            last_exit=last_exit,
+        ).save(self.rdir())
 
 
 class UnexpectedErrorIsRecorded(DeadRunCase):
@@ -41,18 +49,20 @@ class UnexpectedErrorIsRecorded(DeadRunCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-2: exits 1
-        self.assertIn("ERROR:", out)                                                           # AC-2: printed
-        self.assertIn("review-1.md", out)                                                      # ... with the exception text
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-2: exits 1
+        self.assertIn("ERROR:", out)  # AC-2: printed
+        self.assertIn("review-1.md", out)  # ... with the exception text
         state = State.load(self.rdir())
-        self.assertEqual(state.stage, "error")                                                 # AC-2: stage error
+        self.assertEqual(state.stage, "error")  # AC-2: stage error
         self.assertEqual(state.last_exit, EXIT_ERROR)
-        self.assertIn("review-1.md", state.message)                                            # AC-2: exception text in message
-        self.assertFalse(os.path.isfile(lock_path(self.rdir())))                               # AC-2: lock released
+        self.assertIn("review-1.md", state.message)  # AC-2: exception text in message
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))  # AC-2: lock released
         rows = read_history(os.path.join(self.home, "history.jsonl"))
-        self.assertEqual(rows[-1]["exit"], EXIT_ERROR)                                         # AC-2: history line
+        self.assertEqual(rows[-1]["exit"], EXIT_ERROR)  # AC-2: history line
         self.assertEqual(rows[-1]["stage"], "error")
-        self.assertIn("Traceback (most recent call last)", err.getvalue())                     # AC-2: traceback to the run log (stderr)
+        self.assertIn(
+            "Traceback (most recent call last)", err.getvalue()
+        )  # AC-2: traceback to the run log (stderr)
         self.assertIn("Traceback (most recent call last)", self.revali_log())
         # a recorded error is a result: wait and status report it, not a death
         code, out = run_cli(["wait", "--timeout", "1s"])
@@ -99,67 +109,75 @@ class StateFileCannotBeWritten(DeadRunCase):
         err = io.StringIO()
         with mock.patch("revali.state.os.replace", replace):
             with contextlib.redirect_stderr(err):
-                code, out = run_cli(["run", "--foreground"])                 # returns: nothing escapes to the caller
+                code, out = run_cli(
+                    ["run", "--foreground"]
+                )  # returns: nothing escapes to the caller
         return code, out, err.getvalue()
 
     def test_the_handler_records_the_error_once_the_reader_lets_go(self):
         replace = DenyStateJson(first_write_only=True)
         code, out, err = self.run_with(replace)
-        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-2: exits 1
-        self.assertIn("ERROR: the run stopped", out)                                           # AC-2: ERROR printed
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-2: exits 1
+        self.assertIn("ERROR: the run stopped", out)  # AC-2: ERROR printed
         self.assertIn("PermissionError", out)
-        self.assertNotIn("could not be updated", out)                                          # the handler's write landed
-        self.assertGreater(replace.denied, 1)                                                  # AC-1: retried before giving up
+        self.assertNotIn("could not be updated", out)  # the handler's write landed
+        self.assertGreater(replace.denied, 1)  # AC-1: retried before giving up
         state = State.load(self.rdir())
-        self.assertEqual(state.stage, "error")                                                 # AC-2: stage error recorded
+        self.assertEqual(state.stage, "error")  # AC-2: stage error recorded
         self.assertEqual(state.last_exit, EXIT_ERROR)
-        self.assertIn("PermissionError", state.message)                                        # AC-2: exception text
-        self.assertFalse(os.path.isfile(lock_path(self.rdir())))                               # AC-2: lock released
+        self.assertIn("PermissionError", state.message)  # AC-2: exception text
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))  # AC-2: lock released
         rows = read_history(os.path.join(self.home, "history.jsonl"))
-        self.assertEqual(rows[-1]["exit"], EXIT_ERROR)                                         # AC-2: history line
+        self.assertEqual(rows[-1]["exit"], EXIT_ERROR)  # AC-2: history line
         self.assertEqual(rows[-1]["stage"], "error")
-        self.assertIn("PermissionError", err)                                                  # AC-2: traceback kept
+        self.assertIn("PermissionError", err)  # AC-2: traceback kept
         self.assertIn("PermissionError", self.revali_log())
-        self.assertEqual(self.fake_calls("claude"), [])                                        # no reviewer was paid for
+        self.assertEqual(self.fake_calls("claude"), [])  # no reviewer was paid for
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertTrue(out.split("\n", 1)[1].startswith("error:"), out)                                         # the recorded result, not a death
+        self.assertTrue(
+            out.split("\n", 1)[1].startswith("error:"), out
+        )  # the recorded result, not a death
         self.assertNotIn("died", out)
 
     def test_a_state_file_that_never_frees_still_ends_with_error_lines_and_exit_1(self):
         replace = DenyStateJson(first_write_only=False)
         code, out, err = self.run_with(replace)
-        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-2: exits 1, no raw traceback escapes
-        self.assertIn("ERROR: the run stopped", out)                                           # AC-2: ERROR printed
-        self.assertIn("ERROR:", out.split("ERROR: the run stopped", 1)[1])                     # ... and the failed record is said, too
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-2: exits 1, no raw traceback escapes
+        self.assertIn("ERROR: the run stopped", out)  # AC-2: ERROR printed
+        self.assertIn(
+            "ERROR:", out.split("ERROR: the run stopped", 1)[1]
+        )  # ... and the failed record is said, too
         self.assertIn("could not be updated", out)
-        self.assertIn("before its first stage", out)                                           # round 2 F1: no stage was reached
+        self.assertIn("before its first stage", out)  # round 2 F1: no stage was reached
         self.assertNotIn("last recorded stage", out)
-        self.assertIn("previous run's result", out)                                            # ... and what wait will show
+        self.assertIn("previous run's result", out)  # ... and what wait will show
         self.assertNotIn("as dead", out)
-        self.assertFalse(os.path.isfile(lock_path(self.rdir())))                               # AC-2: lock released
-        self.assertIsNone(State.load(self.rdir()))                                             # nothing could be recorded
-        self.assertIn("PermissionError", err)                                                  # AC-2: traceback to the run log
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))  # AC-2: lock released
+        self.assertIsNone(State.load(self.rdir()))  # nothing could be recorded
+        self.assertIn("PermissionError", err)  # AC-2: traceback to the run log
         self.assertIn("could not be updated", self.revali_log())
         self.assertEqual(self.fake_calls("claude"), [])
         code, out = run_cli(["wait", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_ERROR, out)                                                # no stale success either way
+        self.assertEqual(code, EXIT_ERROR, out)  # no stale success either way
 
     def test_a_blocked_first_save_leaves_the_previous_result_and_says_so(self):
         # round 2 F1: the previous run finished (exit 2); this run's very first write is what
         # fails, so nothing of it lands, and the note must promise the previous result, not a death
         self.dead_state("needs_action", last_exit=EXIT_ACTION)
         code, out, err = self.run_with(DenyStateJson(first_write_only=False))
-        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-2: this run exits 1
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-2: this run exits 1
         self.assertIn("ERROR: the run stopped with PermissionError", out)
-        self.assertIn("before its first stage", out)                                           # not "stage 'needs_action'"
+        self.assertIn("before its first stage", out)  # not "stage 'needs_action'"
         self.assertNotIn("needs_action", out.split("could not be updated", 1)[0])
         self.assertIn("still show the previous run's result", out)
         self.assertFalse(os.path.isfile(lock_path(self.rdir())))
         state = State.load(self.rdir())
-        self.assertEqual((state.stage, state.last_exit), ("needs_action", EXIT_ACTION))        # untouched on disk
+        self.assertEqual(
+            (state.stage, state.last_exit), ("needs_action", EXIT_ACTION)
+        )  # untouched on disk
         code, out = run_cli(["wait", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_ACTION, out)                                               # the note was true
+        self.assertEqual(code, EXIT_ACTION, out)  # the note was true
         self.assertTrue(out.split("\n", 1)[1].startswith("needs_action:"), out)
         self.assertNotIn("died", out)
         code, out = run_cli(["status"])
@@ -172,8 +190,8 @@ class StateFileCannotBeWritten(DeadRunCase):
             with contextlib.redirect_stderr(err):
                 code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertIn("boom in review", out)                                                   # AC-2: the exception text
-        self.assertIn("last recorded stage 'review'", out)                                     # round 2 F1: the stage it reached
+        self.assertIn("boom in review", out)  # AC-2: the exception text
+        self.assertIn("last recorded stage 'review'", out)  # round 2 F1: the stage it reached
         self.assertNotIn("before its first stage", out)
         state = State.load(self.rdir())
         self.assertEqual(state.stage, "error")
@@ -194,6 +212,7 @@ def deny_state_json_after(n):
             if len(seen) > n:
                 raise PermissionError(13, "Access is denied")
         real(src, dst)
+
     return replace
 
 
@@ -214,18 +233,18 @@ class StopWithABlockedRecord(DeadRunCase):
         with mock.patch("revali.state.os.replace", deny_state_json_after(1)):
             with contextlib.redirect_stderr(err):
                 code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_ERROR, out)                                                # the Stop's own code
-        self.assertIn("not clean", out)                                                        # the Stop's own message
+        self.assertEqual(code, EXIT_ERROR, out)  # the Stop's own code
+        self.assertIn("not clean", out)  # the Stop's own message
         self.assertIn("could not be updated", out)
-        self.assertIn("as dead", out)                                                          # the start mark is on disk
-        self.assertNotIn("Traceback", err.getvalue())                                          # not the catch-all path
+        self.assertIn("as dead", out)  # the start mark is on disk
+        self.assertNotIn("Traceback", err.getvalue())  # not the catch-all path
         self.assertNotIn("Traceback", out)
         self.assertFalse(os.path.isfile(lock_path(self.rdir())))
         self.assertEqual(self.fake_calls("claude"), [])
         state = State.load(self.rdir())
-        self.assertEqual(state.last_exit, -1)                                                  # only the start mark landed
+        self.assertEqual(state.last_exit, -1)  # only the start mark landed
         code, out = run_cli(["wait", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-3: a death, exit 1
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-3: a death, exit 1
         self.assertIn("without a result", out)
         code, out = run_cli(["status"])
         self.assertIn("without a result", out)
@@ -233,20 +252,29 @@ class StopWithABlockedRecord(DeadRunCase):
 
 class VanishedRunIsReported(DeadRunCase):
     def test_wait_and_status_report_the_death_not_the_stale_exit_code(self):
-        self.dead_state("review", last_exit=EXIT_ACTION)          # exit 2 left over from an earlier, finished round
+        self.dead_state(
+            "review", last_exit=EXIT_ACTION
+        )  # exit 2 left over from an earlier, finished round
         code, out = run_cli(["wait", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-3: returns 1, not 2
-        self.assertIn("died at stage 'review'", out)                                           # AC-3: the stage
-        self.assertIn(self.run_log(), out)                                                     # AC-3: where the log is
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-3: returns 1, not 2
+        self.assertIn("died at stage 'review'", out)  # AC-3: the stage
+        self.assertIn(self.run_log(), out)  # AC-3: where the log is
         code, out = run_cli(["status"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("stage: review", out)
-        self.assertIn("without a result", out)                                                 # AC-3: status says the same
+        self.assertIn("without a result", out)  # AC-3: status says the same
         self.assertIn(self.run_log(), out)
-        self.assertLess(out.index("stage: review"), out.index("without a result"))             # ... after the stage line
+        self.assertLess(
+            out.index("stage: review"), out.index("without a result")
+        )  # ... after the stage line
         # a terminal stage is still reported as before
-        State(branch="feature/mul", base="main", stage="needs_action", message="changes requested in round 1",
-              last_exit=EXIT_ACTION).save(self.rdir())
+        State(
+            branch="feature/mul",
+            base="main",
+            stage="needs_action",
+            message="changes requested in round 1",
+            last_exit=EXIT_ACTION,
+        ).save(self.rdir())
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ACTION, out)
         self.assertNotIn("died", out)
@@ -258,32 +286,34 @@ class VanishedRunIsReported(DeadRunCase):
             with self.subTest(stage=stage):
                 self.dead_state(stage)
                 code, out = run_cli(["wait", "--timeout", "1s"])
-                self.assertEqual(code, EXIT_ERROR, out)                                        # AC-3
+                self.assertEqual(code, EXIT_ERROR, out)  # AC-3
                 self.assertIn("died at stage '%s'" % stage, out)
                 code, out = run_cli(["status"])
                 self.assertIn("stopped at stage '%s' without a result" % stage, out)
 
     def test_a_stale_lock_changes_nothing_but_is_removed(self):
         self.dead_state("validate")
-        write_json_atomic(lock_path(self.rdir()), {"pid": 999999999, "since": "2026-09-01T00:00:00"})
+        write_json_atomic(
+            lock_path(self.rdir()), {"pid": 999999999, "since": "2026-09-01T00:00:00"}
+        )
         code, out = run_cli(["status"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertNotIn("running: yes", out)
-        self.assertIn("without a result", out)                                                 # AC-3: with a stale lock
+        self.assertIn("without a result", out)  # AC-3: with a stale lock
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn("died at stage 'validate'", out)
         self.assertIn(self.run_log(), out)
-        self.assertFalse(os.path.isfile(lock_path(self.rdir())))                               # the stale lock is gone
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))  # the stale lock is gone
         code, out = run_cli(["wait", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-3: and without it
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-3: and without it
         self.assertIn("died at stage 'validate'", out)
 
     def test_a_finished_dry_run_is_a_result_but_a_kill_during_preflight_is_not(self):
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)
         code, out = run_cli(["wait", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_OK, out)                                                   # the dry run's own result
+        self.assertEqual(code, EXIT_OK, out)  # the dry run's own result
         self.assertNotIn("died", out)
         code, out = run_cli(["status"])
         self.assertNotIn("without a result", out)
@@ -294,7 +324,7 @@ class VanishedRunIsReported(DeadRunCase):
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertFalse(os.path.isfile(lock_path(self.rdir())))
         code, out = run_cli(["wait", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-3: not the stale 0
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-3: not the stale 0
         self.assertIn("died at stage 'preflight'", out)
         code, out = run_cli(["status"])
         self.assertIn("without a result", out)
@@ -304,24 +334,26 @@ class VanishedRunIsReported(DeadRunCase):
         # come back from `wait` once a new run started and vanished
         self.dead_state("needs_action", last_exit=EXIT_ACTION)
         code, out = run_cli(["wait", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_ACTION, out)                                               # before: the recorded result
+        self.assertEqual(code, EXIT_ACTION, out)  # before: the recorded result
         self.claude(claude_entry())
         with mock.patch("revali.pipeline.preflight", side_effect=KeyboardInterrupt):
             code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertFalse(os.path.isfile(lock_path(self.rdir())))
         state = State.load(self.rdir())
-        self.assertEqual(state.last_exit, -1)                                                  # a run began, no result
-        self.assertEqual(state.stage, "needs_action")                                          # the stage is not rewritten
+        self.assertEqual(state.last_exit, -1)  # a run began, no result
+        self.assertEqual(state.stage, "needs_action")  # the stage is not rewritten
         code, out = run_cli(["wait", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_ERROR, out)                                                # AC-3: not the stale 2
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-3: not the stale 2
         self.assertIn("without a result", out)
         self.assertIn(self.run_log(), out)
         code, out = run_cli(["status"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("without a result", out)
         # and a stale lock from that run changes nothing but is removed
-        write_json_atomic(lock_path(self.rdir()), {"pid": 999999999, "since": "2026-09-01T00:00:00"})
+        write_json_atomic(
+            lock_path(self.rdir()), {"pid": 999999999, "since": "2026-09-01T00:00:00"}
+        )
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn("without a result", out)

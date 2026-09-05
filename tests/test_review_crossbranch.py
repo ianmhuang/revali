@@ -13,6 +13,7 @@ Black-box through the CLI on the fixture repository (fake gh / claude / runner, 
 Locks and state are written directly to stage each outcome. On the base branch `wait` has
 no `--branch`, `stop` only sees the checked-out branch, and `stop` / `reset` / `merge` /
 `clean` do not print the identity line, so every test here fails there."""
+
 import argparse
 import json
 import os
@@ -20,13 +21,12 @@ import subprocess
 import sys
 import unittest
 
-from tests.helpers import RepoCase, git, run_cli
-from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
-from revali import gitops
+from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops
 from revali.state import State, lock_path, read_history
+from tests.helpers import RepoCase, git, run_cli
 
-EXIT_STILL_RUNNING = 4          # `wait` only, fixed by CONVENTIONS.md
-DEAD_PID = 999999999            # no such process on any host
+EXIT_STILL_RUNNING = 4  # `wait` only, fixed by CONVENTIONS.md
+DEAD_PID = 999999999  # no such process on any host
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -55,30 +55,40 @@ class CrossBranchCase(RepoCase):
         return out.splitlines()
 
     def state(self, stage, message, last_exit, **fields):
-        State(repo="me/sample", branch="feature/mul", base="main", stage=stage, message=message,
-              last_exit=last_exit, **fields).save(self.rdir())
+        State(
+            repo="me/sample",
+            branch="feature/mul",
+            base="main",
+            stage=stage,
+            message=message,
+            last_exit=last_exit,
+            **fields,
+        ).save(self.rdir())
 
     def live_child(self):
-        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],
-                                 start_new_session=True)   # own group: kill_tree uses killpg on POSIX
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(120)"], start_new_session=True
+        )  # own group: kill_tree uses killpg on POSIX
         self.addCleanup(lambda: child.poll() is None and child.kill())
         return child
 
 
 class WaitForAnotherBranch(CrossBranchCase):
-    def test_a_recorded_result_from_main(self):                                        # AC-3
+    def test_a_recorded_result_from_main(self):  # AC-3
         self.state("needs_action", "changes requested in round 1 (2 findings)", EXIT_ACTION)
         git(["checkout", "-q", "main"], self.repo)
         code, out = run_cli(["wait", "--branch", "feature/mul", "--timeout", "1s"])
-        self.assertEqual(code, EXIT_ACTION, out)                                       # the run's own exit code
+        self.assertEqual(code, EXIT_ACTION, out)  # the run's own exit code
         lines = self.lines(out)
-        self.assertEqual(lines[0], self.identity("feature/mul"))                       # names <b>, not main
+        self.assertEqual(lines[0], self.identity("feature/mul"))  # names <b>, not main
         self.assertEqual(lines[1], "needs_action: changes requested in round 1 (2 findings)")
 
-    def test_ready_to_merge_and_error_from_main(self):                                 # AC-3
+    def test_ready_to_merge_and_error_from_main(self):  # AC-3
         git(["checkout", "-q", "main"], self.repo)
-        for stage, message, exit_code in (("ready_to_merge", "validation 1 passed", EXIT_OK),
-                                          ("error", "configuration: bad key", EXIT_ERROR)):
+        for stage, message, exit_code in (
+            ("ready_to_merge", "validation 1 passed", EXIT_OK),
+            ("error", "configuration: bad key", EXIT_ERROR),
+        ):
             with self.subTest(stage=stage):
                 self.state(stage, message, exit_code)
                 code, out = run_cli(["wait", "--branch", "feature/mul", "--timeout", "1s"])
@@ -86,7 +96,7 @@ class WaitForAnotherBranch(CrossBranchCase):
                 self.assertEqual(self.lines(out)[0], self.identity("feature/mul"))
                 self.assertEqual(self.lines(out)[1], "%s: %s" % (stage, message))
 
-    def test_still_running_from_main(self):                                            # AC-3
+    def test_still_running_from_main(self):  # AC-3
         self.state("review", "reviewer round 1", -1)
         self.hold_branch_lock(os.getpid())
         self.hold_tree_lock("feature/mul", os.getpid())
@@ -96,7 +106,7 @@ class WaitForAnotherBranch(CrossBranchCase):
         self.assertEqual(self.lines(out)[0], self.identity("feature/mul"))
         self.assertIn("still running (pid %d), stage review" % os.getpid(), out)
 
-    def test_no_run_recorded_for_that_branch(self):                                    # AC-3
+    def test_no_run_recorded_for_that_branch(self):  # AC-3
         git(["checkout", "-q", "main"], self.repo)
         code, out = run_cli(["wait", "--branch", "feature/nothing", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR, out)
@@ -105,39 +115,48 @@ class WaitForAnotherBranch(CrossBranchCase):
 
 
 class StopActsOnTheTreesRun(CrossBranchCase):
-    def test_stop_from_main_kills_the_run_of_the_other_branch(self):                   # AC-3
+    def test_stop_from_main_kills_the_run_of_the_other_branch(self):  # AC-3
         child = self.live_child()
-        self.state("review", "reviewer round 1", -1, reviewer_running=True,
-                   pending_test_files=["tests/test_review_x.py"], rounds=[], fixes=1)
+        self.state(
+            "review",
+            "reviewer round 1",
+            -1,
+            reviewer_running=True,
+            pending_test_files=["tests/test_review_x.py"],
+            rounds=[],
+            fixes=1,
+        )
         self.hold_branch_lock(child.pid)
         self.hold_tree_lock("feature/mul", child.pid)
         git(["checkout", "-q", "main"], self.repo)
         code, out = run_cli(["stop"])
         self.assertEqual(code, EXIT_OK, out)
         lines = self.lines(out)
-        self.assertEqual(lines[0], self.identity("feature/mul"))                       # that branch's identity line
+        self.assertEqual(lines[0], self.identity("feature/mul"))  # that branch's identity line
         self.assertIn("stopped pid %d" % child.pid, out)
         self.assertNotIn("no run in progress", out)
-        child.wait(timeout=10)                                                         # the process is gone
+        child.wait(timeout=10)  # the process is gone
         state = State.load(self.rdir())
-        self.assertEqual(state.stage, "stopped")                                       # closed like `stop` today
+        self.assertEqual(state.stage, "stopped")  # closed like `stop` today
         self.assertEqual(state.last_exit, EXIT_ERROR)
         self.assertIn("stopped by user", state.message)
         self.assertIn("'review'", state.message)
-        self.assertTrue(state.reviewer_running)                                        # cleanup flags kept
+        self.assertTrue(state.reviewer_running)  # cleanup flags kept
         self.assertEqual(state.pending_test_files, ["tests/test_review_x.py"])
         self.assertEqual(state.fixes, 1)
-        self.assertFalse(os.path.isfile(lock_path(self.rdir())))                       # both locks released
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))  # both locks released
         self.assertFalse(os.path.isfile(self.tree_lock()))
         rows = read_history(os.path.join(self.home, "history.jsonl"))
         self.assertTrue(rows, "no history row was appended")
-        self.assertEqual(rows[-1]["stage"], "stopped")                                 # history row for that branch
+        self.assertEqual(rows[-1]["stage"], "stopped")  # history row for that branch
         self.assertEqual(rows[-1]["branch"], "feature/mul")
         self.assertEqual(rows[-1]["exit"], EXIT_ERROR)
-        self.assertEqual(gitops.current_branch(self.repo), "main")                     # the checkout was not touched
-        self.assertIsNone(State.load(os.path.join(self.root(), ".revali", "main")))    # nothing recorded for main
+        self.assertEqual(gitops.current_branch(self.repo), "main")  # the checkout was not touched
+        self.assertIsNone(
+            State.load(os.path.join(self.root(), ".revali", "main"))
+        )  # nothing recorded for main
 
-    def test_stop_with_no_run_anywhere_from_main(self):                                # AC-3, AC-4
+    def test_stop_with_no_run_anywhere_from_main(self):  # AC-3, AC-4
         git(["checkout", "-q", "main"], self.repo)
         code, out = run_cli(["stop"])
         self.assertEqual(code, EXIT_OK, out)
@@ -145,16 +164,16 @@ class StopActsOnTheTreesRun(CrossBranchCase):
         self.assertEqual(lines[0], self.identity("main"))
         self.assertEqual(lines[1], "no run in progress")
 
-    def test_stop_ignores_and_removes_a_dead_owner_on_another_branch(self):            # AC-3
+    def test_stop_ignores_and_removes_a_dead_owner_on_another_branch(self):  # AC-3
         self.hold_tree_lock("feature/other", DEAD_PID)
         code, out = run_cli(["stop"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertEqual(self.lines(out)[0], self.identity())                          # stays on the checked-out branch
+        self.assertEqual(self.lines(out)[0], self.identity())  # stays on the checked-out branch
         self.assertIn("no run in progress", out)
         self.assertNotIn("stopped pid", out)
         self.assertFalse(os.path.isfile(self.tree_lock()))
 
-    def test_stop_on_the_own_branch_still_releases_the_tree_lock(self):                # AC-3
+    def test_stop_on_the_own_branch_still_releases_the_tree_lock(self):  # AC-3
         child = self.live_child()
         self.state("review", "reviewer round 1", -1)
         self.hold_branch_lock(child.pid)
@@ -165,17 +184,22 @@ class StopActsOnTheTreesRun(CrossBranchCase):
         child.wait(timeout=10)
         self.assertFalse(os.path.isfile(self.tree_lock()))
         self.assertFalse(os.path.isfile(lock_path(self.rdir())))
-        code, out = run_cli(["run", "--dry-run"])                                      # the tree is free again
+        code, out = run_cli(["run", "--dry-run"])  # the tree is free again
         self.assertEqual(code, EXIT_OK, out)
         self.assertNotIn("already in progress", out)
 
 
 class EveryCommandOpensWithTheIdentityLine(CrossBranchCase):
-    def test_stop_reset_merge_wording_and_exit_codes_after_the_line(self):             # AC-4
-        cases = ((["stop"], EXIT_OK, "no run in progress"),
-                 (["reset"], EXIT_OK, "no state to remove"),
-                 (["merge"], EXIT_ERROR, "ERROR: this branch is not ready to merge (stage: none); "
-                                         "run `revali run` first"))
+    def test_stop_reset_merge_wording_and_exit_codes_after_the_line(self):  # AC-4
+        cases = (
+            (["stop"], EXIT_OK, "no run in progress"),
+            (["reset"], EXIT_OK, "no state to remove"),
+            (
+                ["merge"],
+                EXIT_ERROR,
+                "ERROR: this branch is not ready to merge (stage: none); " "run `revali run` first",
+            ),
+        )
         for argv, exit_code, second in cases:
             with self.subTest(argv=argv):
                 code, out = run_cli(argv)
@@ -185,7 +209,7 @@ class EveryCommandOpensWithTheIdentityLine(CrossBranchCase):
                 self.assertEqual(lines[1], second)
                 self.assertEqual(out.count("repo: "), 1)
 
-    def test_clean_names_its_argument(self):                                           # AC-4
+    def test_clean_names_its_argument(self):  # AC-4
         code, out = run_cli(["clean", "feature/gone"])
         self.assertEqual(code, EXIT_ERROR, out)
         lines = self.lines(out)
@@ -197,35 +221,55 @@ class EveryCommandOpensWithTheIdentityLine(CrossBranchCase):
         self.assertEqual(self.lines(out)[0], self.identity("feature/mul"))
         self.assertFalse(os.path.isdir(self.rdir()))
 
-    def test_detached_head_is_an_error_line_not_a_traceback(self):                     # AC-4
+    def test_detached_head_is_an_error_line_not_a_traceback(self):  # AC-4
         git(["checkout", "-q", "--detach"], self.repo)
-        # `stop` left this list with feature/worktree-docs AC-8: it resolves the run through tree.lock
-        for argv in (["status"], ["run", "--dry-run"], ["wait", "--timeout", "1s"], ["reset"],
-                     ["merge"]):
+        # `stop` left this list with feature/worktree-docs AC-8: it resolves the run through
+        # tree.lock
+        for argv in (
+            ["status"],
+            ["run", "--dry-run"],
+            ["wait", "--timeout", "1s"],
+            ["reset"],
+            ["merge"],
+        ):
             with self.subTest(argv=argv):
                 code, out = run_cli(argv)
                 self.assertEqual(code, EXIT_ERROR, out)
-                self.assertTrue(any(l.startswith("ERROR: detached HEAD") for l in self.lines(out)), out)
+                self.assertTrue(
+                    any(line.startswith("ERROR: detached HEAD") for line in self.lines(out)), out
+                )
                 self.assertNotIn("Traceback", out)
-                self.assertNotIn("repo: ", out)                                        # no identity line to print
+                self.assertNotIn("repo: ", out)  # no identity line to print
                 self.assertNotIn("branch: HEAD", out)
 
-    def test_wait_branch_still_works_on_a_detached_head(self):                         # AC-3
+    def test_wait_branch_still_works_on_a_detached_head(self):  # AC-3
         self.state("ready_to_merge", "validation 1 passed", EXIT_OK)
         git(["checkout", "-q", "--detach"], self.repo)
         code, out = run_cli(["wait", "--branch", "feature/mul", "--timeout", "1s"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertEqual(self.lines(out)[0], self.identity("feature/mul"))
 
-    def test_outside_a_repository(self):                                               # AC-4
+    def test_outside_a_repository(self):  # AC-4
         os.chdir(self.tmp)
-        for argv in (["status"], ["stop"], ["reset"], ["clean", "x"], ["merge"], ["run", "--dry-run"],
-                     ["wait", "--timeout", "1s"]):
+        for argv in (
+            ["status"],
+            ["stop"],
+            ["reset"],
+            ["clean", "x"],
+            ["merge"],
+            ["run", "--dry-run"],
+            ["wait", "--timeout", "1s"],
+        ):
             with self.subTest(argv=argv):
                 code, out = run_cli(argv)
                 self.assertEqual(code, EXIT_ERROR, out)
-                self.assertTrue(any(l.startswith("ERROR: not inside a git repository") for l in self.lines(out)),
-                                out)
+                self.assertTrue(
+                    any(
+                        line.startswith("ERROR: not inside a git repository")
+                        for line in self.lines(out)
+                    ),
+                    out,
+                )
                 self.assertNotIn("Traceback", out)
                 self.assertNotIn("repo: ", out)
 
@@ -233,23 +277,24 @@ class EveryCommandOpensWithTheIdentityLine(CrossBranchCase):
 class HelpAndReadme(unittest.TestCase):
     def subparser(self, name):
         from revali.cli import build_parser
+
         parser = build_parser()
         for action in parser._actions:
             if isinstance(action, argparse._SubParsersAction):
                 return action.choices[name]
         self.fail("no subcommands")
 
-    def test_wait_help_describes_branch(self):                                         # AC-5
+    def test_wait_help_describes_branch(self):  # AC-5
         text = " ".join(self.subparser("wait").format_help().split())
         self.assertIn("--branch", text)
-        self.assertIn("--timeout", text)                                               # the old option stays
+        self.assertIn("--timeout", text)  # the old option stays
 
-    def test_stop_help_describes_the_tree_scope(self):                                 # AC-5
+    def test_stop_help_describes_the_tree_scope(self):  # AC-5
         text = " ".join(self.subparser("stop").format_help().split()).lower()
         self.assertIn("working tree", text)
         self.assertIn("branch", text)
 
-    def test_readme(self):                                                             # AC-5
+    def test_readme(self):  # AC-5
         def doc(name):
             with open(os.path.join(ROOT, "docs", name), "r", encoding="utf-8", newline="") as fh:
                 return fh.read()
@@ -259,10 +304,12 @@ class HelpAndReadme(unittest.TestCase):
             return body.split("\n## ", 1)[0]
 
         files = doc("files.md")
-        self.assertTrue(any(l.startswith("| `tree.lock`") for l in files.splitlines()), "no tree.lock row")
+        self.assertTrue(
+            any(line.startswith("| `tree.lock`") for line in files.splitlines()), "no tree.lock row"
+        )
         effects = doc("side-effects.md")
         self.assertIn("tree.lock", effects)
-        self.assertIn("HEAD", effects)                                                 # the mid-run check
+        self.assertIn("HEAD", effects)  # the mid-run check
         usage = section(doc("workflow.md"), "Running")
         self.assertIn("wait --branch", usage)
         self.assertIn("stop", usage)

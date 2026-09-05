@@ -8,6 +8,7 @@ Each invocation consumes the next entry:
 The prompt (last argv element) and argv are appended to REVALI_FAKE_LOG.
 Use via REVALI_CLAUDE_CMD="<python> <this file>".
 """
+
 import json
 import os
 import sys
@@ -42,13 +43,16 @@ def main(argv):
     log = os.environ.get("REVALI_FAKE_LOG")
     if log:
         with open(log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"exe": "claude", "argv": argv, "prompt": prompt, "cwd": os.getcwd()}) + "\n")
+            fh.write(
+                json.dumps({"exe": "claude", "argv": argv, "prompt": prompt, "cwd": os.getcwd()})
+                + "\n"
+            )
     for rel, content in (entry.get("write_files") or {}).items():
         path = os.path.join(os.getcwd(), rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(content)
-    for rel in entry.get("delete_files") or []:   # a reviewer dropping one of its own earlier files
+    for rel in entry.get("delete_files") or []:  # a reviewer dropping one of its own earlier files
         path = os.path.join(os.getcwd(), rel)
         if os.path.isfile(path):
             os.remove(path)

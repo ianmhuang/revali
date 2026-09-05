@@ -2,6 +2,7 @@
 (Git Bash on Windows, /bin/bash elsewhere). `wslpath -a` converts Windows paths to
 the bash-style form. Use via REVALI_WSL_CMD="<python> <this file>".
 """
+
 import os
 import re
 import shutil

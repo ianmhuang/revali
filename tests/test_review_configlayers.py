@@ -4,15 +4,27 @@ Black-box against revali.config's public loaders. Every test fails on the base
 branch, where parse_project_config has no user layer, no [paths], no engines,
 and load_user_config has no `sections`.
 """
+
 import os
 import tempfile
 import tomllib
 import unittest
 
+from revali.config import (
+    ConfigError,
+    EngineCfg,
+    MergeCfg,
+    PathsCfg,
+    PlatformCfg,
+    ProjectCfg,
+    ReviewCfg,
+    ValidateCfg,
+    load_defaults,
+    load_project_config,
+    load_user_config,
+    parse_project_config,
+)
 from tests.helpers import ROOT, rmtree_force
-from revali.config import (ConfigError, EngineCfg, MergeCfg, PathsCfg, PlatformCfg, ProjectCfg,
-                           ReviewCfg, ValidateCfg, load_defaults, load_project_config,
-                           load_user_config, parse_project_config)
 
 MINIMAL = """
 [project]
@@ -66,12 +78,19 @@ class IsolatedHome(unittest.TestCase):
 class AC1DefaultsFile(unittest.TestCase):
     def test_every_dataclass_field_has_a_default(self):
         d = load_defaults()
-        for section, dc in (("project", ProjectCfg), ("review", ReviewCfg), ("validate", ValidateCfg),
-                            ("merge", MergeCfg), ("paths", PathsCfg)):
+        for section, dc in (
+            ("project", ProjectCfg),
+            ("review", ReviewCfg),
+            ("validate", ValidateCfg),
+            ("merge", MergeCfg),
+            ("paths", PathsCfg),
+        ):
             for name in dc.__dataclass_fields__:
                 if name in ("platforms", "config_version"):
                     continue
-                self.assertIn(name, d[section], "%s.%s missing from defaults.toml" % (section, name))
+                self.assertIn(
+                    name, d[section], "%s.%s missing from defaults.toml" % (section, name)
+                )
         for name in PlatformCfg.__dataclass_fields__:
             if name != "name":
                 self.assertIn(name, d["validate"]["platform"], "validate.platform.%s" % name)
@@ -106,8 +125,18 @@ class AC1DefaultsFile(unittest.TestCase):
     def test_config_module_has_no_literal_defaults(self):
         with open(os.path.join(ROOT, "revali", "config.py"), "r", encoding="utf-8") as fh:
             source = fh.read()
-        for literal in ('"fable"', '"opus"', '"sonnet"', '"Ubuntu"', '"CONVENTIONS.md"',
-                        "= 2.0", "= 1.0", "= 800", "= 15", "= 30"):
+        for literal in (
+            '"fable"',
+            '"opus"',
+            '"sonnet"',
+            '"Ubuntu"',
+            '"CONVENTIONS.md"',
+            "= 2.0",
+            "= 1.0",
+            "= 800",
+            "= 15",
+            "= 30",
+        ):
             self.assertNotIn(literal, source, "literal default %s in config.py" % literal)
 
     def test_defaults_file_itself_is_checked(self):
@@ -124,27 +153,37 @@ class AC1DefaultsFile(unittest.TestCase):
 
 class AC2Precedence(IsolatedHome):
     def test_user_beats_defaults_project_beats_user(self):
-        user = {"review": {"model": "opus", "max_fixes": 5}, "validate": {"budget_usd": 3.5},
-                "merge": {"method": "rebase"}, "paths": {"logs_dir": "out"},
-                "project": {"test_dir": "spec"}}
+        user = {
+            "review": {"model": "opus", "max_fixes": 5},
+            "validate": {"budget_usd": 3.5},
+            "merge": {"method": "rebase"},
+            "paths": {"logs_dir": "out"},
+            "project": {"test_dir": "spec"},
+        }
         cfg = parse_project_config(MINIMAL, user_sections=user)
-        self.assertEqual(cfg.review.model, "opus")            # user over default
+        self.assertEqual(cfg.review.model, "opus")  # user over default
         self.assertEqual(cfg.review.max_fixes, 5)
         self.assertEqual(cfg.validate.budget_usd, 3.5)
         self.assertEqual(cfg.merge.method, "rebase")
         self.assertEqual(cfg.paths.logs_dir, "out")
         self.assertEqual(cfg.project.test_dir, "spec")
-        self.assertEqual(cfg.review.effort, "high")            # untouched default survives
+        self.assertEqual(cfg.review.effort, "high")  # untouched default survives
 
-        project = MINIMAL + '\n[review]\nmodel = "sonnet"\n[merge]\nmethod = "merge"\n[paths]\nlogs_dir = "l"\n'
+        project = (
+            MINIMAL
+            + '\n[review]\nmodel = "sonnet"\n[merge]\nmethod = "merge"\n[paths]\nlogs_dir = "l"\n'
+        )
         cfg = parse_project_config(project, user_sections=user)
-        self.assertEqual(cfg.review.model, "sonnet")           # project over user
-        self.assertEqual(cfg.review.max_fixes, 5)              # user value the project left alone
+        self.assertEqual(cfg.review.model, "sonnet")  # project over user
+        self.assertEqual(cfg.review.max_fixes, 5)  # user value the project left alone
         self.assertEqual(cfg.merge.method, "merge")
         self.assertEqual(cfg.paths.logs_dir, "l")
 
     def test_precedence_through_the_real_files(self):
-        self.user_file('[review]\nmodel = "opus"\nbudget_usd = 0.25\n[validate.linux]\ndistro = "Ubuntu-24.04"\n')
+        self.user_file(
+            '[review]\nmodel = "opus"\nbudget_usd = 0.25\n'
+            '[validate.linux]\ndistro = "Ubuntu-24.04"\n'
+        )
         self.project_file(MINIMAL + '\n[review]\nmodel = "sonnet"\n')
         cfg = load_project_config(self.repo)
         self.assertEqual(cfg.review.model, "sonnet")
@@ -158,7 +197,9 @@ class AC2Precedence(IsolatedHome):
     def test_platform_table_starts_from_platform_defaults(self):
         d = load_defaults()["validate"]["platform"]
         user = {"validate": {"linux": {"distro": "Debian"}}}
-        cfg = parse_project_config(MINIMAL + '\n[validate.extra]\nnew_test = "x"\n', user_sections=user)
+        cfg = parse_project_config(
+            MINIMAL + '\n[validate.extra]\nnew_test = "x"\n', user_sections=user
+        )
         linux = cfg.validate.platforms["linux"]
         self.assertEqual(linux.distro, "Debian")
         self.assertEqual(linux.runner, d["runner"])
@@ -171,8 +212,10 @@ class AC2Precedence(IsolatedHome):
 
     def test_engine_table_layers_per_engine(self):
         user = {"engines": {"claude": {"helper_prefix": "claude-tiny"}}}
-        cfg = parse_project_config(MINIMAL + '\n[engines.claude]\ntiers = ["a", "b"]\n', user_sections=user)
-        self.assertEqual(cfg.engines["claude"].tiers, ["a", "b"])            # project
+        cfg = parse_project_config(
+            MINIMAL + '\n[engines.claude]\ntiers = ["a", "b"]\n', user_sections=user
+        )
+        self.assertEqual(cfg.engines["claude"].tiers, ["a", "b"])  # project
         self.assertEqual(cfg.engines["claude"].helper_prefix, "claude-tiny")  # user
         cfg = parse_project_config(MINIMAL, user_sections=user)
         self.assertEqual(cfg.engines["claude"].tiers, load_defaults()["engines"]["claude"]["tiers"])
@@ -198,8 +241,11 @@ class AC3LayerErrors(IsolatedHome):
             self.assertIn("revali.toml", p)
 
     def test_both_layers_reported_in_one_pass(self):
-        problems = _problems(parse_project_config, MINIMAL + '\n[review]\nfoo = 1\n',
-                             user_sections={"review": {"bar": 1}})
+        problems = _problems(
+            parse_project_config,
+            MINIMAL + "\n[review]\nfoo = 1\n",
+            user_sections={"review": {"bar": 1}},
+        )
         self.assertTrue(any("user config" in p and "bar" in p for p in problems), problems)
         self.assertTrue(any("revali.toml" in p and "foo" in p for p in problems), problems)
 
@@ -207,18 +253,24 @@ class AC3LayerErrors(IsolatedHome):
 class AC4Engines(unittest.TestCase):
     def test_retired_values_point_at_strategy(self):
         for old in ("prompt", "hybrid"):
-            problems = _problems(parse_project_config, MINIMAL + '\n[review]\nengine = "%s"\n' % old)
+            problems = _problems(
+                parse_project_config, MINIMAL + '\n[review]\nengine = "%s"\n' % old
+            )
             self.assertTrue(any("engine" in p and "strategy" in p for p in problems), problems)
 
     def test_unknown_engine_lists_available(self):
         for role in ("review", "validate"):
-            problems = _problems(parse_project_config, MINIMAL + '\n[%s]\nengine = "codex"\n' % role)
+            problems = _problems(
+                parse_project_config, MINIMAL + '\n[%s]\nengine = "codex"\n' % role
+            )
             hits = [p for p in problems if "codex" in p]
             self.assertTrue(hits, problems)
             self.assertIn("claude", hits[0])
 
     def test_engine_must_name_a_table(self):
-        text = MINIMAL + '\n[engines.codex]\ntiers = ["mini", "max"]\n[validate]\nengine = "codex"\n'
+        text = (
+            MINIMAL + '\n[engines.codex]\ntiers = ["mini", "max"]\n[validate]\nengine = "codex"\n'
+        )
         cfg = parse_project_config(text)
         self.assertEqual(cfg.validate.engine, "codex")
         self.assertEqual(cfg.engines["codex"].tiers, ["mini", "max"])
@@ -227,10 +279,12 @@ class AC4Engines(unittest.TestCase):
 
 class AC5UserFile(IsolatedHome):
     def test_accepts_project_sections_plus_top_keys(self):
-        self.user_file('checklist = "mine.md"\nhistory_path = "h.jsonl"\n'
-                       '[project]\ntest_dir = "spec"\n[review]\neffort = "low"\n[validate]\nbudget_usd = 2.5\n'
-                       '[validate.linux]\nrunner = "local"\n[merge]\nwait_for_checks = false\n'
-                       '[paths]\nlogs_dir = "out"\n[engines.claude]\ntiers = ["x"]\n')
+        self.user_file(
+            'checklist = "mine.md"\nhistory_path = "h.jsonl"\n'
+            '[project]\ntest_dir = "spec"\n[review]\neffort = "low"\n[validate]\nbudget_usd = 2.5\n'
+            '[validate.linux]\nrunner = "local"\n[merge]\nwait_for_checks = false\n'
+            '[paths]\nlogs_dir = "out"\n[engines.claude]\ntiers = ["x"]\n'
+        )
         u = load_user_config()
         self.assertEqual(u.checklist, os.path.join(self.home, "mine.md"))
         self.assertEqual(u.history_path, "h.jsonl")
@@ -256,15 +310,24 @@ class AC6Paths(IsolatedHome):
     def test_state_and_logs_dir_single_component(self):
         for key in ("state_dir", "logs_dir"):
             for bad in ('"a/b"', "'a\\b'", '""', '"."', '".."'):
-                problems = _problems(parse_project_config, MINIMAL + "\n[paths]\n%s = %s\n" % (key, bad))
+                problems = _problems(
+                    parse_project_config, MINIMAL + "\n[paths]\n%s = %s\n" % (key, bad)
+                )
                 self.assertTrue(any(key in p for p in problems), (key, bad, problems))
         cfg = parse_project_config(MINIMAL + '\n[paths]\nstate_dir = ".rv"\nlogs_dir = "out"\n')
         self.assertEqual((cfg.paths.state_dir, cfg.paths.logs_dir), (".rv", "out"))
 
     def test_file_overrides_must_exist_under_the_repo(self):
-        for section, key in (("review", "prompt"), ("review", "schema"), ("review", "checklist_builtin"),
-                             ("validate", "prompt"), ("validate", "schema")):
-            self.project_file(MINIMAL + '\n[%s]\n%s = "docs/%s_%s.txt"\n' % (section, key, section, key))
+        for section, key in (
+            ("review", "prompt"),
+            ("review", "schema"),
+            ("review", "checklist_builtin"),
+            ("validate", "prompt"),
+            ("validate", "schema"),
+        ):
+            self.project_file(
+                MINIMAL + '\n[%s]\n%s = "docs/%s_%s.txt"\n' % (section, key, section, key)
+            )
             problems = _problems(load_project_config, self.repo)
             self.assertTrue(any("%s.%s" % (section, key) in p for p in problems), (key, problems))
             _write(os.path.join(self.repo, "docs", "%s_%s.txt" % (section, key)), "x")
@@ -272,9 +335,13 @@ class AC6Paths(IsolatedHome):
             self.assertEqual(getattr(getattr(cfg, section), key), "docs/%s_%s.txt" % (section, key))
 
     def test_empty_override_means_shipped_file(self):
-        self.project_file(MINIMAL + '\n[review]\nprompt = ""\nschema = ""\nchecklist_builtin = ""\n')
+        self.project_file(
+            MINIMAL + '\n[review]\nprompt = ""\nschema = ""\nchecklist_builtin = ""\n'
+        )
         cfg = load_project_config(self.repo)
-        self.assertEqual((cfg.review.prompt, cfg.review.schema, cfg.review.checklist_builtin), ("", "", ""))
+        self.assertEqual(
+            (cfg.review.prompt, cfg.review.schema, cfg.review.checklist_builtin), ("", "", "")
+        )
 
 
 class AC7Docs(IsolatedHome):
@@ -293,7 +360,7 @@ class AC7Docs(IsolatedHome):
         self.assertIn("defaults.toml", text)
         self.assertNotIn("\nreview_model", text)
         self.user_file(text)
-        u = load_user_config()   # the uncommented keys must be accepted as written
+        u = load_user_config()  # the uncommented keys must be accepted as written
         self.assertEqual(u.checklist, "")
 
     def test_readme_has_configuration_section(self):

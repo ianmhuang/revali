@@ -17,6 +17,11 @@ Things a linter cannot check; formatting is not listed.
   act, 3 a human must decide, 4 (`wait` only) still running. A new failure
   must map onto one of these, not add a code.
 
+## Style
+- Formatting is black's, lint is ruff's (`pyproject.toml`); `revali preflight` runs both
+  through `[project] lint` and stops with exit 2 on a failure, so neither the author nor the
+  reviewer spends a round on style. The reviewer does not comment on what they check.
+
 ## Behaviour changes
 - Every behaviour change ships with a test in `tests/` built on
   `tests/helpers.RepoCase` (fake `gh` / `claude` / runner, real `git`).

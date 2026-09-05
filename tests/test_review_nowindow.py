@@ -6,6 +6,7 @@ and no `creationflags` on POSIX.
 the keyword arguments revali hands to the interpreter; `os.name` is patched to pick the
 platform branch. On the base branch no `creationflags` is ever passed, so the Windows
 cases fail there; the `run_shell` cases also fail on the round-1 code."""
+
 import os
 import subprocess
 import unittest
@@ -59,7 +60,7 @@ class WindowsPassesTheFlag(NtRecorderCase):
         procs.run(["claude", "-p"], input_text="prompt body", cwd=os.getcwd(), timeout=5)
         argv, kw = self.rec.calls[0]
         self.assertEqual(kw.get("creationflags", 0) & CREATE_NO_WINDOW, CREATE_NO_WINDOW)
-        self.assertEqual(kw.get("input"), "prompt body")           # the flag did not displace anything
+        self.assertEqual(kw.get("input"), "prompt body")  # the flag did not displace anything
         self.assertEqual(kw.get("timeout"), 5)
         self.assertTrue(kw.get("capture_output"))
         self.assertEqual(kw.get("encoding"), "utf-8")
@@ -72,12 +73,14 @@ class WindowsPassesTheFlag(NtRecorderCase):
         self.assertEqual(kw.get("creationflags", 0) & CREATE_NO_WINDOW, CREATE_NO_WINDOW)
 
     def test_run_retry_sets_the_flag_on_every_attempt(self):
-        self.rec.codes = [1, 1, 0]                                  # two failures, then success
+        self.rec.codes = [1, 1, 0]  # two failures, then success
         res = procs.run_retry(["gh", "pr", "view"], retries=2, wait=0)
         self.assertTrue(res.ok)
         self.assertEqual(len(self.rec.calls), 3)
         for i in range(3):
-            self.assertEqual(self.flags(i) & CREATE_NO_WINDOW, CREATE_NO_WINDOW, "attempt %d" % (i + 1))
+            self.assertEqual(
+                self.flags(i) & CREATE_NO_WINDOW, CREATE_NO_WINDOW, "attempt %d" % (i + 1)
+            )
 
     def test_the_flag_is_only_the_no_window_bit(self):
         # no console must be created, but the child must not be detached from the pipes either:
@@ -104,8 +107,8 @@ class WindowsRunShellPassesTheFlag(NtRecorderCase):
     def test_run_shell_keeps_the_shell_and_the_capture(self):
         procs.run_shell("make test", cwd=os.getcwd(), timeout=7)
         argv, kw = self.rec.calls[0]
-        self.assertEqual(argv, "make test")                          # the string goes to the shell as is
-        self.assertTrue(kw.get("shell"))                             # the flag did not displace shell=True
+        self.assertEqual(argv, "make test")  # the string goes to the shell as is
+        self.assertTrue(kw.get("shell"))  # the flag did not displace shell=True
         self.assertEqual(kw.get("cwd"), os.getcwd())
         self.assertEqual(kw.get("timeout"), 7)
         self.assertTrue(kw.get("capture_output"))

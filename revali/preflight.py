@@ -4,14 +4,21 @@ Cheap, local checks first; gh calls after; lint last. Onboarding problems
 (config, change.md) are collected and reported together so the author fixes
 them in one pass instead of one per run.
 """
+
 import os
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
 
-from revali import EXIT_ACTION, EXIT_ERROR, V1_KINDS
-from revali import changedoc, gitops
-from revali.config import (Config, ConfigError, UserConfig, load_project_config,
-                           load_user_config, paths_for, tool_file)
+from revali import EXIT_ACTION, EXIT_ERROR, V1_KINDS, changedoc, gitops
+from revali.config import (
+    Config,
+    ConfigError,
+    UserConfig,
+    load_project_config,
+    load_user_config,
+    paths_for,
+    tool_file,
+)
 from revali.procs import ExeNotFound, ProcTimeout, run_shell
 from revali.secretscan import format_hits, scan_diff
 from revali.state import RunLog, review_dir
@@ -34,7 +41,7 @@ class Context:
     repo_root: str = ""
     branch: str = ""
     base: str = ""
-    base_ref: str = ""          # ref actually compared against (origin/main or main)
+    base_ref: str = ""  # ref actually compared against (origin/main or main)
     rdir: str = ""
     cfg: Optional[Config] = None
     user_cfg: Optional[UserConfig] = None
@@ -49,8 +56,8 @@ class Context:
     notes: List[str] = field(default_factory=list)
     dry_run: bool = False
     log: Optional[RunLog] = None
-    logs: str = ""                 # <state_dir>/<branch>/<logs_dir>
-    review_prompt: str = ""        # resolved files (project override or the built-in)
+    logs: str = ""  # <state_dir>/<branch>/<logs_dir>
+    review_prompt: str = ""  # resolved files (project override or the built-in)
     review_schema: str = ""
     builtin_checklist: str = ""
     diagnose_prompt: str = ""
@@ -68,6 +75,7 @@ class Context:
 def check_engines(cfg: Config) -> List[str]:
     """Both roles must name an engine revali implements, before anything is pushed."""
     from revali import engines  # local: engines imports Stop from this module
+
     problems: List[str] = []
     for role in ("review", "validate"):
         try:
@@ -113,15 +121,20 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
     if ctx.cfg:
         ctx.review_prompt = tool_file(ctx.cfg.review.prompt, root, "prompts", "review.md")
         ctx.review_schema = tool_file(ctx.cfg.review.schema, root, "schemas", "review.schema.json")
-        ctx.builtin_checklist = tool_file(ctx.cfg.review.checklist_builtin, root, "checklists", "default.md")
+        ctx.builtin_checklist = tool_file(
+            ctx.cfg.review.checklist_builtin, root, "checklists", "default.md"
+        )
         ctx.diagnose_prompt = tool_file(ctx.cfg.validate.prompt, root, "prompts", "diagnose.md")
-        ctx.diagnose_schema = tool_file(ctx.cfg.validate.schema, root, "schemas", "diagnose.schema.json")
+        ctx.diagnose_schema = tool_file(
+            ctx.cfg.validate.schema, root, "schemas", "diagnose.schema.json"
+        )
         problems.extend(check_engines(ctx.cfg))
 
     doc_path = os.path.join(ctx.rdir, changedoc.FILENAME)
     if not os.path.isfile(doc_path):
-        problems.append("%s not found (copy templates/change.md, fill it in)"
-                        % os.path.relpath(doc_path, root))
+        problems.append(
+            "%s not found (copy templates/change.md, fill it in)" % os.path.relpath(doc_path, root)
+        )
     else:
         ctx.doc = changedoc.load(doc_path)
         problems.extend(changedoc.validate(ctx.doc, V1_KINDS))
@@ -138,11 +151,16 @@ def check_tree(ctx: Context, tolerate: Sequence[str] = ()) -> None:
     reviewer's own uncommitted files from a NEEDS_INFO round (state.pending_test_files),
     which the next round commits or removes."""
     allowed = {p.replace("\\", "/") for p in tolerate}
-    dirty = [entry for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",))
-             if entry.split(" ", 1)[1].replace("\\", "/") not in allowed]
+    dirty = [
+        entry
+        for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",))
+        if entry.split(" ", 1)[1].replace("\\", "/") not in allowed
+    ]
     if dirty:
-        raise Stop(EXIT_ERROR, "working tree is not clean; commit or stash first:\n  "
-                   + "\n  ".join(dirty[:20]))
+        raise Stop(
+            EXIT_ERROR,
+            "working tree is not clean; commit or stash first:\n  " + "\n  ".join(dirty[:20]),
+        )
 
 
 def check_github(ctx: Context) -> None:
@@ -154,16 +172,21 @@ def check_github(ctx: Context) -> None:
         ctx.login = gitops.gh_login(ctx.repo_root, ctx.detail)
         ctx.repo = gitops.gh_repo_info(ctx.repo_root, ctx.detail)
     except gitops.GhError as exc:
-        raise Stop(EXIT_ERROR, "GitHub lookup failed: %s" % exc)
+        raise Stop(EXIT_ERROR, "GitHub lookup failed: %s" % exc) from exc
     if not ctx.repo.owner or ctx.repo.owner.lower() != ctx.login.lower():
-        raise Stop(EXIT_ERROR, "repo owner is '%s' but you are '%s'; revali only runs on your own repos"
-                   % (ctx.repo.owner, ctx.login))
+        raise Stop(
+            EXIT_ERROR,
+            "repo owner is '%s' but you are '%s'; revali only runs on your own repos"
+            % (ctx.repo.owner, ctx.login),
+        )
     if not ctx.base:
         ctx.base = ctx.repo.default_branch
         if not ctx.base:
             raise Stop(EXIT_ERROR, "cannot determine the base branch; set project.base_branch")
     if ctx.branch == ctx.base:
-        raise Stop(EXIT_ERROR, "you are on '%s'; revali reviews a feature branch, not the base" % ctx.base)
+        raise Stop(
+            EXIT_ERROR, "you are on '%s'; revali reviews a feature branch, not the base" % ctx.base
+        )
 
 
 def check_runner(ctx: Context) -> None:
@@ -171,6 +194,7 @@ def check_runner(ctx: Context) -> None:
     if ctx.dry_run:
         return
     from revali.runners import probe_runner
+
     plat = ctx.cfg.validate.platforms[ctx.cfg.project.platforms[0]]
     problem = probe_runner(plat)
     if problem:
@@ -184,12 +208,17 @@ def check_base(ctx: Context) -> None:
         if gitops.fetch("origin", ctx.base, root, ctx.detail):
             ref = "origin/%s" % ctx.base
         else:
-            ctx.notes.append("could not fetch origin/%s; comparing against local %s" % (ctx.base, ctx.base))
+            ctx.notes.append(
+                "could not fetch origin/%s; comparing against local %s" % (ctx.base, ctx.base)
+            )
     if gitops.rev_parse(ref, root) is None:
         raise Stop(EXIT_ERROR, "base branch '%s' does not exist" % ref)
     ctx.base_ref = ref
     if not gitops.is_ancestor(ref, "HEAD", root):
-        raise Stop(EXIT_ACTION, "branch is behind %s; rebase onto it and run again (the review restarts)" % ref)
+        raise Stop(
+            EXIT_ACTION,
+            "branch is behind %s; rebase onto it and run again (the review restarts)" % ref,
+        )
     ctx.head_sha = gitops.rev_parse("HEAD", root) or ""
     ctx.base_sha = gitops.rev_parse(ref, root) or ""
     if gitops.commits_between(ref, "HEAD", root) == 0:
@@ -213,8 +242,11 @@ def check_diff_size(ctx: Context) -> None:
     if not files and not ctx.excluded_files:
         raise Stop(EXIT_ERROR, "the diff against %s is empty" % ctx.base_ref)
     if total > cfg.review.max_diff_lines:
-        raise Stop(EXIT_ACTION, "diff is %d lines (limit %d); split the change into smaller PRs"
-                   % (total, cfg.review.max_diff_lines))
+        raise Stop(
+            EXIT_ACTION,
+            "diff is %d lines (limit %d); split the change into smaller PRs"
+            % (total, cfg.review.max_diff_lines),
+        )
 
 
 def check_secrets(ctx: Context) -> None:
@@ -232,18 +264,29 @@ def check_lint(ctx: Context) -> None:
     if ctx.dry_run:
         return
     try:
-        res = run_shell(cmd, cwd=ctx.repo_root, timeout=ctx.cfg.review.timeout_min * 60, log=ctx.detail)
+        res = run_shell(
+            cmd, cwd=ctx.repo_root, timeout=ctx.cfg.review.timeout_min * 60, log=ctx.detail
+        )
     except ExeNotFound as exc:
-        raise Stop(EXIT_ERROR, "lint command could not start: %s" % exc)
+        raise Stop(EXIT_ERROR, "lint command could not start: %s" % exc) from exc
     except ProcTimeout as exc:
-        raise Stop(EXIT_ERROR, "lint timed out: %s" % exc)
+        raise Stop(EXIT_ERROR, "lint timed out: %s" % exc) from exc
     if not res.ok:
-        raise Stop(EXIT_ACTION, "lint failed (exit %d); fix and run again:\n%s" % (res.returncode, _tail(res.text)))
+        raise Stop(
+            EXIT_ACTION,
+            "lint failed (exit %d); fix and run again:\n%s" % (res.returncode, _tail(res.text)),
+        )
 
 
-def preflight(cwd: str, base_override: str = "", dry_run: bool = False,
-              log: Optional[RunLog] = None, baseline=None, before_tree=None,
-              tolerate: Sequence[str] = ()) -> Context:
+def preflight(
+    cwd: str,
+    base_override: str = "",
+    dry_run: bool = False,
+    log: Optional[RunLog] = None,
+    baseline=None,
+    before_tree=None,
+    tolerate: Sequence[str] = (),
+) -> Context:
     """Run every check. Returns a populated Context or raises Stop.
 
     `baseline` is an optional callable(ctx) supplied by the validate stage (it
@@ -259,16 +302,27 @@ def preflight(cwd: str, base_override: str = "", dry_run: bool = False,
         before_tree(ctx)
     check_tree(ctx, tolerate)
     check_github(ctx)
-    ctx.say("GitHub: %s/%s (%s), base %s" % (ctx.repo.owner, ctx.repo.name, ctx.repo.visibility.lower(), ctx.base))
+    ctx.say(
+        "GitHub: %s/%s (%s), base %s"
+        % (ctx.repo.owner, ctx.repo.name, ctx.repo.visibility.lower(), ctx.base)
+    )
     if ctx.repo.visibility != "PRIVATE":
-        ctx.say("%s repository: PR comments will carry summaries only; the full review text stays under %s"
-                % (ctx.repo.visibility.lower() or "non-private", ctx.cfg.paths.state_dir))
+        ctx.say(
+            "%s repository: PR comments will carry summaries only; "
+            "the full review text stays under %s"
+            % (ctx.repo.visibility.lower() or "non-private", ctx.cfg.paths.state_dir)
+        )
     check_base(ctx)
     check_runner(ctx)
     check_diff_size(ctx)
-    ctx.say("diff: %d lines in %d files%s" % (
-        ctx.diff_lines, len(ctx.changed_files),
-        " (+%d excluded)" % len(ctx.excluded_files) if ctx.excluded_files else ""))
+    ctx.say(
+        "diff: %d lines in %d files%s"
+        % (
+            ctx.diff_lines,
+            len(ctx.changed_files),
+            " (+%d excluded)" % len(ctx.excluded_files) if ctx.excluded_files else "",
+        )
+    )
     check_secrets(ctx)
     check_lint(ctx)
     if baseline is not None:
@@ -286,5 +340,8 @@ def check_tree_unmoved(ctx: Context, tail: str = "nothing was committed or pushe
     branch = gitops.current_branch(ctx.repo_root)
     head = gitops.rev_parse("HEAD", ctx.repo_root) or ""
     if branch != ctx.branch or head != ctx.head_sha:
-        raise Stop(EXIT_ERROR, "the working tree moved under the run: expected branch %s at %s, "
-                               "found %s at %s; %s" % (ctx.branch, ctx.head_sha[:10], branch, head[:10], tail))
+        raise Stop(
+            EXIT_ERROR,
+            "the working tree moved under the run: expected branch %s at %s, "
+            "found %s at %s; %s" % (ctx.branch, ctx.head_sha[:10], branch, head[:10], tail),
+        )

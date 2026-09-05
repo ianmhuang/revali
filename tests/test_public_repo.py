@@ -1,9 +1,9 @@
 """A repository that is not private gets summary comments; a private one gets the full text."""
-import os
+
 import unittest
 
-from tests.helpers import RepoCase, approve_response, claude_entry, run_cli
 from revali import EXIT_ACTION, EXIT_OK
+from tests.helpers import RepoCase, approve_response, claude_entry, run_cli
 
 FINDING_TEXT = "the loop never terminates when the list is empty"
 SUGGESTION = "guard the empty list before the loop"
@@ -11,16 +11,35 @@ QUESTION = "is mul expected to accept floats?"
 
 
 def review_with_a_low_finding():
-    return approve_response(findings=[{"id": "F1", "severity": "low", "kind": "convention", "file": "src/calc.py",
-                                       "line": 7, "text": FINDING_TEXT, "suggestion": SUGGESTION}],
-                            scope_mismatch=["the diff also renames a helper"])
+    return approve_response(
+        findings=[
+            {
+                "id": "F1",
+                "severity": "low",
+                "kind": "convention",
+                "file": "src/calc.py",
+                "line": 7,
+                "text": FINDING_TEXT,
+                "suggestion": SUGGESTION,
+            }
+        ],
+        scope_mismatch=["the diff also renames a helper"],
+    )
 
 
 def diagnosis():
-    return {"summary": "mul returns a + b; the product test fails.", "cause": "code",
-            "failures": [{"test": "tests/test_review_mul.py::MulTests::test_product", "cause": "code",
-                          "note": "expected 12, got 7"}],
-            "recommendation": "return a * b"}
+    return {
+        "summary": "mul returns a + b; the product test fails.",
+        "cause": "code",
+        "failures": [
+            {
+                "test": "tests/test_review_mul.py::MulTests::test_product",
+                "cause": "code",
+                "note": "expected 12, got 7",
+            }
+        ],
+        "recommendation": "return a * b",
+    }
 
 
 class PublicRepoComments(RepoCase):
@@ -59,17 +78,26 @@ class PublicRepoComments(RepoCase):
         self.assertNotIn("fake new_test output", v)
 
     def test_questions_and_diagnosis_text_are_withheld(self):
-        self.claude(claude_entry(approve_response(verdict="NEEDS_INFO", questions=[QUESTION]), write_tests=False))
+        self.claude(
+            claude_entry(
+                approve_response(verdict="NEEDS_INFO", questions=[QUESTION]), write_tests=False
+            )
+        )
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
         c = self.comment("review-1")
         self.assertIn("1 question(s) for the author", c)
         self.assertNotIn(QUESTION, c)
-        self.assertIn(QUESTION, out)   # the author still sees it locally
+        self.assertIn(QUESTION, out)  # the author still sees it locally
 
     def test_failed_validation_comment_names_the_cause_only(self):
-        self.runner_scenario({"default": 0, "results": {"validate-r1": {"new_test": 1}},
-                              "outputs": {"validate-r1": {"new_test": "FAIL: test_product expected 12 got 7"}}})
+        self.runner_scenario(
+            {
+                "default": 0,
+                "results": {"validate-r1": {"new_test": 1}},
+                "outputs": {"validate-r1": {"new_test": "FAIL: test_product expected 12 got 7"}},
+            }
+        )
         self.claude(claude_entry(), claude_entry(diagnosis(), write_tests=False))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)

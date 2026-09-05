@@ -4,13 +4,13 @@ records "". Black-box through the CLI: the history file and `stats` output are
 the interface, the origin URL is the input. Every run here stops on a dirty
 tree, which is checked before any fetch, so no network is touched.
 """
-import os
+
 import unittest
 
-from tests.helpers import RepoCase, claude_entry, git, run_cli
 from revali import EXIT_ERROR, EXIT_OK
 from revali.config import history_path, load_user_config
 from revali.state import read_history
+from tests.helpers import RepoCase, claude_entry, git, run_cli
 
 
 class _PreflightStop(RepoCase):
@@ -75,13 +75,14 @@ class HostedOrigins(_PreflightStop):
         code, out = run_cli(["stats"])
         self.assertEqual(code, 0, out)
         self.assertNotIn("(unknown repo)", out)
-        rows = [l for l in out.splitlines() if l.startswith("| me/sample |")]
+        rows = [line for line in out.splitlines() if line.startswith("| me/sample |")]
         self.assertEqual(len(rows), 1, out)
 
 
 class NonHostedOrigins(_PreflightStop):
     def test_local_bare_directory_stays_blank(self):
-        # the fixture's origin is a bare repository on disk (an absolute path, drive letter on Windows)
+        # the fixture's origin is a bare repository on disk (an absolute path, drive letter on
+        # Windows)
         self.stop_in_preflight()
         self.assertEqual(self.last_repo(), "")
 
@@ -124,7 +125,8 @@ class StoppedAndCompletedRunsShareOneRow(RepoCase):
         git(["checkout", "--", "src/calc.py"], self.repo)
         git(["remote", "set-url", "origin", local_origin], self.repo)
 
-        # gh reports the canonical login casing; preflight compares owner and login case-insensitively
+        # gh reports the canonical login casing; preflight compares owner and login
+        # case-insensitively
         self.scenario({"owner": "ME", "name": "Sample", "login": "me"})
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
@@ -134,7 +136,7 @@ class StoppedAndCompletedRunsShareOneRow(RepoCase):
         self.assertEqual([r["repo"] for r in rows], ["me/sample", "me/sample"])
         code, out = run_cli(["stats"])
         self.assertNotIn("(unknown repo)", out)
-        repo_rows = [l for l in out.splitlines() if l.startswith("| me/sample |")]
+        repo_rows = [line for line in out.splitlines() if line.startswith("| me/sample |")]
         self.assertEqual(len(repo_rows), 1, out)
         self.assertIn("| me/sample | 2 |", out)
 

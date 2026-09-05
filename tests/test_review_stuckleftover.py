@@ -6,14 +6,15 @@ reviewer. `os.remove` is patched in-process to refuse one path, which is the onl
 produce an undeletable file portably.
 Round 3 adds: `reset` on a stuck file says by hand and never "tolerate" (round 2 F1), the
 next preflight is then refused, and the stop path still says "tolerate"."""
+
 import os
 import unittest
 from unittest import mock
 
-from tests.helpers import RepoCase, TEST_REVIEW_MUL, approve_response, claude_entry, git, run_cli
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.config import paths_for
 from revali.state import State
+from tests.helpers import TEST_REVIEW_MUL, RepoCase, approve_response, claude_entry, git, run_cli
 
 MUL = "tests/test_review_mul.py"
 LEFT = "tests/test_review_left.py"
@@ -31,8 +32,10 @@ def needs_info(files=None):
 
 
 def approving(files):
-    tests = [{"path": p, "purpose": "acceptance", "covers": ["AC-1", "AC-2"], "expected": "per AC"}
-             for p in files]
+    tests = [
+        {"path": p, "purpose": "acceptance", "covers": ["AC-1", "AC-2"], "expected": "per AC"}
+        for p in files
+    ]
     entry = claude_entry(approve_response(tests=tests), write_tests=False)
     entry["write_files"] = dict(files)
     return entry
@@ -46,9 +49,13 @@ def refusing(relpath):
 
     def remove(path, *args, **kwargs):
         if os.path.abspath(path).replace("\\", "/").endswith(tail):
-            raise PermissionError(13, "The process cannot access the file because it is being used "
-                                      "by another process", path)
+            raise PermissionError(
+                13,
+                "The process cannot access the file because it is being used " "by another process",
+                path,
+            )
         return real(path, *args, **kwargs)
+
     return remove
 
 
@@ -82,52 +89,52 @@ class StopPathKeepsTheStuckFile(StuckCase):
     def test_pending_file_that_cannot_be_deleted_stays_tolerated(self):
         self.needs_info_round()
         self.assertEqual(self.state().pending_test_files, [MUL])
-        self.claude(claude_entry(is_error=True, exit=1))          # the round stops before its commit
+        self.claude(claude_entry(is_error=True, exit=1))  # the round stops before its commit
         with mock.patch("os.remove", refusing(MUL)):
             code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertTrue(self.exists(MUL))                                                  # still there
-        self.assertIn("could not remove", out)                                             # AC-5: named
+        self.assertTrue(self.exists(MUL))  # still there
+        self.assertIn("could not remove", out)  # AC-5: named
         self.assertIn(MUL, out)
-        self.assertIn("tolerate", out)                                                     # AC-5: says so
-        self.assertNotIn("by hand", out)                                                   # round 1 F3: no contradiction
+        self.assertIn("tolerate", out)  # AC-5: says so
+        self.assertNotIn("by hand", out)  # round 1 F3: no contradiction
         log = self.log_text()
         self.assertIn(MUL, log)
         self.assertIn("tolerate", log)
         self.assertNotIn("by hand", log)
         state = self.state()
-        self.assertEqual(state.pending_test_files, [MUL])                                  # AC-5: kept
+        self.assertEqual(state.pending_test_files, [MUL])  # AC-5: kept
         self.assertFalse(state.reviewer_running)
         code, out = run_cli(["preflight"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-5: tree check passes
+        self.assertEqual(code, EXIT_OK, out)  # AC-5: tree check passes
         self.assertNotIn("not clean", out)
         self.claude(approving({MUL: TEST_REVIEW_MUL}))
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-5: not refused
+        self.assertEqual(code, EXIT_OK, out)  # AC-5: not refused
         self.assertNotIn("not clean", out)
-        self.assertIn("- " + MUL, self.pending_section(self.last_prompt()))                # AC-5: listed
+        self.assertIn("- " + MUL, self.pending_section(self.last_prompt()))  # AC-5: listed
         state = self.state()
-        self.assertEqual(state.pending_test_files, [])                                     # committed by this round
+        self.assertEqual(state.pending_test_files, [])  # committed by this round
         self.assertEqual(state.test_files, [MUL])
         self.assertEqual(self.status(), "")
 
     def test_the_rounds_own_new_file_that_cannot_be_deleted_joins_the_list(self):
-        self.needs_info_round({})                       # nothing pending from round 1
+        self.needs_info_round({})  # nothing pending from round 1
         self.assertEqual(self.state().pending_test_files, [])
-        self.claude(claude_entry(is_error=True, exit=1))          # writes MUL, then fails
+        self.claude(claude_entry(is_error=True, exit=1))  # writes MUL, then fails
         with mock.patch("os.remove", refusing(MUL)):
             code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertTrue(self.exists(MUL))
         self.assertIn(MUL, out)
         self.assertIn("tolerate", out)
-        self.assertEqual(self.state().pending_test_files, [MUL])                           # AC-5: added
+        self.assertEqual(self.state().pending_test_files, [MUL])  # AC-5: added
         code, out = run_cli(["preflight"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-5: tolerated
+        self.assertEqual(code, EXIT_OK, out)  # AC-5: tolerated
         self.claude(approving({MUL: TEST_REVIEW_MUL}))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertIn("- " + MUL, self.pending_section(self.last_prompt()))                # AC-5: listed
+        self.assertIn("- " + MUL, self.pending_section(self.last_prompt()))  # AC-5: listed
         self.assertEqual(self.state().test_files, [MUL])
         self.assertEqual(self.status(), "")
 
@@ -137,9 +144,9 @@ class StopPathKeepsTheStuckFile(StuckCase):
         with mock.patch("os.remove", refusing(LEFT)):
             code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertFalse(self.exists(MUL))                                                 # deleted as before
+        self.assertFalse(self.exists(MUL))  # deleted as before
         self.assertTrue(self.exists(LEFT))
-        self.assertEqual(self.state().pending_test_files, [LEFT])                          # AC-5: exactly the stuck one
+        self.assertEqual(self.state().pending_test_files, [LEFT])  # AC-5: exactly the stuck one
         code, out = run_cli(["preflight"])
         self.assertEqual(code, EXIT_OK, out)
 
@@ -148,25 +155,25 @@ class StartOfRunCleanupKeepsTheStuckFile(StuckCase):
     def test_leftover_of_a_killed_round_that_cannot_be_deleted_is_handed_to_the_reviewer(self):
         self.needs_info_round()
         state = self.state()
-        state.reviewer_running = True                  # what a kill mid-session leaves on disk
+        state.reviewer_running = True  # what a kill mid-session leaves on disk
         state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
         self.write(LEFT, "# half written by the killed session\n")
         self.claude(approving({LEFT: LEFT_TEXT}))
         with mock.patch("os.remove", refusing(LEFT)):
             code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-5: tree check passes
+        self.assertEqual(code, EXIT_OK, out)  # AC-5: tree check passes
         self.assertNotIn("not clean", out)
-        self.assertFalse(self.exists(MUL))                                                 # the deletable one went
-        self.assertIn("could not remove", out)                                             # AC-5: named
+        self.assertFalse(self.exists(MUL))  # the deletable one went
+        self.assertIn("could not remove", out)  # AC-5: named
         self.assertIn(LEFT, out)
         self.assertIn("tolerate", out)
-        self.assertNotIn("by hand", out)                                                   # round 1 F3
+        self.assertNotIn("by hand", out)  # round 1 F3
         self.assertIn("] run:", out)
-        self.assertIn("- " + LEFT, self.pending_section(self.last_prompt()))               # AC-5: listed
+        self.assertIn("- " + LEFT, self.pending_section(self.last_prompt()))  # AC-5: listed
         self.assertNotIn("- " + MUL, self.last_prompt())
         state = self.state()
         self.assertFalse(state.reviewer_running)
-        self.assertEqual(state.pending_test_files, [])                                     # committed by this round
+        self.assertEqual(state.pending_test_files, [])  # committed by this round
         self.assertEqual(state.test_files, [LEFT])
         self.assertEqual(self.status(), "")
 
@@ -178,8 +185,8 @@ class StartOfRunCleanupKeepsTheStuckFile(StuckCase):
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertEqual(self.state().pending_test_files, [MUL])
         code, out = run_cli(["run", "--dry-run"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-5: tolerated
-        self.assertTrue(self.exists(MUL))                                                  # a dry run deletes nothing
+        self.assertEqual(code, EXIT_OK, out)  # AC-5: tolerated
+        self.assertTrue(self.exists(MUL))  # a dry run deletes nothing
         self.assertEqual(self.state().pending_test_files, [MUL])
 
 
@@ -194,17 +201,17 @@ class ResetWithAStuckFile(StuckCase):
             code, out = run_cli(["reset"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertNotIn("Traceback", out)
-        self.assertFalse(self.exists(MUL))                                                 # deletable one went
+        self.assertFalse(self.exists(MUL))  # deletable one went
         self.assertTrue(self.exists(LEFT))
-        self.assertIn("could not remove", out)                                             # named
-        self.assertIn("by hand", out)                                                      # told what to do
+        self.assertIn("could not remove", out)  # named
+        self.assertIn("by hand", out)  # told what to do
         self.assertIn(LEFT, out.split("by hand", 1)[1])
-        self.assertNotIn("tolerate", out)                                                  # round 2 F1: no false promise
-        self.assertNotIn(MUL, out.split("by hand", 1)[1])                                  # only the stuck one
+        self.assertNotIn("tolerate", out)  # round 2 F1: no false promise
+        self.assertNotIn(MUL, out.split("by hand", 1)[1])  # only the stuck one
         self.assertIn("state removed", out)
         self.assertIsNone(self.state())
         code, out = run_cli(["preflight"])
-        self.assertEqual(code, EXIT_ERROR, out)                                            # nothing tolerates it now
+        self.assertEqual(code, EXIT_ERROR, out)  # nothing tolerates it now
         self.assertIn("not clean", out)
 
     def test_run_path_still_promises_tolerance_after_reset_changed_nothing_there(self):
@@ -215,7 +222,7 @@ class ResetWithAStuckFile(StuckCase):
         with mock.patch("os.remove", refusing(MUL)):
             code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertIn("tolerate", out)                                                     # AC-5: still said here
+        self.assertIn("tolerate", out)  # AC-5: still said here
         self.assertNotIn("by hand", out)
         self.assertEqual(self.state().pending_test_files, [MUL])
 

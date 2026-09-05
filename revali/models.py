@@ -2,6 +2,7 @@
 
 Tiers are an engine's ladder, weakest first (defaults.toml [engines.<name>] tiers).
 """
+
 from dataclasses import dataclass
 from typing import Iterable, List, Optional
 
@@ -13,7 +14,7 @@ REVIEWER, DIAGNOSER = "reviewer", "diagnoser"
 class Resolved:
     model: str
     fallback: str
-    reason: str      # "" when the model was set explicitly
+    reason: str  # "" when the model was set explicitly
 
 
 def tier_index(model: str, tiers: List[str]) -> Optional[int]:
@@ -32,8 +33,14 @@ def on_foreign_ladder(model: str, ladders: Iterable[List[str]]) -> bool:
     return any(tier_index(model, tiers) is not None for tiers in ladders)
 
 
-def resolve(role: str, requested: str, fallback_requested: str, author_model: str,
-            tiers: List[str], foreign_ladders: Iterable[List[str]] = ()) -> Resolved:
+def resolve(
+    role: str,
+    requested: str,
+    fallback_requested: str,
+    author_model: str,
+    tiers: List[str],
+    foreign_ladders: Iterable[List[str]] = (),
+) -> Resolved:
     """Pick the model for a role.
 
     auto, reviewer: one tier above the author (top stays top; unknown or foreign author -> top).
@@ -54,15 +61,24 @@ def resolve(role: str, requested: str, fallback_requested: str, author_model: st
             else:
                 why = "author model %s is not on the ladder" % author_model
             chosen = top if role == REVIEWER else max(0, top - 1)
-            reason = "auto: %s, using %s" % (why, "the top tier" if chosen == top else "one below the top")
+            reason = "auto: %s, using %s" % (
+                why,
+                "the top tier" if chosen == top else "one below the top",
+            )
         elif role == REVIEWER:
             chosen = min(top, idx + 1)
-            reason = ("auto: one tier above author %s" % author_model if chosen > idx
-                      else "auto: author %s is already at the top" % author_model)
+            reason = (
+                "auto: one tier above author %s" % author_model
+                if chosen > idx
+                else "auto: author %s is already at the top" % author_model
+            )
         else:
             chosen = max(0, idx - 1)
-            reason = ("auto: one tier below author %s" % author_model if chosen < idx
-                      else "auto: author %s is already at the bottom" % author_model)
+            reason = (
+                "auto: one tier below author %s" % author_model
+                if chosen < idx
+                else "auto: author %s is already at the bottom" % author_model
+            )
         model = tiers[chosen]
     else:
         model = requested.strip()

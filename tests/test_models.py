@@ -1,7 +1,7 @@
 import unittest
 
-from tests.helpers import ROOT  # noqa: F401  (sys.path setup)
 from revali.models import DIAGNOSER, REVIEWER, resolve, tier_index
+from tests.helpers import ROOT  # noqa: F401  (sys.path setup)
 
 TIERS = ["haiku", "sonnet", "opus", "fable"]
 OTHER = [["gpt-5-mini", "gpt-5"]]

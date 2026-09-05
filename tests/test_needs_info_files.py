@@ -1,15 +1,23 @@
 """AC-1..AC-7 of fix/needs-info-files: a NEEDS_INFO round's uncommitted test files are
 recorded in the state, tolerated by the clean-tree check, shown to the next round, committed
 or removed by it, and dropped with the other leftovers when that round is interrupted."""
+
 import os
 import unittest
 
-from tests.helpers import ROOT, RepoCase, TEST_REVIEW_MUL, approve_response, claude_entry, git, run_cli
-from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, PROMPT_VERSION, STATE_VERSION
-from revali import pipeline
+from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, PROMPT_VERSION, STATE_VERSION, pipeline
 from revali.preflight import Stop, locate, preflight
 from revali.review import interruption_cleanup
 from revali.state import State
+from tests.helpers import (
+    ROOT,
+    TEST_REVIEW_MUL,
+    RepoCase,
+    approve_response,
+    claude_entry,
+    git,
+    run_cli,
+)
 
 PENDING = "tests/test_review_mul.py"
 SECOND = "tests/test_review_zero.py"
@@ -23,20 +31,29 @@ def asking(write_tests=True):
 
 def approving(**files):
     """An approving entry that writes exactly `files` (path -> text) and lists them as tests."""
-    tests = [{"path": p, "purpose": "acceptance", "covers": ["AC-1", "AC-2"], "expected": "per AC"}
-             for p in files]
+    tests = [
+        {"path": p, "purpose": "acceptance", "covers": ["AC-1", "AC-2"], "expected": "per AC"}
+        for p in files
+    ]
     entry = claude_entry(approve_response(tests=tests), write_tests=False)
     entry["write_files"] = dict(files)
     return entry
 
 
 def finding():
-    return {"id": "F1", "file": "src/calc.py", "line": 3, "severity": "high", "kind": "correctness",
-            "text": "mul ignores negative numbers", "suggestion": "handle them"}
+    return {
+        "id": "F1",
+        "file": "src/calc.py",
+        "line": 3,
+        "severity": "high",
+        "kind": "correctness",
+        "text": "mul ignores negative numbers",
+        "suggestion": "handle them",
+    }
 
 
 def error_line(out):
-    return next((l for l in out.splitlines() if l.startswith("ERROR:")), "")
+    return next((line for line in out.splitlines() if line.startswith("ERROR:")), "")
 
 
 def changed_in(sha, repo):
@@ -60,9 +77,9 @@ class NeedsInfoCase(RepoCase):
 class Recorded(NeedsInfoCase):
     def test_pending_files_recorded_and_named(self):
         out = self.needs_info_round()
-        self.assertEqual(self.state().pending_test_files, [PENDING])                       # AC-1
-        self.assertIn("?? " + PENDING, self.status())                                      # still uncommitted
-        self.assertIn(PENDING, out)                                                        # AC-1: named
+        self.assertEqual(self.state().pending_test_files, [PENDING])  # AC-1
+        self.assertIn("?? " + PENDING, self.status())  # still uncommitted
+        self.assertIn(PENDING, out)  # AC-1: named
         self.assertIn("do not commit", out)
         self.assertGreaterEqual(STATE_VERSION, 3)
         self.assertEqual(State().pending_test_files, [])
@@ -71,7 +88,7 @@ class Recorded(NeedsInfoCase):
         self.claude(asking(write_tests=False))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
-        self.assertEqual(self.state().pending_test_files, [])                              # AC-1
+        self.assertEqual(self.state().pending_test_files, [])  # AC-1
         self.assertNotIn("do not commit", out)
 
 
@@ -80,12 +97,12 @@ class Tolerated(NeedsInfoCase):
         self.needs_info_round()
         with self.assertRaises(Stop) as cm:
             preflight(self.repo)
-        self.assertIn("not clean", cm.exception.message)                                   # the file is dirty
-        preflight(self.repo, tolerate=[PENDING])                                           # AC-2: tolerated
+        self.assertIn("not clean", cm.exception.message)  # the file is dirty
+        preflight(self.repo, tolerate=[PENDING])  # AC-2: tolerated
         code, out = run_cli(["run", "--dry-run"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-2: dry run
+        self.assertEqual(code, EXIT_OK, out)  # AC-2: dry run
         code, out = run_cli(["preflight"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-2: preflight
+        self.assertEqual(code, EXIT_OK, out)  # AC-2: preflight
         self.assertTrue(self.exists(PENDING))
         self.assertEqual(self.state().pending_test_files, [PENDING])
 
@@ -94,22 +111,24 @@ class Tolerated(NeedsInfoCase):
         self.write("src/extra.py", "x = 1\n")
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-2: other path
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-2: other path
         self.assertIn("not clean", error_line(out))
         self.assertIn("src/extra.py", out)
-        self.assertNotIn(PENDING, out)                                                     # AC-2: not an offender
+        self.assertNotIn(PENDING, out)  # AC-2: not an offender
         self.assertTrue(self.exists(PENDING))
-        self.assertEqual(self.state().pending_test_files, [PENDING])                       # AC-5: kept
+        self.assertEqual(self.state().pending_test_files, [PENDING])  # AC-5: kept
         os.remove(os.path.join(self.repo, "src/extra.py"))
         doc = self.read(self.change_md())
-        self.write(self.change_md(), doc.replace("kind: feature\n", "kind: feature\nstatus: draft\n", 1))
+        self.write(
+            self.change_md(), doc.replace("kind: feature\n", "kind: feature\nstatus: draft\n", 1)
+        )
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_ERROR, out)                                            # AC-5: draft stops it
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-5: draft stops it
         self.assertTrue(self.exists(PENDING))
         self.assertEqual(self.state().pending_test_files, [PENDING])
         self.write(self.change_md(), doc)
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-5: next run tolerates
+        self.assertEqual(code, EXIT_OK, out)  # AC-5: next run tolerates
         self.assertEqual(self.state().pending_test_files, [])
 
     def test_a_modified_own_earlier_file_is_tolerated(self):
@@ -117,7 +136,7 @@ class Tolerated(NeedsInfoCase):
         self.claude(cr)
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
-        self.assertEqual(self.state().test_files, [PENDING])                               # committed in round 1
+        self.assertEqual(self.state().test_files, [PENDING])  # committed in round 1
         self.write("src/calc.py", self.read("src/calc.py") + "\n# negatives handled\n")
         self.commit_all("fix")
         entry = asking(write_tests=False)
@@ -125,13 +144,13 @@ class Tolerated(NeedsInfoCase):
         self.claude(entry)
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
-        self.assertEqual(self.state().pending_test_files, [PENDING])                       # AC-1: modified file
+        self.assertEqual(self.state().pending_test_files, [PENDING])  # AC-1: modified file
         self.assertIn(" M " + PENDING, self.status())
         code, out = run_cli(["preflight"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-2: tolerated
+        self.assertEqual(code, EXIT_OK, out)  # AC-2: tolerated
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_OK, out)                                               # AC-3: committed
+        self.assertEqual(code, EXIT_OK, out)  # AC-3: committed
         self.assertEqual(self.status().strip(), "")
         self.assertEqual(self.state().pending_test_files, [])
         self.assertIn(PENDING, changed_in(self.state().test_commits[-1], self.repo))
@@ -147,11 +166,11 @@ class NextRound(NeedsInfoCase):
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
         prompt = self.fake_calls("claude")[-1]["prompt"]
-        self.assertIn("not committed yet", prompt)                                         # AC-3: listed
+        self.assertIn("not committed yet", prompt)  # AC-3: listed
         self.assertIn("- " + PENDING, prompt)
         self.assertGreaterEqual(int(PROMPT_VERSION), 5)
         state = self.state()
-        self.assertEqual(state.pending_test_files, [])                                     # AC-3: cleared
+        self.assertEqual(state.pending_test_files, [])  # AC-3: cleared
         self.assertEqual(sorted(changed_in(state.test_commits[-1], self.repo)), [PENDING, SECOND])
         self.assertEqual(sorted(state.test_files), [PENDING, SECOND])
         self.assertEqual(self.status().strip(), "")
@@ -163,7 +182,7 @@ class NextRound(NeedsInfoCase):
         self.claude(entry)
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertFalse(self.exists(PENDING))                                             # AC-3: gone
+        self.assertFalse(self.exists(PENDING))  # AC-3: gone
         state = self.state()
         self.assertEqual(changed_in(state.test_commits[-1], self.repo), [SECOND])
         self.assertEqual(state.pending_test_files, [])
@@ -176,25 +195,24 @@ class Interrupted(NeedsInfoCase):
         self.claude(claude_entry(is_error=True))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertFalse(self.exists(PENDING))                                             # AC-4: removed
-        self.assertEqual(self.state().pending_test_files, [])                              # AC-4: cleared
+        self.assertFalse(self.exists(PENDING))  # AC-4: removed
+        self.assertEqual(self.state().pending_test_files, [])  # AC-4: cleared
         self.assertEqual(self.status().strip(), "")
 
     def test_a_killed_next_session_is_cleaned_by_the_run_after_it(self):
         self.needs_info_round()
         state = self.state()
-        state.reviewer_running = True          # what a session killed mid-round leaves behind
+        state.reviewer_running = True  # what a session killed mid-round leaves behind
         state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
         self.claude(approving(**{SECOND: SECOND_TEXT}))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertIn("removed 1 unfinished test file", out)                               # AC-4: named
+        self.assertIn("removed 1 unfinished test file", out)  # AC-4: named
         self.assertIn(PENDING, out)
-        self.assertFalse(self.exists(PENDING))                                             # AC-4: removed
+        self.assertFalse(self.exists(PENDING))  # AC-4: removed
         state = self.state()
         self.assertEqual(state.pending_test_files, [])
         self.assertEqual(state.test_files, [SECOND])
-
 
     def test_a_modified_own_tracked_pending_file_goes_back_to_head_when_the_next_round_fails(self):
         # Round 1 commits the reviewer's file, round 2 (NEEDS_INFO) modifies it, the session of
@@ -214,17 +232,17 @@ class Interrupted(NeedsInfoCase):
         self.claude(claude_entry(is_error=True))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertEqual(self.read(PENDING), committed)                                    # back to HEAD
+        self.assertEqual(self.read(PENDING), committed)  # back to HEAD
         self.assertEqual(self.status().strip(), "")
         self.assertEqual(self.state().pending_test_files, [])
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
-        self.assertEqual(code, EXIT_OK, out)                                               # not refused
+        self.assertEqual(code, EXIT_OK, out)  # not refused
 
 
 class HookLivesInReview(NeedsInfoCase):
     def test_hook_built_by_review_and_not_by_pipeline(self):
-        self.assertIsNone(interruption_cleanup(State(), self.rdir(), None))                # AC-6
+        self.assertIsNone(interruption_cleanup(State(), self.rdir(), None))  # AC-6
         flagged = State()
         flagged.reviewer_running = True
         flagged.pending_test_files = [PENDING]
@@ -232,7 +250,7 @@ class HookLivesInReview(NeedsInfoCase):
         self.assertTrue(callable(hook))
         self.write(PENDING, "# half written\n")
         hook(locate(self.repo))
-        self.assertFalse(self.exists(PENDING))                                             # AC-6: same cleanup
+        self.assertFalse(self.exists(PENDING))  # AC-6: same cleanup
         self.assertFalse(flagged.reviewer_running)
         self.assertEqual(flagged.pending_test_files, [])
         self.assertFalse(hasattr(pipeline, "_cleanup_after_interruption"))
@@ -243,7 +261,7 @@ class ReadmeDescribesIt(unittest.TestCase):
         with open(os.path.join(ROOT, "docs", "side-effects.md"), "r", encoding="utf-8") as fh:
             text = fh.read()
         section = text.split("# What revali does to your repository", 1)[1].split("\n## ", 1)[0]
-        self.assertIn("NEEDS_INFO round keeps its test files", section)                    # AC-7
+        self.assertIn("NEEDS_INFO round keeps its test files", section)  # AC-7
         self.assertIn("tolerates exactly those paths", section)
         self.assertIn("next round commits or removes", section)
         self.assertIn("Do not commit them by hand", section)

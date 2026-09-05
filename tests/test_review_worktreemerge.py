@@ -4,16 +4,16 @@ AC-4 (`merge` takes the tree lock inside a try, so a TreeLockHeld is one ERROR l
 
 Black-box through `revali merge` with the fake gh and a real git remote; the one white-box
 case (a failing `git checkout --detach`) is what AC-3 asks for by name."""
+
 import os
 import subprocess
 import unittest
 from unittest import mock
 
-from tests.helpers import RepoCase, git, run_cli
-from revali import EXIT_ERROR, EXIT_OK
-from revali import gitops, merge, pipeline
+from revali import EXIT_ERROR, EXIT_OK, gitops, merge, pipeline
 from revali.procs import Result
 from revali.state import State, TreeLockHeld, lock_path, tree_lock_path
+from tests.helpers import RepoCase, git, run_cli
 
 
 def same_path(a, b):
@@ -22,8 +22,9 @@ def same_path(a, b):
 
 
 def mentions_path(text, path):
-    return os.path.normcase(os.path.normpath(path)).replace("\\", "/") in \
-        os.path.normcase(text).replace("\\", "/")
+    return os.path.normcase(os.path.normpath(path)).replace("\\", "/") in os.path.normcase(
+        text
+    ).replace("\\", "/")
 
 
 class WorktreeCase(RepoCase):
@@ -36,22 +37,34 @@ class WorktreeCase(RepoCase):
 
         def drop():
             os.chdir(self.repo)
-            subprocess.run(["git", "worktree", "remove", "--force", path], cwd=self.repo, capture_output=True)
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", path], cwd=self.repo, capture_output=True
+            )
 
         self.addCleanup(drop)
         return path
 
     def ready(self, root):
         rdir = os.path.join(root, ".revali", "feature__mul")
-        State(repo="owner/repo", branch="feature/mul", base="main", stage="ready_to_merge",
-              message="validation 1 passed", last_exit=EXIT_OK, pr_number=7,
-              head_sha=gitops.rev_parse("HEAD", root), test_files=["tests/test_review_mul.py"]).save(rdir)
+        State(
+            repo="owner/repo",
+            branch="feature/mul",
+            base="main",
+            stage="ready_to_merge",
+            message="validation 1 passed",
+            last_exit=EXIT_OK,
+            pr_number=7,
+            head_sha=gitops.rev_parse("HEAD", root),
+            test_files=["tests/test_review_mul.py"],
+        ).save(rdir)
         git(["push", "-q", "-u", "origin", "feature/mul"], root)
         return rdir
 
     def remote_heads(self, root):
-        return sorted(l.split("refs/heads/")[1]
-                      for l in git(["ls-remote", "--heads", "origin"], root).splitlines())
+        return sorted(
+            line.split("refs/heads/")[1]
+            for line in git(["ls-remote", "--heads", "origin"], root).splitlines()
+        )
 
     def gh_merges(self):
         return [c["argv"] for c in self.fake_calls("gh") if c["argv"][:2] == ["pr", "merge"]]
@@ -76,7 +89,7 @@ class PrimaryTreeRefusal(WorktreeCase):
         self.assertIsNotNone(gitops.rev_parse("feature/mul", self.repo))
         self.assertIn("feature/mul", self.remote_heads(self.repo))
         self.assertEqual(State.load(rdir).stage, "ready_to_merge")
-        self.assertTrue(os.path.isdir(rdir))                     # the state directory stays
+        self.assertTrue(os.path.isdir(rdir))  # the state directory stays
         # both locks are released
         self.assertFalse(os.path.isfile(lock_path(rdir)))
         self.assertFalse(os.path.isfile(tree_lock_path(self.repo, ".revali")))
@@ -107,24 +120,26 @@ class LinkedWorktreeFollowUp(WorktreeCase):
         self.assertEqual(self.gh_merges(), [["pr", "merge", "7", "--squash"]])
         self.assertIn("detached at the merged main, local branch feature/mul removed", out)
         self.assertIn("git worktree remove", out)
-        self.assertTrue(mentions_path(out, self.repo), out)       # where to `git pull`
+        self.assertTrue(mentions_path(out, self.repo), out)  # where to `git pull`
         self.assertNotIn("note:", out)
         self.assertEqual(gitops.current_branch(self.wt), "HEAD")
         self.assertIsNone(gitops.rev_parse("feature/mul", self.wt))
-        self.assertEqual(gitops.rev_parse("HEAD", self.wt), gitops.rev_parse("origin/main", self.wt))
+        self.assertEqual(
+            gitops.rev_parse("HEAD", self.wt), gitops.rev_parse("origin/main", self.wt)
+        )
         self.assertNotIn("feature/mul", self.remote_heads(self.wt))
-        self.assertEqual(gitops.current_branch(self.repo), "main")   # the primary tree is untouched
+        self.assertEqual(gitops.current_branch(self.repo), "main")  # the primary tree is untouched
         self.assertFalse(os.path.isfile(tree_lock_path(self.wt, ".revali")))
 
     def test_failed_fetch_is_reported_and_nothing_is_claimed(self):
         # the remote vanished between the PR merge and the local follow-up
         git(["remote", "set-url", "origin", os.path.join(self.tmp, "gone.git")], self.wt)
         code, out = run_cli(["merge"])
-        self.assertEqual(code, EXIT_OK, out)                        # the PR is merged; that is the result
+        self.assertEqual(code, EXIT_OK, out)  # the PR is merged; that is the result
         self.assertIn("MERGED: PR #7 into main", out)
         self.assertIn("note: could not delete origin/feature/mul", out)
         self.assertIn("note: git fetch failed", out)
-        self.assertRegex(out, r"note: git fetch failed: \S")        # carries git's own text
+        self.assertRegex(out, r"note: git fetch failed: \S")  # carries git's own text
         self.assertIn("still on feature/mul", out)
         self.assertIn("local branch feature/mul kept", out)
         self.assertNotIn("detached at", out)
@@ -138,8 +153,13 @@ class LinkedWorktreeFollowUp(WorktreeCase):
 
         def refuse_checkout(cmd, **kw):
             if "checkout" in [str(c) for c in cmd]:
-                return Result(cmd=list(cmd), returncode=1, stdout="",
-                              stderr="error: fake checkout refusal\n", duration=0.0)
+                return Result(
+                    cmd=list(cmd),
+                    returncode=1,
+                    stdout="",
+                    stderr="error: fake checkout refusal\n",
+                    duration=0.0,
+                )
             return real_run(cmd, **kw)
 
         with mock.patch.object(merge, "run", refuse_checkout):
@@ -149,7 +169,7 @@ class LinkedWorktreeFollowUp(WorktreeCase):
         self.assertIn("still on feature/mul", out)
         self.assertIn("local branch feature/mul kept", out)
         self.assertNotIn("detached at", out)
-        self.assertNotIn("git fetch failed", out)                   # the fetch itself went through
+        self.assertNotIn("git fetch failed", out)  # the fetch itself went through
         self.assertEqual(gitops.current_branch(self.wt), "feature/mul")
         self.assertIsNotNone(gitops.rev_parse("feature/mul", self.wt))
         self.assertNotIn("feature/mul", self.remote_heads(self.wt))  # the remote delete did happen
@@ -161,9 +181,16 @@ class MergeTreeLockRace(RepoCase):
     one ERROR line, exit 1, and the branch lock is let go."""
 
     def ready(self):
-        State(repo="owner/repo", branch="feature/mul", base="main", stage="ready_to_merge",
-              message="validation 1 passed", last_exit=EXIT_OK, pr_number=7,
-              head_sha=gitops.rev_parse("HEAD", self.repo)).save(self.rdir())
+        State(
+            repo="owner/repo",
+            branch="feature/mul",
+            base="main",
+            stage="ready_to_merge",
+            message="validation 1 passed",
+            last_exit=EXIT_OK,
+            pr_number=7,
+            head_sha=gitops.rev_parse("HEAD", self.repo),
+        ).save(self.rdir())
 
     def test_tree_lock_held_is_an_error_line(self):
         self.ready()
@@ -171,12 +198,19 @@ class MergeTreeLockRace(RepoCase):
         def held(path, branch, pid=None):
             raise TreeLockHeld(4321, "feature/other", "2026-09-04T00:00:00")
 
-        with mock.patch.object(pipeline, "acquire_tree_lock", held), \
-             mock.patch.object(merge, "do_merge", side_effect=AssertionError("do_merge must not run")):
+        with (
+            mock.patch.object(pipeline, "acquire_tree_lock", held),
+            mock.patch.object(
+                merge, "do_merge", side_effect=AssertionError("do_merge must not run")
+            ),
+        ):
             code, out = run_cli(["merge"])
         self.assertEqual(code, EXIT_ERROR, out)
-        self.assertIn("ERROR: a revali run is already in progress in this working tree on branch feature/other "
-                      "(pid 4321)", out)
+        self.assertIn(
+            "ERROR: a revali run is already in progress in this working tree "
+            "on branch feature/other (pid 4321)",
+            out,
+        )
         self.assertIn("revali wait --branch feature/other", out)
         self.assertNotIn("Traceback", out)
         self.assertFalse(os.path.isfile(lock_path(self.rdir())))

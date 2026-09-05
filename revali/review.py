@@ -1,31 +1,65 @@
 """Review stage: build the reviewer prompt, spawn `claude -p`, judge its output,
 guard the working tree, check AC coverage, smoke-run the new tests, commit them.
 """
+
 import json
 import os
 import string
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
-from revali import EXIT_ERROR
-from revali import engines, gitops, models
+from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
 from revali.preflight import Context, Stop, check_tree_unmoved
 from revali.procs import resolve, run
 from revali.runners import RunnerError, get_runner, steps_for
-from revali.state import State, RunLog, now_iso, read_text, safe_branch, write_json_atomic, write_text
+from revali.state import (
+    RunLog,
+    State,
+    now_iso,
+    read_text,
+    safe_branch,
+    write_json_atomic,
+    write_text,
+)
 
 APPROVE, CHANGES_REQUESTED, NEEDS_INFO = "APPROVE", "CHANGES_REQUESTED", "NEEDS_INFO"
 MANIFEST_PATTERNS = [
-    "requirements*.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile", "Pipfile.lock",
-    "poetry.lock", "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-    "Cargo.toml", "Cargo.lock", "go.mod", "go.sum", "CMakeLists.txt", ".gitmodules",
-    "conanfile.*", "vcpkg.json", "Gemfile", "Gemfile.lock",
+    "requirements*.txt",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "Pipfile",
+    "Pipfile.lock",
+    "poetry.lock",
+    "package.json",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "Cargo.toml",
+    "Cargo.lock",
+    "go.mod",
+    "go.sum",
+    "CMakeLists.txt",
+    ".gitmodules",
+    "conanfile.*",
+    "vcpkg.json",
+    "Gemfile",
+    "Gemfile.lock",
 ]
-SHELL_ALLOW = ["git diff", "git log", "git show"]   # read-only git, mapped by the engine
-TRAILER = "Revali-Round"   # on every test commit revali makes; marks the reviewer's files as its own
-LIST_FIELDS = ("questions", "findings", "previous_findings", "scope_mismatch", "dependencies_changed",
-               "test_changes", "tests", "not_testable", "suggestions")
+SHELL_ALLOW = ["git diff", "git log", "git show"]  # read-only git, mapped by the engine
+TRAILER = "Revali-Round"  # on every test commit revali makes; marks the reviewer's files as its own
+LIST_FIELDS = (
+    "questions",
+    "findings",
+    "previous_findings",
+    "scope_mismatch",
+    "dependencies_changed",
+    "test_changes",
+    "tests",
+    "not_testable",
+    "suggestions",
+)
 
 
 @dataclass
@@ -60,6 +94,7 @@ class RoundOutcome:
 
 # ---- inputs -----------------------------------------------------------------
 
+
 def assemble_checklist(ctx: Context) -> str:
     parts = []
     if ctx.builtin_checklist and os.path.isfile(ctx.builtin_checklist):
@@ -71,7 +106,9 @@ def assemble_checklist(ctx: Context) -> str:
     if proj:
         path = proj if os.path.isabs(proj) else os.path.join(ctx.repo_root, proj)
         if os.path.isfile(path):
-            parts.append("### Project (overrides the layers above on conflict)\n\n" + read_text(path).strip())
+            parts.append(
+                "### Project (overrides the layers above on conflict)\n\n" + read_text(path).strip()
+            )
     return "\n\n".join(parts) if parts else "(no checklist configured)"
 
 
@@ -82,11 +119,23 @@ def test_pattern_glob(ctx: Context) -> str:
 def modified_existing_tests(ctx: Context) -> List[str]:
     """Existing test files (present on base) that the diff modifies or deletes."""
     root = ctx.repo_root
-    res = gitops._git(["diff", "--name-only", "--diff-filter=MD", "%s...HEAD" % ctx.base_ref, "--",
-                       ctx.cfg.project.test_dir], root)
+    res = gitops._git(
+        [
+            "diff",
+            "--name-only",
+            "--diff-filter=MD",
+            "%s...HEAD" % ctx.base_ref,
+            "--",
+            ctx.cfg.project.test_dir,
+        ],
+        root,
+    )
     pattern = test_pattern_glob(ctx)
-    return [p.strip() for p in res.stdout.splitlines()
-            if p.strip() and not gitops.matches_any(p.strip(), [pattern])]
+    return [
+        p.strip()
+        for p in res.stdout.splitlines()
+        if p.strip() and not gitops.matches_any(p.strip(), [pattern])
+    ]
 
 
 def manifests_touched(ctx: Context) -> List[str]:
@@ -104,14 +153,28 @@ def _prior_findings_section(rdir: str, round_no: int) -> str:
     except ValueError:
         return ""
     data = prev.get("data", prev)
-    lines = ["# Previous round (%d)" % (round_no - 1), "",
-             "Verdict: %s. Summary: %s" % (data.get("verdict", "?"), data.get("summary", "")), "",
-             "Findings from that round (mark each in `previous_findings` as resolved, unresolved,",
-             "or accepted when the author's response convinced you; raise new findings only for",
-             "what the fix introduced):", ""]
+    lines = [
+        "# Previous round (%d)" % (round_no - 1),
+        "",
+        "Verdict: %s. Summary: %s" % (data.get("verdict", "?"), data.get("summary", "")),
+        "",
+        "Findings from that round (mark each in `previous_findings` as resolved, unresolved,",
+        "or accepted when the author's response convinced you; raise new findings only for",
+        "what the fix introduced):",
+        "",
+    ]
     for f in data.get("findings", []):
-        lines.append("- %s [%s %s] %s:%s %s" % (f.get("id", "?"), f.get("severity", "?"), f.get("kind", "?"),
-                                                f.get("file", "?"), f.get("line", 0), f.get("text", "")))
+        lines.append(
+            "- %s [%s %s] %s:%s %s"
+            % (
+                f.get("id", "?"),
+                f.get("severity", "?"),
+                f.get("kind", "?"),
+                f.get("file", "?"),
+                f.get("line", 0),
+                f.get("text", ""),
+            )
+        )
     if not data.get("findings"):
         lines.append("- (none)")
     if data.get("questions"):
@@ -131,17 +194,21 @@ def _response_section(rdir: str, round_no: int) -> str:
 def _prior_tests_section(state: State) -> str:
     if not state.test_files:
         return ""
-    return ("Test files you wrote in earlier rounds (update them; do not create duplicates):\n"
-            + "\n".join("- " + p for p in state.test_files) + "\n")
+    return (
+        "Test files you wrote in earlier rounds (update them; do not create duplicates):\n"
+        + "\n".join("- " + p for p in state.test_files)
+        + "\n"
+    )
 
 
 def _pending_tests_section(state: State) -> str:
     if not state.pending_test_files:
         return ""
-    return ("Files you wrote in the previous round (NEEDS_INFO) that are not committed yet; they are\n"
-            "in the working tree. Update or delete them; whatever remains is committed with this\n"
-            "round's tests:\n"
-            + "\n".join("- " + p for p in state.pending_test_files) + "\n")
+    return (
+        "Files you wrote in the previous round (NEEDS_INFO) that are not committed yet; they are\n"
+        "in the working tree. Update or delete them; whatever remains is committed with this\n"
+        "round's tests:\n" + "\n".join("- " + p for p in state.pending_test_files) + "\n"
+    )
 
 
 def tracked_test_files(ctx: Context) -> List[str]:
@@ -154,8 +221,11 @@ def existing_test_names(ctx: Context, state: State) -> List[str]:
     """Tracked files matching test_file_pattern that this pipeline did not write:
     names the reviewer must not use or modify."""
     pattern = test_pattern_glob(ctx)
-    return sorted(p for p in tracked_test_files(ctx)
-                  if gitops.matches_any(p, [pattern]) and p not in state.test_files)
+    return sorted(
+        p
+        for p in tracked_test_files(ctx)
+        if gitops.matches_any(p, [pattern]) and p not in state.test_files
+    )
 
 
 def branch_test_commits(ctx: Context) -> List[Tuple[str, List[str]]]:
@@ -168,13 +238,18 @@ def branch_test_commits(ctx: Context) -> List[Tuple[str, List[str]]]:
     test_dir = ctx.cfg.project.test_dir
     out = []
     for sha, _ in gitops.trailer_commits(ctx.base_ref, "HEAD", TRAILER, ctx.repo_root):
-        paths = [p for p in gitops.commit_paths(sha, ctx.repo_root)
-                 if _under_test_dir(p, test_dir) and p in tracked]
+        paths = [
+            p
+            for p in gitops.commit_paths(sha, ctx.repo_root)
+            if _under_test_dir(p, test_dir) and p in tracked
+        ]
         out.append((sha, sorted(paths)))
     return out
 
 
-def recover_test_ownership(ctx: Context, state: State, log: Optional[RunLog]) -> Tuple[List[str], List[str]]:
+def recover_test_ownership(
+    ctx: Context, state: State, log: Optional[RunLog]
+) -> Tuple[List[str], List[str]]:
     """Add the branch's trailer commits and their surviving test files to the state (front of
     the lists, no duplicates). Runs on every run, so the state heals whatever forgot the files:
     a rewrite, `revali reset`, a state written before this rule existed. Idempotent; returns
@@ -188,14 +263,25 @@ def recover_test_ownership(ctx: Context, state: State, log: Optional[RunLog]) ->
     state.test_commits = commits + [c for c in state.test_commits if c not in commits]
     state.test_files = files + [f for f in state.test_files if f not in files]
     if log and new_files:
-        log.stage("run", "recovered the reviewer's %d test file(s) from %d earlier test commit(s) on the "
-                         "branch (%s trailer): %s; commits %s"
-                  % (len(new_files), len(commits), TRAILER, ", ".join(new_files),
-                     ", ".join(c[:10] for c in commits)))
+        log.stage(
+            "run",
+            "recovered the reviewer's %d test file(s) from %d earlier test commit(s) on the "
+            "branch (%s trailer): %s; commits %s"
+            % (
+                len(new_files),
+                len(commits),
+                TRAILER,
+                ", ".join(new_files),
+                ", ".join(c[:10] for c in commits),
+            ),
+        )
     elif log and new_commits and not files:
-        log.stage("run", "found %d earlier reviewer test commit(s) on the branch (%s trailer) but none of "
-                         "their test files is still in HEAD: %s"
-                  % (len(commits), TRAILER, ", ".join(c[:10] for c in commits)))
+        log.stage(
+            "run",
+            "found %d earlier reviewer test commit(s) on the branch (%s trailer) but none of "
+            "their test files is still in HEAD: %s"
+            % (len(commits), TRAILER, ", ".join(c[:10] for c in commits)),
+        )
     return commits, files
 
 
@@ -203,9 +289,13 @@ def _existing_tests_section(ctx: Context, state: State) -> str:
     names = existing_test_names(ctx, state)
     if not names:
         return ""
-    return ("Test files that already exist in `%s/` and are not yours (do not modify, delete, or\n"
-            "overwrite them; choose a topic that gives a different file name):\n"
-            % ctx.cfg.project.test_dir + "\n".join("- " + p for p in names) + "\n")
+    return (
+        "Test files that already exist in `%s/` and are not yours (do not modify, delete, or\n"
+        "overwrite them; choose a topic that gives a different file name):\n"
+        % ctx.cfg.project.test_dir
+        + "\n".join("- " + p for p in names)
+        + "\n"
+    )
 
 
 def _bounce_section(notes: str) -> str:
@@ -214,18 +304,27 @@ def _bounce_section(notes: str) -> str:
     return "# Corrections required before this review is accepted\n\n%s\n" % notes.strip()
 
 
-def build_prompt(ctx: Context, state: State, rdir: str, round_no: int, bounce_notes: str = "") -> str:
+def build_prompt(
+    ctx: Context, state: State, rdir: str, round_no: int, bounce_notes: str = ""
+) -> str:
     cfg = ctx.cfg
     exclude = list(cfg.review.exclude) + [test_pattern_glob(ctx)]
     diff = gitops.diff_text(ctx.base_ref, "HEAD", ctx.repo_root, exclude=exclude)
     kind = ctx.doc.kind
-    tests_required = "required for kind %s" % kind if kind in ("feature", "fix") else \
-        "not required for kind %s: leave `tests` empty and list every AC in `not_testable` with reason 'kind %s'" % (kind, kind)
+    tests_required = (
+        "required for kind %s" % kind
+        if kind in ("feature", "fix")
+        else "not required for kind %s: leave `tests` empty and list every AC in "
+        "`not_testable` with reason 'kind %s'" % (kind, kind)
+    )
     guide = ""
     if cfg.project.test_guide:
         gpath = os.path.join(ctx.repo_root, cfg.project.test_guide)
         if os.path.isfile(gpath):
-            guide = "\nHow tests are added in this project (from %s):\n\n%s\n" % (cfg.project.test_guide, read_text(gpath).strip())
+            guide = "\nHow tests are added in this project (from %s):\n\n%s\n" % (
+                cfg.project.test_guide,
+                read_text(gpath).strip(),
+            )
     values = {
         "branch": ctx.branch,
         "base": ctx.base,
@@ -256,6 +355,7 @@ def build_prompt(ctx: Context, state: State, rdir: str, round_no: int, bounce_no
 
 # ---- reviewer session -------------------------------------------------------
 
+
 def validate_shape(data) -> List[str]:
     problems = []
     if not isinstance(data, dict):
@@ -268,8 +368,11 @@ def validate_shape(data) -> List[str]:
         if not isinstance(data.get(key), list):
             problems.append("%s must be a list" % key)
     for f in data.get("findings", []) if isinstance(data.get("findings"), list) else []:
-        if not isinstance(f, dict) or f.get("severity") not in ("high", "medium", "low") \
-                or f.get("kind") not in ("correctness", "convention", "security"):
+        if (
+            not isinstance(f, dict)
+            or f.get("severity") not in ("high", "medium", "low")
+            or f.get("kind") not in ("correctness", "convention", "security")
+        ):
             problems.append("finding with invalid severity/kind: %r" % (f,))
     for t in data.get("tests", []) if isinstance(data.get("tests"), list) else []:
         if not isinstance(t, dict) or not t.get("path") or not isinstance(t.get("covers"), list):
@@ -281,40 +384,79 @@ def planned_reviewer(ctx: Context) -> models.Resolved:
     """Which model the Reviewer would run on, and why (explicit or auto)."""
     cfg = ctx.cfg.review
     engine_cfg = ctx.cfg.engine_for("review")
-    return models.resolve(models.REVIEWER, cfg.model, cfg.fallback_model, ctx.doc.author_model if ctx.doc else "",
-                          engine_cfg.tiers, ctx.cfg.foreign_ladders(engine_cfg.name))
+    return models.resolve(
+        models.REVIEWER,
+        cfg.model,
+        cfg.fallback_model,
+        ctx.doc.author_model if ctx.doc else "",
+        engine_cfg.tiers,
+        ctx.cfg.foreign_ladders(engine_cfg.name),
+    )
 
 
-def spawn_reviewer(ctx: Context, prompt: str, rdir: str, round_no: int, attempt: int,
-                   log: Optional[RunLog]) -> ReviewerRun:
+def spawn_reviewer(
+    ctx: Context, prompt: str, rdir: str, round_no: int, attempt: int, log: Optional[RunLog]
+) -> ReviewerRun:
     cfg = ctx.cfg.review
     engine = engines.for_role(ctx.cfg, "review")
     chosen = planned_reviewer(ctx)
     raw_path = os.path.join(ctx.logs, "review-r%d-%d.raw.json" % (round_no, attempt))
     if log:
-        log.stage("review", "round %d attempt %d: reviewer %s%s via %s (budget $%.2f, timeout %d min)"
-                  % (round_no, attempt, chosen.model, " (%s)" % chosen.reason if chosen.reason else "",
-                     engine.name, cfg.budget_usd, cfg.timeout_min))
+        log.stage(
+            "review",
+            "round %d attempt %d: reviewer %s%s via %s (budget $%.2f, timeout %d min)"
+            % (
+                round_no,
+                attempt,
+                chosen.model,
+                " (%s)" % chosen.reason if chosen.reason else "",
+                engine.name,
+                cfg.budget_usd,
+                cfg.timeout_min,
+            ),
+        )
     request = EngineRequest(
-        role="reviewer", prompt=prompt, schema_text=read_text(ctx.review_schema),
-        model=chosen.model, fallback_model=chosen.fallback, effort=cfg.effort, budget_usd=cfg.budget_usd,
-        timeout_s=cfg.timeout_min * 60, cwd=ctx.repo_root, raw_path=raw_path,
-        may_write=[ctx.cfg.project.test_dir], shell_allow=list(SHELL_ALLOW))
+        role="reviewer",
+        prompt=prompt,
+        schema_text=read_text(ctx.review_schema),
+        model=chosen.model,
+        fallback_model=chosen.fallback,
+        effort=cfg.effort,
+        budget_usd=cfg.budget_usd,
+        timeout_s=cfg.timeout_min * 60,
+        cwd=ctx.repo_root,
+        raw_path=raw_path,
+        may_write=[ctx.cfg.project.test_dir],
+        shell_allow=list(SHELL_ALLOW),
+    )
     result = engine.run(request, log)
     problems = validate_shape(result.data)
     if problems:
-        raise Stop(EXIT_ERROR, "reviewer output does not match the schema: %s; raw saved to %s"
-                   % ("; ".join(problems[:5]), raw_path))
+        raise Stop(
+            EXIT_ERROR,
+            "reviewer output does not match the schema: %s; raw saved to %s"
+            % ("; ".join(problems[:5]), raw_path),
+        )
     return ReviewerRun(
-        data=result.data, raw=result.raw, model_requested=chosen.model, model_actual=result.model_actual,
-        fallback=result.fallback, cost=result.cost, denials=result.denials, duration_ms=result.duration_ms,
+        data=result.data,
+        raw=result.raw,
+        model_requested=chosen.model,
+        model_actual=result.model_actual,
+        fallback=result.fallback,
+        cost=result.cost,
+        denials=result.denials,
+        duration_ms=result.duration_ms,
         model_reason=chosen.reason,
     )
 
 
-def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str = "the reviewer",
-                             stage: str = "review", only: Optional[Sequence[str]] = None
-                             ) -> Tuple[List[str], List[str]]:
+def discard_unfinished_tests(
+    ctx: Context,
+    log: Optional[RunLog],
+    left_by: str = "the reviewer",
+    stage: str = "review",
+    only: Optional[Sequence[str]] = None,
+) -> Tuple[List[str], List[str]]:
     """Delete untracked files matching test_file_pattern under test_dir after a review round
     stopped before its tests were committed: they are half-written and would make the next
     run refuse a dirty tree. This is the only deletion inside test_dir revali ever performs.
@@ -329,13 +471,16 @@ def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str =
     removed = []
     stuck = []
     reasons = []
-    for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + '/',)):
+    for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",)):
         code, path = entry.split(" ", 1)
         path = path.replace("\\", "/")
         if wanted is not None and path not in wanted:
             continue
-        if (code.strip() == "??" and _under_test_dir(path, ctx.cfg.project.test_dir)
-                and gitops.matches_any(path, [pattern])):
+        if (
+            code.strip() == "??"
+            and _under_test_dir(path, ctx.cfg.project.test_dir)
+            and gitops.matches_any(path, [pattern])
+        ):
             try:
                 os.remove(os.path.join(ctx.repo_root, path))
                 removed.append(path)
@@ -343,17 +488,30 @@ def discard_unfinished_tests(ctx: Context, log: Optional[RunLog], left_by: str =
                 stuck.append(path)
                 reasons.append("%s (%s)" % (path, exc))
     if removed and log:
-        log.stage(stage, "removed %d unfinished test file(s) %s left behind: %s"
-                  % (len(removed), left_by, ", ".join(removed)))
+        log.stage(
+            stage,
+            "removed %d unfinished test file(s) %s left behind: %s"
+            % (len(removed), left_by, ", ".join(removed)),
+        )
     if stuck and log:
-        log.stage(stage, "could not remove %d unfinished test file(s): %s" % (len(stuck), ", ".join(reasons)))
+        log.stage(
+            stage,
+            "could not remove %d unfinished test file(s): %s" % (len(stuck), ", ".join(reasons)),
+        )
     return removed, stuck
 
 
 # ---- checks after the reviewer --------------------------------------------
 
-def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage: str = "review",
-                       keep: Sequence[str] = (), tolerated_next_run: bool = True) -> None:
+
+def drop_pending_tests(
+    ctx: Context,
+    state: State,
+    log: Optional[RunLog],
+    stage: str = "review",
+    keep: Sequence[str] = (),
+    tolerated_next_run: bool = True,
+) -> None:
     """Forget a NEEDS_INFO round's pending files once a round that was meant to commit them
     stopped: the untracked ones are gone with discard_unfinished_tests, and a tracked one the
     reviewer had modified (its own file from an earlier round) goes back to HEAD, so the next
@@ -366,19 +524,31 @@ def drop_pending_tests(ctx: Context, state: State, log: Optional[RunLog], stage:
             _restore_from_head(path, ctx.repo_root)
             restored.append(path)
     if restored and log:
-        log.stage(stage, "restored %d pending test file(s) of the reviewer's own from HEAD: %s"
-                  % (len(restored), ", ".join(restored)))
+        log.stage(
+            stage,
+            "restored %d pending test file(s) of the reviewer's own from HEAD: %s"
+            % (len(restored), ", ".join(restored)),
+        )
     kept = sorted(set(p.replace("\\", "/") for p in keep))
     if kept and log and tolerated_next_run:
-        log.stage(stage, "the next run will tolerate the %d file(s) it could not remove and list them "
-                         "for the reviewer to update or delete: %s" % (len(kept), ", ".join(kept)))
+        log.stage(
+            stage,
+            "the next run will tolerate the %d file(s) it could not remove and list them "
+            "for the reviewer to update or delete: %s" % (len(kept), ", ".join(kept)),
+        )
     # in place: the run passed this very list to preflight as `tolerate` before the cleanup hook ran
     state.pending_test_files[:] = kept
 
 
-def discard_round_leftovers(ctx: Context, state: State, log: Optional[RunLog], left_by: str,
-                            stage: str, only: Optional[Sequence[str]] = None,
-                            tolerated_next_run: bool = True) -> None:
+def discard_round_leftovers(
+    ctx: Context,
+    state: State,
+    log: Optional[RunLog],
+    left_by: str,
+    stage: str,
+    only: Optional[Sequence[str]] = None,
+    tolerated_next_run: bool = True,
+) -> None:
     """Everything a round that did not reach its commit leaves behind, in one call: delete
     the untracked drafts, restore a modified tracked pending file, keep the undeletable ones
     tolerated. Shared by the stop path of a round, the cleanup before the next run, and
@@ -387,7 +557,9 @@ def discard_round_leftovers(ctx: Context, state: State, log: Optional[RunLog], l
     leave it None. `tolerated_next_run` False skips the "next run will tolerate" line: `reset`
     drops the state that would carry the list and gives its own advice."""
     _, stuck = discard_unfinished_tests(ctx, log, left_by, stage=stage, only=only)
-    drop_pending_tests(ctx, state, log, stage=stage, keep=stuck, tolerated_next_run=tolerated_next_run)
+    drop_pending_tests(
+        ctx, state, log, stage=stage, keep=stuck, tolerated_next_run=tolerated_next_run
+    )
 
 
 def interruption_cleanup(state: State, rdir: str, log: Optional[RunLog]):
@@ -402,6 +574,7 @@ def interruption_cleanup(state: State, rdir: str, log: Optional[RunLog]):
         discard_round_leftovers(ctx, state, log, "the interrupted run", stage="run")
         state.reviewer_running = False
         state.save(rdir)
+
     return hook
 
 
@@ -416,7 +589,7 @@ def _restore_from_head(path: str, root: str) -> None:
     try:
         gitops.git_ok(["checkout", "HEAD", "--", path], root)
     except gitops.GitError as exc:
-        raise Stop(EXIT_ERROR, "could not restore %s from HEAD: %s" % (path, exc))
+        raise Stop(EXIT_ERROR, "could not restore %s from HEAD: %s" % (path, exc)) from exc
 
 
 def _remove_new(path: str, code: str, root: str) -> None:
@@ -426,20 +599,22 @@ def _remove_new(path: str, code: str, root: str) -> None:
         try:
             gitops.git_ok(["rm", "-q", "--cached", "--", path], root)
         except gitops.GitError as exc:
-            raise Stop(EXIT_ERROR, "could not unstage %s: %s" % (path, exc))
+            raise Stop(EXIT_ERROR, "could not unstage %s: %s" % (path, exc)) from exc
     full = os.path.join(root, path)
     if os.path.isdir(full):
         import shutil
+
         shutil.rmtree(full, ignore_errors=True)
     elif os.path.exists(full):
         os.remove(full)
 
 
 def guard_worktree(ctx: Context, log: Optional[RunLog]) -> List[str]:
-    """Restore from HEAD anything the reviewer touched outside test_dir. Returns the offending paths."""
+    """Restore from HEAD anything the reviewer touched outside test_dir. Returns the offending
+    paths."""
     root = ctx.repo_root
     offenders = []
-    for entry in gitops.dirty_paths(root, (ctx.cfg.paths.state_dir + '/',)):
+    for entry in gitops.dirty_paths(root, (ctx.cfg.paths.state_dir + "/",)):
         code, path = entry.split(" ", 1)
         if _under_test_dir(path, ctx.cfg.project.test_dir):
             continue
@@ -449,8 +624,11 @@ def guard_worktree(ctx: Context, log: Optional[RunLog]) -> List[str]:
         else:
             _restore_from_head(path, root)
     if offenders and log:
-        log.stage("review", "reviewer touched files outside %s; reverted: %s"
-                  % (ctx.cfg.project.test_dir, ", ".join(offenders)))
+        log.stage(
+            "review",
+            "reviewer touched files outside %s; reverted: %s"
+            % (ctx.cfg.project.test_dir, ", ".join(offenders)),
+        )
     return offenders
 
 
@@ -459,7 +637,7 @@ def restore_protected_tests(ctx: Context, state: State, log: Optional[RunLog]) -
     that this pipeline did not write in an earlier round. Returns the restored paths."""
     root = ctx.repo_root
     restored = []
-    for entry in gitops.dirty_paths(root, (ctx.cfg.paths.state_dir + '/',)):
+    for entry in gitops.dirty_paths(root, (ctx.cfg.paths.state_dir + "/",)):
         code, path = entry.split(" ", 1)
         path = path.replace("\\", "/")
         if code == "??" or code[0] == "A" or not _under_test_dir(path, ctx.cfg.project.test_dir):
@@ -470,14 +648,17 @@ def restore_protected_tests(ctx: Context, state: State, log: Optional[RunLog]) -
         restored.append(path)
     restored.sort()
     if restored and log:
-        log.stage("review", "reviewer modified existing test file(s) it did not write; restored: %s"
-                  % ", ".join(restored))
+        log.stage(
+            "review",
+            "reviewer modified existing test file(s) it did not write; restored: %s"
+            % ", ".join(restored),
+        )
     return restored
 
 
 def new_test_files(ctx: Context) -> List[str]:
     files = []
-    for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + '/',)):
+    for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",)):
         _, path = entry.split(" ", 1)
         if _under_test_dir(path, ctx.cfg.project.test_dir):
             files.append(path.replace("\\", "/"))
@@ -496,13 +677,20 @@ def ac_gaps(data: dict, ac_ids: List[str]) -> List[str]:
 
 def is_blocking(f: dict) -> bool:
     sev, kind = f.get("severity"), f.get("kind")
-    return (kind in ("correctness", "security") and sev in ("high", "medium")) or \
-           (kind == "convention" and sev == "high")
+    return (kind in ("correctness", "security") and sev in ("high", "medium")) or (
+        kind == "convention" and sev == "high"
+    )
 
 
 def format_finding(f: dict) -> str:
-    return "%s [%s %s] %s:%s %s" % (f.get("id", "F?"), f.get("severity"), f.get("kind"), f.get("file", "?"),
-                                    f.get("line", 0), f.get("text", ""))
+    return "%s [%s %s] %s:%s %s" % (
+        f.get("id", "F?"),
+        f.get("severity"),
+        f.get("kind"),
+        f.get("file", "?"),
+        f.get("line", 0),
+        f.get("text", ""),
+    )
 
 
 def non_blocking_findings(data: dict) -> List[dict]:
@@ -519,7 +707,11 @@ def finding_counts(data: dict) -> Tuple[int, int]:
 def counts_label(data: dict, review_path: str) -> str:
     """Suffix for the needs_action stage message: counts and where the full review is."""
     blocking, other = finding_counts(data)
-    return "%d blocking, %d non-blocking finding(s); full review: %s" % (blocking, other, review_path)
+    return "%d blocking, %d non-blocking finding(s); full review: %s" % (
+        blocking,
+        other,
+        review_path,
+    )
 
 
 def non_blocking_note(data: dict, round_no: int, review_path: str, rdir: str) -> str:
@@ -528,8 +720,11 @@ def non_blocking_note(data: dict, round_no: int, review_path: str, rdir: str) ->
     others = non_blocking_findings(data)
     if not others:
         return ""
-    lines = ["Also %d non-blocking finding(s) in %s; fix or answer each in %s or they come back as unresolved:"
-             % (len(others), review_path, os.path.join(rdir, "response-%d.md" % round_no))]
+    lines = [
+        "Also %d non-blocking finding(s) in %s; fix or answer each in %s "
+        "or they come back as unresolved:"
+        % (len(others), review_path, os.path.join(rdir, "response-%d.md" % round_no))
+    ]
     lines += ["  - " + format_finding(f) for f in others]
     return "\n" + "\n".join(lines)
 
@@ -541,18 +736,27 @@ def compute_verdict(data: dict, gaps: List[str], needs_info_allowed: bool) -> Tu
             reasons.append(format_finding(f))
     for tc in data.get("test_changes", []):
         if not tc.get("justified"):
-            reasons.append("existing test %s changed without justification: %s"
-                           % (tc.get("file", "?"), tc.get("reason", "")))
+            reasons.append(
+                "existing test %s changed without justification: %s"
+                % (tc.get("file", "?"), tc.get("reason", ""))
+            )
     for dep in data.get("dependencies_changed", []):
         if not dep.get("justified"):
-            reasons.append("dependency change in %s not justified: %s" % (dep.get("file", "?"), dep.get("reason", "")))
+            reasons.append(
+                "dependency change in %s not justified: %s"
+                % (dep.get("file", "?"), dep.get("reason", ""))
+            )
     if gaps:
-        reasons.append("acceptance criteria without a test or a not_testable reason: %s" % ", ".join(gaps))
+        reasons.append(
+            "acceptance criteria without a test or a not_testable reason: %s" % ", ".join(gaps)
+        )
     questions = [q for q in data.get("questions", []) if str(q).strip()]
     if data.get("verdict") == NEEDS_INFO and questions:
         if needs_info_allowed and not reasons:
             return NEEDS_INFO, ["question: " + str(q) for q in questions]
-        reasons.append("reviewer still has unanswered questions: " + "; ".join(str(q) for q in questions))
+        reasons.append(
+            "reviewer still has unanswered questions: " + "; ".join(str(q) for q in questions)
+        )
     if reasons:
         return CHANGES_REQUESTED, reasons
     if data.get("verdict") == CHANGES_REQUESTED:
@@ -560,44 +764,76 @@ def compute_verdict(data: dict, gaps: List[str], needs_info_allowed: bool) -> Tu
     return APPROVE, []
 
 
-def smoke_run(ctx: Context, test_files: List[str], rdir: str, round_no: int, attempt: int,
-              log: Optional[RunLog]) -> Optional[str]:
+def smoke_run(
+    ctx: Context,
+    test_files: List[str],
+    rdir: str,
+    round_no: int,
+    attempt: int,
+    log: Optional[RunLog],
+) -> Optional[str]:
     """Run the new tests once in the sandbox. None = they ran (pass or fail);
     a string = they could not run (bounce to the reviewer)."""
     plat = ctx.cfg.validate.platforms[ctx.cfg.project.platforms[0]]
     try:
         runner = get_runner(plat)
     except RunnerError as exc:
-        raise Stop(EXIT_ERROR, str(exc))
-    extra = {rel: read_text(os.path.join(ctx.repo_root, rel)) for rel in test_files
-             if os.path.isfile(os.path.join(ctx.repo_root, rel))}
+        raise Stop(EXIT_ERROR, str(exc)) from exc
+    extra = {
+        rel: read_text(os.path.join(ctx.repo_root, rel))
+        for rel in test_files
+        if os.path.isfile(os.path.join(ctx.repo_root, rel))
+    }
     label = "smoke-r%d-%d" % (round_no, attempt)
     if log:
         log.stage("review", "smoke run of %d new test file(s) on %s" % (len(extra), runner.name))
     try:
-        report = runner.run(ctx.repo_root, "HEAD", steps_for(plat, ["setup", "build", "new_test"]), extra,
-                            ctx.logs, label, log.detail if log else None, scope=safe_branch(ctx.branch))
+        report = runner.run(
+            ctx.repo_root,
+            "HEAD",
+            steps_for(plat, ["setup", "build", "new_test"]),
+            extra,
+            ctx.logs,
+            label,
+            log.detail if log else None,
+            scope=safe_branch(ctx.branch),
+        )
     except RunnerError as exc:
-        raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc)
+        raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc) from exc
     failed = report.failed
     if failed is None:
         return None
     if failed.name != "new_test":
-        raise Stop(EXIT_ERROR, "sandbox %s step failed (exit %d); see %s" % (failed.name, failed.returncode, failed.log_path))
+        raise Stop(
+            EXIT_ERROR,
+            "sandbox %s step failed (exit %d); see %s"
+            % (failed.name, failed.returncode, failed.log_path),
+        )
     if failed.returncode == 1 and not failed.timed_out:
         return None  # tests ran and some failed: that is validation's business
     tail = "\n".join(failed.text.strip().splitlines()[-30:])
-    return ("the new tests could not run (exit %d%s) with `%s`:\n%s"
-            % (failed.returncode, ", timed out" if failed.timed_out else "", failed.cmd, tail))
+    return "the new tests could not run (exit %d%s) with `%s`:\n%s" % (
+        failed.returncode,
+        ", timed out" if failed.timed_out else "",
+        failed.cmd,
+        tail,
+    )
 
 
 def commit_tests(ctx: Context, files: List[str], round_no: int, log: Optional[RunLog]) -> str:
     root = ctx.repo_root
     gitops.git_ok(["add", "--"] + files, root)
-    message = ("test: review tests (round %d)\n\nWritten by the revali reviewer from the acceptance criteria.\n\n"
-               "Co-Authored-By: Claude <noreply@anthropic.com>\n%s: %d\n" % (round_no, TRAILER, round_no))
-    res = run(resolve("git") + ["commit", "--quiet", "-F", "-"], cwd=root, input_text=message,
-              log=log.detail if log else None)
+    message = (
+        "test: review tests (round %d)\n\n"
+        "Written by the revali reviewer from the acceptance criteria.\n\n"
+        "Co-Authored-By: Claude <noreply@anthropic.com>\n%s: %d\n" % (round_no, TRAILER, round_no)
+    )
+    res = run(
+        resolve("git") + ["commit", "--quiet", "-F", "-"],
+        cwd=root,
+        input_text=message,
+        log=log.detail if log else None,
+    )
     if not res.ok:
         raise Stop(EXIT_ERROR, "could not commit the reviewer's tests: %s" % res.text.strip())
     sha = gitops.rev_parse("HEAD", root) or ""
@@ -608,29 +844,62 @@ def commit_tests(ctx: Context, files: List[str], round_no: int, log: Optional[Ru
 
 # ---- rendering --------------------------------------------------------------
 
+
 def _header(meta: dict) -> str:
     lines = ["<!-- generated by revali -->"]
-    for key in ("tool", "round", "model_requested", "model_reason", "model_actual", "fallback", "prompt_version",
-                "cost_usd", "duration_s", "at"):
+    for key in (
+        "tool",
+        "round",
+        "model_requested",
+        "model_reason",
+        "model_actual",
+        "fallback",
+        "prompt_version",
+        "cost_usd",
+        "duration_s",
+        "at",
+    ):
         if key in meta:
             lines.append("%s: %s" % (key, meta[key]))
     return "\n".join(lines) + "\n"
 
 
-def render_review_md(data: dict, verdict: str, reasons: List[str], meta: dict, ac_ids: List[str]) -> str:
-    out = [_header(meta), "", "# Review round %s: %s" % (meta.get("round", "?"), verdict), "",
-           data.get("summary", "").strip(), ""]
+def render_review_md(
+    data: dict, verdict: str, reasons: List[str], meta: dict, ac_ids: List[str]
+) -> str:
+    out = [
+        _header(meta),
+        "",
+        "# Review round %s: %s" % (meta.get("round", "?"), verdict),
+        "",
+        data.get("summary", "").strip(),
+        "",
+    ]
     if verdict != data.get("verdict"):
-        out.append("_Reviewer said %s; the verdict above follows the severity rules._\n" % data.get("verdict"))
+        out.append(
+            "_Reviewer said %s; the verdict above follows the severity rules._\n"
+            % data.get("verdict")
+        )
     if reasons:
         out += ["## Blocking", ""] + ["- " + r for r in reasons] + [""]
     if data.get("questions"):
-        out += ["## Questions for the author", ""] + ["- " + str(q) for q in data["questions"]] + [""]
+        out += (
+            ["## Questions for the author", ""] + ["- " + str(q) for q in data["questions"]] + [""]
+        )
     out += ["## Findings", ""]
     if data.get("findings"):
         for f in data["findings"]:
-            out.append("- **%s** [%s %s] `%s:%s` %s" % (f.get("id", "?"), f.get("severity"), f.get("kind"),
-                                                       f.get("file", "?"), f.get("line", 0), f.get("text", "")))
+            out.append(
+                "- **%s** [%s %s] `%s:%s` %s"
+                % (
+                    f.get("id", "?"),
+                    f.get("severity"),
+                    f.get("kind"),
+                    f.get("file", "?"),
+                    f.get("line", 0),
+                    f.get("text", ""),
+                )
+            )
             if f.get("suggestion"):
                 out.append("  - suggestion: %s" % f["suggestion"])
     else:
@@ -638,24 +907,44 @@ def render_review_md(data: dict, verdict: str, reasons: List[str], meta: dict, a
     out.append("")
     if data.get("previous_findings"):
         out += ["## Previous findings", ""]
-        out += ["- %s: %s %s" % (p.get("id"), p.get("status"), p.get("note", "")) for p in data["previous_findings"]]
+        out += [
+            "- %s: %s %s" % (p.get("id"), p.get("status"), p.get("note", ""))
+            for p in data["previous_findings"]
+        ]
         out.append("")
     if data.get("scope_mismatch"):
         out += ["## Scope mismatch", ""] + ["- " + str(s) for s in data["scope_mismatch"]] + [""]
     if data.get("test_changes"):
         out += ["## Changes to existing tests", ""]
-        out += ["- `%s`: %s (%s)" % (t.get("file"), "justified" if t.get("justified") else "NOT justified", t.get("reason", ""))
-                for t in data["test_changes"]]
+        out += [
+            "- `%s`: %s (%s)"
+            % (
+                t.get("file"),
+                "justified" if t.get("justified") else "NOT justified",
+                t.get("reason", ""),
+            )
+            for t in data["test_changes"]
+        ]
         out.append("")
     if data.get("dependencies_changed"):
         out += ["## Dependency changes", ""]
-        out += ["- `%s`: %s (%s)" % (d.get("file"), "justified" if d.get("justified") else "NOT justified", d.get("reason", ""))
-                for d in data["dependencies_changed"]]
+        out += [
+            "- `%s`: %s (%s)"
+            % (
+                d.get("file"),
+                "justified" if d.get("justified") else "NOT justified",
+                d.get("reason", ""),
+            )
+            for d in data["dependencies_changed"]
+        ]
         out.append("")
     out += ["## Tests written", ""]
     if data.get("tests"):
         for t in data["tests"]:
-            out.append("- `%s` covers %s: %s" % (t.get("path"), ", ".join(t.get("covers", [])) or "-", t.get("purpose", "")))
+            out.append(
+                "- `%s` covers %s: %s"
+                % (t.get("path"), ", ".join(t.get("covers", [])) or "-", t.get("purpose", ""))
+            )
     else:
         out.append("- none")
     out.append("")
@@ -674,24 +963,48 @@ def render_review_md(data: dict, verdict: str, reasons: List[str], meta: dict, a
             out.append("- %s: **uncovered**" % ac)
     out.append("")
     if data.get("suggestions"):
-        out += ["## Follow-up suggestions (not required)", ""] + ["- " + str(s) for s in data["suggestions"]] + [""]
+        out += (
+            ["## Follow-up suggestions (not required)", ""]
+            + ["- " + str(s) for s in data["suggestions"]]
+            + [""]
+        )
     return "\n".join(out)
 
 
-def render_review_summary(data: dict, verdict: str, round_no: int, model: str, cost: float,
-                          ac_ids: List[str], state_dir: str) -> str:
+def render_review_summary(
+    data: dict,
+    verdict: str,
+    round_no: int,
+    model: str,
+    cost: float,
+    ac_ids: List[str],
+    state_dir: str,
+) -> str:
     """The PR comment for a non-private repository: verdict, finding locations, coverage.
     No finding text, suggestions, questions, or scope notes; those stay in review-<n>.md."""
-    out = ["<!-- generated by revali; summary only (non-private repository) -->", "",
-           "# Review round %d: %s" % (round_no, verdict), "",
-           "model: %s, cost: $%.2f" % (model or "?", cost), ""]
+    out = [
+        "<!-- generated by revali; summary only (non-private repository) -->",
+        "",
+        "# Review round %d: %s" % (round_no, verdict),
+        "",
+        "model: %s, cost: $%.2f" % (model or "?", cost),
+        "",
+    ]
     if data.get("questions"):
         out += ["%d question(s) for the author" % len(data["questions"]), ""]
     out += ["## Findings", ""]
     if data.get("findings"):
         for f in data["findings"]:
-            out.append("- %s [%s %s] `%s:%s`" % (f.get("id", "?"), f.get("severity"), f.get("kind"),
-                                              f.get("file", "?"), f.get("line", 0)))
+            out.append(
+                "- %s [%s %s] `%s:%s`"
+                % (
+                    f.get("id", "?"),
+                    f.get("severity"),
+                    f.get("kind"),
+                    f.get("file", "?"),
+                    f.get("line", 0),
+                )
+            )
     else:
         out.append("- none")
     out.append("")
@@ -704,14 +1017,20 @@ def render_review_summary(data: dict, verdict: str, round_no: int, model: str, c
         counts.append("%d scope note(s)" % len(data["scope_mismatch"]))
     if data.get("test_changes"):
         bad = [t for t in data["test_changes"] if not t.get("justified")]
-        counts.append("%d existing test file(s) changed, %d not justified" % (len(data["test_changes"]), len(bad)))
+        counts.append(
+            "%d existing test file(s) changed, %d not justified"
+            % (len(data["test_changes"]), len(bad))
+        )
     if data.get("dependencies_changed"):
         counts.append("%d dependency change(s)" % len(data["dependencies_changed"]))
     if counts:
         out += ["; ".join(counts), ""]
     out += ["## Tests written", ""]
     if data.get("tests"):
-        out += ["- `%s` covers %s" % (t.get("path"), ", ".join(t.get("covers", [])) or "-") for t in data["tests"]]
+        out += [
+            "- `%s` covers %s" % (t.get("path"), ", ".join(t.get("covers", [])) or "-")
+            for t in data["tests"]
+        ]
     else:
         out.append("- none")
     out.append("")
@@ -721,23 +1040,41 @@ def render_review_summary(data: dict, verdict: str, round_no: int, model: str, c
     nt = {n.get("ac") for n in data.get("not_testable", []) if isinstance(n, dict)}
     out += ["## AC coverage", ""]
     for ac in ac_ids:
-        out.append("- %s: %s" % (ac, "covered" if ac in covered else "not testable" if ac in nt else "**uncovered**"))
-    out += ["", "Full text: `%s/<branch>/review-%d.md` on the author's machine." % (state_dir, round_no), ""]
+        out.append(
+            "- %s: %s"
+            % (ac, "covered" if ac in covered else "not testable" if ac in nt else "**uncovered**")
+        )
+    out += [
+        "",
+        "Full text: `%s/<branch>/review-%d.md` on the author's machine." % (state_dir, round_no),
+        "",
+    ]
     return "\n".join(out)
 
 
 def render_tests_md(ctx: Context, state: State, rounds: List[dict]) -> str:
-    """tests.md (file 3): purpose / covers / expected per test, AC table, validation sections appended later."""
-    out = ["<!-- generated by revali; validation results are appended below -->", "",
-           "# Tests for %s" % ctx.doc.title, "", "Branch `%s`, kind `%s`." % (ctx.branch, ctx.doc.kind), ""]
+    """tests.md (file 3): purpose / covers / expected per test, AC table, validation
+    sections appended later."""
+    out = [
+        "<!-- generated by revali; validation results are appended below -->",
+        "",
+        "# Tests for %s" % ctx.doc.title,
+        "",
+        "Branch `%s`, kind `%s`." % (ctx.branch, ctx.doc.kind),
+        "",
+    ]
     latest = rounds[-1]["data"] if rounds else {}
     out += ["## Test files", ""]
     if latest.get("tests"):
         for t in latest["tests"]:
-            out += ["### `%s`" % t.get("path"), "",
-                    "- purpose: %s" % t.get("purpose", ""),
-                    "- covers: %s" % (", ".join(t.get("covers", [])) or "-"),
-                    "- expected: %s" % t.get("expected", ""), ""]
+            out += [
+                "### `%s`" % t.get("path"),
+                "",
+                "- purpose: %s" % t.get("purpose", ""),
+                "- covers: %s" % (", ".join(t.get("covers", [])) or "-"),
+                "- expected: %s" % t.get("expected", ""),
+                "",
+            ]
     else:
         out += ["- none", ""]
     out += ["## Acceptance criteria", ""]
@@ -745,7 +1082,9 @@ def render_tests_md(ctx: Context, state: State, rounds: List[dict]) -> str:
     for t in latest.get("tests", []):
         for ac in t.get("covers", []):
             covered.setdefault(ac, []).append(t.get("path"))
-    nt = {n.get("ac"): n.get("reason") for n in latest.get("not_testable", []) if isinstance(n, dict)}
+    nt = {
+        n.get("ac"): n.get("reason") for n in latest.get("not_testable", []) if isinstance(n, dict)
+    }
     for ac_id, text in ctx.doc.acs:
         if ac_id in covered:
             status = ", ".join("`%s`" % p for p in covered[ac_id])
@@ -759,6 +1098,7 @@ def render_tests_md(ctx: Context, state: State, rounds: List[dict]) -> str:
 
 
 # ---- the round --------------------------------------------------------------
+
 
 def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> RoundOutcome:
     """One review round. Whatever stops it before the tests are committed leaves no
@@ -784,16 +1124,23 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
         prompt = build_prompt(ctx, state, rdir, round_no, bounce_notes)
         write_text(os.path.join(ctx.logs, "prompt-r%d-%d.md" % (round_no, attempt)), prompt)
         check_tree_unmoved(ctx)
-        state.reviewer_running = True   # cleared when this round ends; a later run cleans up otherwise
+        state.reviewer_running = (
+            True  # cleared when this round ends; a later run cleans up otherwise
+        )
         state.save(rdir)
         rr = spawn_reviewer(ctx, prompt, rdir, round_no, attempt, log)
         total_cost += rr.cost
         if rr.denials and log:
-            log.stage("review", "note: %d tool call(s) were denied by the allowlist" % len(rr.denials))
+            log.stage(
+                "review", "note: %d tool call(s) were denied by the allowlist" % len(rr.denials)
+            )
         offenders = guard_worktree(ctx, log)
         if offenders:
-            raise Stop(EXIT_ERROR, "the reviewer modified files outside %s (reverted): %s"
-                       % (ctx.cfg.project.test_dir, ", ".join(offenders)))
+            raise Stop(
+                EXIT_ERROR,
+                "the reviewer modified files outside %s (reverted): %s"
+                % (ctx.cfg.project.test_dir, ", ".join(offenders)),
+            )
         restored = restore_protected_tests(ctx, state, log)
         files = new_test_files(ctx)
         gaps = ac_gaps(rr.data, ctx.doc.ac_ids)
@@ -802,40 +1149,55 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
             smoke_problem = smoke_run(ctx, files, rdir, round_no, attempt, log)
         problems = []
         if restored:
-            problems.append("You modified or deleted existing test file(s) that are not yours; they were "
-                            "restored: %s. Do not touch them. Write your tests into new files under a "
-                            "different topic; names already taken: %s."
-                            % (", ".join(restored), ", ".join(existing_test_names(ctx, state)) or "(none)"))
+            problems.append(
+                "You modified or deleted existing test file(s) that are not yours; they were "
+                "restored: %s. Do not touch them. Write your tests into new files under a "
+                "different topic; names already taken: %s."
+                % (", ".join(restored), ", ".join(existing_test_names(ctx, state)) or "(none)")
+            )
         if gaps and rr.data.get("verdict") != NEEDS_INFO:
-            problems.append("These acceptance criteria are neither covered by a test nor listed in "
-                            "`not_testable` with a reason: %s. Cover them or explain." % ", ".join(gaps))
+            problems.append(
+                "These acceptance criteria are neither covered by a test nor listed in "
+                "`not_testable` with a reason: %s. Cover them or explain." % ", ".join(gaps)
+            )
         if smoke_problem:
             problems.append("Fix the test files so they run: " + smoke_problem)
         if problems and bounces == 0:
             bounces = 1
             bounce_notes = "\n\n".join(problems)
             if log:
-                log.stage("review", "sending the reviewer back once: %s" % "; ".join(p.split("\n")[0][:80] for p in problems))
+                log.stage(
+                    "review",
+                    "sending the reviewer back once: %s"
+                    % "; ".join(p.split("\n")[0][:80] for p in problems),
+                )
             continue
         break
 
     if restored:
-        raise Stop(EXIT_ERROR, "the reviewer modified existing test file(s) it did not write on the last "
-                               "attempt of round %d; restored, no tests committed: %s"
-                   % (round_no, ", ".join(restored)))
+        raise Stop(
+            EXIT_ERROR,
+            "the reviewer modified existing test file(s) it did not write on the last "
+            "attempt of round %d; restored, no tests committed: %s"
+            % (round_no, ", ".join(restored)),
+        )
     if smoke_problem:
-        raise Stop(EXIT_ERROR, "the reviewer's tests still cannot run after a retry; " + smoke_problem)
+        raise Stop(
+            EXIT_ERROR, "the reviewer's tests still cannot run after a retry; " + smoke_problem
+        )
     asked = rr.data.get("verdict") == NEEDS_INFO
     verdict, reasons = compute_verdict(rr.data, [] if asked else gaps, needs_info_allowed)
 
-    reviewed_head = ctx.head_sha   # what the reviewer saw; ctx.head_sha moves on with the run's commits
+    reviewed_head = (
+        ctx.head_sha
+    )  # what the reviewer saw; ctx.head_sha moves on with the run's commits
     commit_sha = ""
     if files and verdict != NEEDS_INFO:
         check_tree_unmoved(ctx)
         state.pending_effect = "commit-tests"
         state.save(rdir)
         commit_sha = commit_tests(ctx, files, round_no, log)
-        ctx.head_sha = commit_sha   # the run's own commit: what the later checks expect
+        ctx.head_sha = commit_sha  # the run's own commit: what the later checks expect
         state.pending_effect = ""
         state.test_commits.append(commit_sha)
         for f in files:
@@ -845,19 +1207,47 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
     # them so preflight tolerates exactly those. Any other verdict has committed or lost them.
     state.pending_test_files = list(files) if verdict == NEEDS_INFO else []
 
-    meta = {"tool": "revali", "round": round_no, "model_requested": rr.model_requested,
-            "model_reason": rr.model_reason or "explicit",
-            "model_actual": rr.model_actual, "fallback": rr.fallback, "prompt_version": state.prompt_version,
-            "cost_usd": "%.4f" % total_cost, "duration_s": rr.duration_ms // 1000, "at": now_iso()}
+    meta = {
+        "tool": "revali",
+        "round": round_no,
+        "model_requested": rr.model_requested,
+        "model_reason": rr.model_reason or "explicit",
+        "model_actual": rr.model_actual,
+        "fallback": rr.fallback,
+        "prompt_version": state.prompt_version,
+        "cost_usd": "%.4f" % total_cost,
+        "duration_s": rr.duration_ms // 1000,
+        "at": now_iso(),
+    }
     review_md = render_review_md(rr.data, verdict, reasons, meta, ctx.doc.ac_ids)
     review_path = os.path.join(rdir, "review-%d.md" % round_no)
     write_text(review_path, review_md)
-    write_json_atomic(os.path.join(rdir, "review-%d.json" % round_no),
-                      {"meta": meta, "verdict": verdict, "reasons": reasons, "data": rr.data,
-                       "test_files": files, "head_sha": reviewed_head, "commit": commit_sha, "bounces": bounces})
-    record = {"round": round_no, "head_sha": reviewed_head, "base_sha": ctx.base_sha, "verdict": verdict,
-              "reviewer_verdict": rr.data.get("verdict"), "model": rr.model_actual, "fallback": rr.fallback,
-              "cost_usd": total_cost, "test_commit": commit_sha, "data": rr.data, "at": now_iso()}
+    write_json_atomic(
+        os.path.join(rdir, "review-%d.json" % round_no),
+        {
+            "meta": meta,
+            "verdict": verdict,
+            "reasons": reasons,
+            "data": rr.data,
+            "test_files": files,
+            "head_sha": reviewed_head,
+            "commit": commit_sha,
+            "bounces": bounces,
+        },
+    )
+    record = {
+        "round": round_no,
+        "head_sha": reviewed_head,
+        "base_sha": ctx.base_sha,
+        "verdict": verdict,
+        "reviewer_verdict": rr.data.get("verdict"),
+        "model": rr.model_actual,
+        "fallback": rr.fallback,
+        "cost_usd": total_cost,
+        "test_commit": commit_sha,
+        "data": rr.data,
+        "at": now_iso(),
+    }
     state.rounds.append(record)
     state.cost_usd += total_cost
     if rr.model_actual and rr.model_actual not in state.models_used:
@@ -870,10 +1260,30 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
     state.reviewer_running = False
     state.save(rdir)
     if log:
-        log.stage("review", "round %d verdict %s (reviewer said %s; model %s%s; $%.2f)"
-                  % (round_no, verdict, rr.data.get("verdict"), rr.model_actual,
-                     ", FALLBACK" if rr.fallback else "", total_cost))
-    return RoundOutcome(round_no=round_no, verdict=verdict, reasons=reasons, data=rr.data, test_files=files,
-                        commit_sha=commit_sha, review_md=review_md, review_path=review_path,
-                        model_actual=rr.model_actual, cost=total_cost, fallback=rr.fallback,
-                        bounces=bounces, gaps=gaps)
+        log.stage(
+            "review",
+            "round %d verdict %s (reviewer said %s; model %s%s; $%.2f)"
+            % (
+                round_no,
+                verdict,
+                rr.data.get("verdict"),
+                rr.model_actual,
+                ", FALLBACK" if rr.fallback else "",
+                total_cost,
+            ),
+        )
+    return RoundOutcome(
+        round_no=round_no,
+        verdict=verdict,
+        reasons=reasons,
+        data=rr.data,
+        test_files=files,
+        commit_sha=commit_sha,
+        review_md=review_md,
+        review_path=review_path,
+        model_actual=rr.model_actual,
+        cost=total_cost,
+        fallback=rr.fallback,
+        bounces=bounces,
+        gaps=gaps,
+    )

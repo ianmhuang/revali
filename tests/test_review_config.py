@@ -1,13 +1,20 @@
 """AC-5 / AC-6 / AC-7: no literal paths or model names left in revali/, the PR #4
 follow-ups in config.py, and the README additions."""
+
 import json
 import os
 import unittest
 
-from tests.helpers import ROOT, RepoCase, claude_entry, run_cli
 from revali import EXIT_OK
-from revali.config import (ConfigError, UserConfig, history_path, load_defaults, parse_project_config,
-                           user_home)
+from revali.config import (
+    ConfigError,
+    UserConfig,
+    history_path,
+    load_defaults,
+    parse_project_config,
+    user_home,
+)
+from tests.helpers import ROOT, RepoCase, claude_entry, run_cli
 
 MINIMAL = """
 [project]
@@ -30,7 +37,7 @@ def package_sources():
 class NoLiteralsInCode(unittest.TestCase):
     def test_paths_and_file_names_come_from_the_config(self):
         for name, text in package_sources().items():
-            if name != "config.py":   # user_home() is the location of the user layer itself
+            if name != "config.py":  # user_home() is the location of the user layer itself
                 self.assertNotIn('".revali"', text, name)
                 self.assertNotIn("'.revali'", text, name)
             self.assertNotIn(".revali/sandbox", text, name)
@@ -38,8 +45,15 @@ class NoLiteralsInCode(unittest.TestCase):
             self.assertNotIn("'history.jsonl'", text, name)
             self.assertNotIn('"logs"', text, name)
             self.assertNotIn("'logs'", text, name)
-            for const in ("REVIEW_DIR =", "PROMPT_PATH =", "SCHEMA_PATH =", "BUILTIN_CHECKLIST =",
-                          "SANDBOX_ROOT =", 'os.path.join(TOOL_ROOT, "prompts"', 'os.path.join(TOOL_ROOT, "schemas"'):
+            for const in (
+                "REVIEW_DIR =",
+                "PROMPT_PATH =",
+                "SCHEMA_PATH =",
+                "BUILTIN_CHECKLIST =",
+                "SANDBOX_ROOT =",
+                'os.path.join(TOOL_ROOT, "prompts"',
+                'os.path.join(TOOL_ROOT, "schemas"',
+            ):
                 self.assertNotIn(const, text, "%s still has %s" % (name, const))
 
     def test_no_model_names_in_the_stages(self):
@@ -55,29 +69,47 @@ class ConfigFollowUps(unittest.TestCase):
     def test_retired_engine_message_is_for_review_only(self):
         with self.assertRaises(ConfigError) as cm:
             parse_project_config(MINIMAL + '\n[validate]\nengine = "prompt"\n')
-        self.assertTrue(any("validate.engine 'prompt' is unknown" in p for p in cm.exception.problems),
-                        cm.exception.problems)
+        self.assertTrue(
+            any("validate.engine 'prompt' is unknown" in p for p in cm.exception.problems),
+            cm.exception.problems,
+        )
         self.assertFalse(any("strategy" in p for p in cm.exception.problems), cm.exception.problems)
         with self.assertRaises(ConfigError) as cm:
             parse_project_config(MINIMAL + '\n[review]\nengine = "hybrid"\n')
-        self.assertTrue(any("review.engine 'hybrid' is now review.strategy" in p for p in cm.exception.problems),
-                        cm.exception.problems)
+        self.assertTrue(
+            any(
+                "review.engine 'hybrid' is now review.strategy" in p for p in cm.exception.problems
+            ),
+            cm.exception.problems,
+        )
 
     def test_wrong_type_is_reported_once(self):
         with self.assertRaises(ConfigError) as cm:
             parse_project_config(MINIMAL + '\n[merge]\nmethod = 5\n[review]\nmax_fixes = "two"\n')
-        self.assertCountEqual(cm.exception.problems,
-                              ["revali.toml: merge.method must be a string",
-                               "revali.toml: review.max_fixes must be an integer"])
+        self.assertCountEqual(
+            cm.exception.problems,
+            [
+                "revali.toml: merge.method must be a string",
+                "revali.toml: review.max_fixes must be an integer",
+            ],
+        )
         with self.assertRaises(ConfigError) as cm:
-            parse_project_config(MINIMAL.replace('new_test = "pytest tests"',
-                                                 'new_test = "pytest tests"\ncommand_timeout_min = "x"'))
-        self.assertEqual(cm.exception.problems, ["revali.toml: validate.linux.command_timeout_min must be an integer"])
+            parse_project_config(
+                MINIMAL.replace(
+                    'new_test = "pytest tests"',
+                    'new_test = "pytest tests"\ncommand_timeout_min = "x"',
+                )
+            )
+        self.assertEqual(
+            cm.exception.problems,
+            ["revali.toml: validate.linux.command_timeout_min must be an integer"],
+        )
 
     def test_later_layer_platform_defaults_reach_an_earlier_platform(self):
         user = {"validate": {"linux": {"distro": "V"}}}
-        cfg = parse_project_config(MINIMAL + '\n[validate.platform]\ncommand_timeout_min = 42\n',
-                                   user_sections=user)
+        cfg = parse_project_config(
+            MINIMAL + "\n[validate.platform]\ncommand_timeout_min = 42\n", user_sections=user
+        )
         self.assertEqual(cfg.validate.platforms["linux"].command_timeout_min, 42)
         self.assertEqual(cfg.validate.platforms["linux"].distro, "V")
         # and the user layer's [validate.platform] reaches a platform the project names
@@ -91,7 +123,9 @@ class ConfigFollowUps(unittest.TestCase):
         self.assertEqual(os.path.basename(history_path()), name)
         with self.assertRaises(ConfigError) as cm:
             parse_project_config(MINIMAL + '\n[paths]\nhistory_file = "a/b.jsonl"\n')
-        self.assertTrue(any("paths.history_file" in p for p in cm.exception.problems), cm.exception.problems)
+        self.assertTrue(
+            any("paths.history_file" in p for p in cm.exception.problems), cm.exception.problems
+        )
 
     def test_history_file_is_honoured_from_the_user_layer_only(self):
         # AC-6 (round-1 F2): the key is wired for the user file and refused in the project file
@@ -99,20 +133,28 @@ class ConfigFollowUps(unittest.TestCase):
         self.assertEqual(os.path.basename(history_path(user)), "runs.jsonl")
         self.assertEqual(os.path.dirname(history_path(user)), user_home())
         # an explicit history_path still wins over the file name
-        both = UserConfig(history_path=os.path.join("elsewhere", "h.jsonl"),
-                          sections={"paths": {"history_file": "runs.jsonl"}})
+        both = UserConfig(
+            history_path=os.path.join("elsewhere", "h.jsonl"),
+            sections={"paths": {"history_file": "runs.jsonl"}},
+        )
         self.assertEqual(history_path(both), os.path.join("elsewhere", "h.jsonl"))
         # the user layer's value validates like the other [paths] keys
         parse_project_config(MINIMAL, user_sections={"paths": {"history_file": "runs.jsonl"}})
         with self.assertRaises(ConfigError) as cm:
             parse_project_config(MINIMAL, user_sections={"paths": {"history_file": "a/b.jsonl"}})
-        self.assertTrue(any("paths.history_file must be a single file name" in p for p in cm.exception.problems),
-                        cm.exception.problems)
+        self.assertTrue(
+            any(
+                "paths.history_file must be a single file name" in p for p in cm.exception.problems
+            ),
+            cm.exception.problems,
+        )
         # the project file may not set it, even to a valid name
         with self.assertRaises(ConfigError) as cm:
             parse_project_config(MINIMAL + '\n[paths]\nhistory_file = "runs.jsonl"\n')
-        self.assertTrue(any("paths.history_file is a user-level key" in p for p in cm.exception.problems),
-                        cm.exception.problems)
+        self.assertTrue(
+            any("paths.history_file is a user-level key" in p for p in cm.exception.problems),
+            cm.exception.problems,
+        )
 
     def test_history_path_itself_refuses_a_nested_user_name(self):
         # round-2 F6: the check must not depend on a project config loading first
@@ -121,8 +163,10 @@ class ConfigFollowUps(unittest.TestCase):
                 history_path(UserConfig(sections={"paths": {"history_file": bad}}))
             self.assertIn("paths.history_file", cm.exception.problems[0])
         # a nested name never wins over an explicit history_path either
-        both = UserConfig(history_path=os.path.join("elsewhere", "h.jsonl"),
-                          sections={"paths": {"history_file": "a/b.jsonl"}})
+        both = UserConfig(
+            history_path=os.path.join("elsewhere", "h.jsonl"),
+            sections={"paths": {"history_file": "a/b.jsonl"}},
+        )
         self.assertEqual(history_path(both), os.path.join("elsewhere", "h.jsonl"))
 
 
@@ -183,9 +227,20 @@ class ReadmeAdditions(unittest.TestCase):
         self.assertTrue(self.files_doc.startswith("# Files\n"))
         files = self.files_doc.split("# Files\n", 1)[1].split("\n## ", 1)[0]
         self.assertIn("| Document | Written by | Read by | Default location | Config key |", files)
-        for token in ("`change.md`", "`tests.md`", "`diagnose-n.json`", "[paths] state_dir", "[paths] logs_dir",
-                      "sandbox_dir", "history_file", "checklist_builtin", "[review] prompt", "[validate] prompt",
-                      "test_guide", "test_file_pattern"):
+        for token in (
+            "`change.md`",
+            "`tests.md`",
+            "`diagnose-n.json`",
+            "[paths] state_dir",
+            "[paths] logs_dir",
+            "sandbox_dir",
+            "history_file",
+            "checklist_builtin",
+            "[review] prompt",
+            "[validate] prompt",
+            "test_guide",
+            "test_file_pattern",
+        ):
             self.assertIn(token, files, token)
 
     def test_model_paragraph_in_configuration(self):
@@ -215,7 +270,7 @@ class TemplatesFollowTheKeys(unittest.TestCase):
         self.assertIn('model = "auto"', text)
         self.assertIn('fallback_model = "auto"', text)
         self.assertNotIn('model = "fable"', text)
-        self.assertNotIn("history_file", text)   # user-level key, not a project one
+        self.assertNotIn("history_file", text)  # user-level key, not a project one
 
 
 if __name__ == "__main__":

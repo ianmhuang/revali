@@ -1,10 +1,10 @@
 import os
 import unittest
 
-from tests.helpers import RepoCase, git, run_cli
-from tests.fixtures.make_sample_repo import PY
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.preflight import Stop, preflight
+from tests.fixtures.make_sample_repo import PY
+from tests.helpers import RepoCase, git, run_cli
 
 
 class _ListLog:
@@ -40,7 +40,10 @@ class PreflightHappyPath(RepoCase):
         self.assertIn("preflight OK", out)
 
     def test_base_from_gh_default_when_unset(self):
-        self.write("revali.toml", self.read("revali.toml").replace('base_branch = "main"', 'base_branch = ""'))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace('base_branch = "main"', 'base_branch = ""'),
+        )
         self.commit_all("config")
         ctx = preflight(self.repo)
         self.assertEqual(ctx.base, "main")
@@ -108,7 +111,12 @@ class PreflightFailures(RepoCase):
         lines = []
         ctx = preflight(self.repo, log=_ListLog(lines))
         self.assertEqual(ctx.repo.visibility, "PUBLIC")
-        self.assertTrue(any("public repository: PR comments will carry summaries only" in l for l in lines), lines)
+        self.assertTrue(
+            any(
+                "public repository: PR comments will carry summaries only" in line for line in lines
+            ),
+            lines,
+        )
 
     def test_stale_base(self):
         # Advance origin/main behind the branch's back.
@@ -126,7 +134,10 @@ class PreflightFailures(RepoCase):
         self.assert_stop(EXIT_ERROR, "nothing to review")
 
     def test_diff_too_large(self):
-        self.write("revali.toml", self.read("revali.toml").replace("max_diff_lines = 800", "max_diff_lines = 3"))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace("max_diff_lines = 800", "max_diff_lines = 3"),
+        )
         self.commit_all("tiny limit")
         self.assert_stop(EXIT_ACTION, "split the change")
 
@@ -150,7 +161,9 @@ class PreflightFailures(RepoCase):
         self.assertIn("style: bad", stop.message)
 
     def test_lint_success(self):
-        self.write("revali.toml", self.read("revali.toml").replace('lint = ""', 'lint = "%s -c pass"' % PY))
+        self.write(
+            "revali.toml", self.read("revali.toml").replace('lint = ""', 'lint = "%s -c pass"' % PY)
+        )
         self.commit_all("lint")
         preflight(self.repo)
 

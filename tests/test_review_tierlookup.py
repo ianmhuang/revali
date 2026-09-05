@@ -4,14 +4,15 @@ White-box on purpose: the AC is about where the answer comes from, not only
 what it is (the two lookups gave identical answers before, which is exactly
 how a future edit to one of them would drift unnoticed).
 """
+
 import unittest
 from unittest import mock
 
-from tests.helpers import ROOT  # noqa: F401  (sys.path setup)
 from revali import models
 from revali.config import EngineCfg
 from revali.engines.base import Engine
 from revali.engines.claude import ClaudeEngine
+from tests.helpers import ROOT  # noqa: F401  (sys.path setup)
 
 LADDER = ["haiku", "sonnet", "opus", "fable"]
 
@@ -27,8 +28,10 @@ class ModelFamilyDelegates(unittest.TestCase):
         eng = engine()
         with mock.patch.object(models, "tier_index", wraps=models.tier_index) as lookup:
             self.assertEqual(eng.model_family("claude-opus-5"), "opus")
-        self.assertEqual([(c.args[0], list(c.args[1])) for c in lookup.call_args_list],
-                         [("claude-opus-5", LADDER)])
+        self.assertEqual(
+            [(c.args[0], list(c.args[1])) for c in lookup.call_args_list],
+            [("claude-opus-5", LADDER)],
+        )
 
     def test_tier_index_answer_wins_over_substring_matching(self):
         # if the shared lookup says "index 0", the family is tiers[0], whatever the id looks like
@@ -53,7 +56,15 @@ class ModelFamilyDelegates(unittest.TestCase):
         # tier_index finds something, on a ladder whose casing differs from the ids
         tiers = ["Mini", "Standard", "Max"]
         eng = engine(tiers=tiers)
-        for model in ("vendor-max-2", "VENDOR-mini", "standard", "max", "vendor-other", " Max ", ""):
+        for model in (
+            "vendor-max-2",
+            "VENDOR-mini",
+            "standard",
+            "max",
+            "vendor-other",
+            " Max ",
+            "",
+        ):
             idx = models.tier_index(model, tiers)
             expected = tiers[idx].lower() if idx is not None else model.lower()
             self.assertEqual(eng.model_family(model), expected, model)

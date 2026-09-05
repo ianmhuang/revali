@@ -1,4 +1,6 @@
-"""Engine registry. Adding a CLI = one module here plus an [engines.<name>] table in defaults.toml."""
+"""Engine registry. Adding a CLI = one module here plus an [engines.<name>] table in
+defaults.toml."""
+
 from typing import Dict, List, Type
 
 from revali.config import Config, ConfigError, EngineCfg
@@ -16,7 +18,9 @@ def available() -> List[str]:
 
 def get_engine(name: str, cfg: EngineCfg) -> Engine:
     if name not in ENGINES:
-        raise ConfigError(["engine '%s' is not implemented (available: %s)" % (name, ", ".join(available()))])
+        raise ConfigError(
+            ["engine '%s' is not implemented (available: %s)" % (name, ", ".join(available()))]
+        )
     return ENGINES[name](cfg)
 
 

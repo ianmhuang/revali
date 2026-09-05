@@ -1,32 +1,45 @@
 """Validate stage: baseline, PASS/FAIL, diagnoser, WSL runner script (run through Git Bash)."""
+
 import os
 import sys
 import unittest
 
-from tests.helpers import FAKE_BIN, RepoCase, _quote, approve_response, claude_entry, git, run_cli
-from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, PY, toml_str
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.config import PlatformCfg
 from revali.runners import WslRunner
 from revali.state import State, read_history
+from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, PY, toml_str
+from tests.helpers import FAKE_BIN, RepoCase, _quote, approve_response, claude_entry, git, run_cli
 
 WSL_STUB = os.path.join(FAKE_BIN, "wsl_stub.py")
 
 
 def diagnosis(cause="code", **kw):
-    data = {"summary": "mul returns a + b instead of a * b, so the product test fails.",
-            "cause": cause,
-            "failures": [{"test": "tests/test_review_mul.py::MulTests::test_product", "cause": cause,
-                          "note": "expected 12, got 7"}],
-            "recommendation": "return a * b"}
+    data = {
+        "summary": "mul returns a + b instead of a * b, so the product test fails.",
+        "cause": cause,
+        "failures": [
+            {
+                "test": "tests/test_review_mul.py::MulTests::test_product",
+                "cause": cause,
+                "note": "expected 12, got 7",
+            }
+        ],
+        "recommendation": "return a * b",
+    }
     data.update(kw)
     return data
 
 
 class BaselineTests(RepoCase):
     def test_broken_baseline_stops_before_review(self):
-        self.runner_scenario({"default": 0, "results": {"baseline": {"test": 1}},
-                              "outputs": {"baseline": {"test": "FAIL: test_add"}}})
+        self.runner_scenario(
+            {
+                "default": 0,
+                "results": {"baseline": {"test": 1}},
+                "outputs": {"baseline": {"test": "FAIL: test_add"}},
+            }
+        )
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
@@ -36,7 +49,10 @@ class BaselineTests(RepoCase):
         self.assertFalse(any(c["argv"][:2] == ["pr", "create"] for c in self.fake_calls("gh")))
 
     def test_baseline_skipped_without_existing_suite(self):
-        self.write("revali.toml", self.read("revali.toml").replace('test = %s' % toml_str(LOCAL_TEST), 'test = ""'))
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace("test = %s" % toml_str(LOCAL_TEST), 'test = ""'),
+        )
         self.commit_all("no suite")
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])
@@ -46,9 +62,20 @@ class BaselineTests(RepoCase):
         self.assertIn("validate-r1", labels)
 
     def test_baseline_only_on_first_pass(self):
-        cr = approve_response(verdict="CHANGES_REQUESTED", findings=[{"id": "F1", "file": "src/calc.py", "line": 1,
-                                                                        "severity": "high", "kind": "correctness",
-                                                                        "text": "t", "suggestion": ""}])
+        cr = approve_response(
+            verdict="CHANGES_REQUESTED",
+            findings=[
+                {
+                    "id": "F1",
+                    "file": "src/calc.py",
+                    "line": 1,
+                    "severity": "high",
+                    "kind": "correctness",
+                    "text": "t",
+                    "suggestion": "",
+                }
+            ],
+        )
         self.claude(claude_entry(cr), claude_entry(write_tests=False))
         run_cli(["run", "--foreground"])
         self.write("src/calc.py", self.read("src/calc.py") + "\n# fix\n")
@@ -79,10 +106,18 @@ class ValidationOutcomes(RepoCase):
         self.assertEqual(len(self.fake_calls("claude")), 1)  # no diagnoser on PASS
 
     def test_fail_diagnoses_then_fix_then_pass(self):
-        self.runner_scenario({"default": 0, "results": {"validate-r1": {"new_test": 1}},
-                              "outputs": {"validate-r1": {"new_test": "AssertionError: 12 != 7"}}})
-        self.claude(claude_entry(), claude_entry(diagnosis(), write_tests=False, model="claude-opus-5", cost=0.2),
-                    claude_entry(approve_response(previous_findings=[]), write_tests=False))
+        self.runner_scenario(
+            {
+                "default": 0,
+                "results": {"validate-r1": {"new_test": 1}},
+                "outputs": {"validate-r1": {"new_test": "AssertionError: 12 != 7"}},
+            }
+        )
+        self.claude(
+            claude_entry(),
+            claude_entry(diagnosis(), write_tests=False, model="claude-opus-5", cost=0.2),
+            claude_entry(approve_response(previous_findings=[]), write_tests=False),
+        )
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
         self.assertIn("validation 1 FAILED at step new_test", out)
@@ -110,7 +145,9 @@ class ValidationOutcomes(RepoCase):
         self.assertIn("tests/test_review_mul.py", diag["prompt"])
         # fix and rerun: counts as a fix cycle, review round 2, validation 2 passes
         self.runner_scenario({"default": 0})
-        self.write("src/calc.py", self.read("src/calc.py").replace("return a * b", "return a * b  # fixed"))
+        self.write(
+            "src/calc.py", self.read("src/calc.py").replace("return a * b", "return a * b  # fixed")
+        )
         self.commit_all("fix mul")
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
@@ -132,7 +169,9 @@ class ValidationOutcomes(RepoCase):
         self.assertIn("step `test`", self.fake_calls("claude")[1]["prompt"])
 
     def test_setup_failure_at_validation_is_error(self):
-        self.write("revali.toml", self.read("revali.toml").replace('setup = ""', 'setup = "pip install x"'))
+        self.write(
+            "revali.toml", self.read("revali.toml").replace('setup = ""', 'setup = "pip install x"')
+        )
         self.commit_all("setup")
         self.runner_scenario({"default": 0, "results": {"validate-r1": {"setup": 1}}})
         self.claude(claude_entry())
@@ -166,6 +205,7 @@ class ValidationOutcomes(RepoCase):
 
 class WslRunnerTests(RepoCase):
     """The generated script is exercised with the host's bash via wsl_stub (no real WSL)."""
+
     runner = "wsl"
 
     def setUp(self):
@@ -174,17 +214,32 @@ class WslRunnerTests(RepoCase):
         os.environ["REVALI_WSL_CMD"] = "%s %s" % (_quote(sys.executable), _quote(WSL_STUB))
         # Commands that work under Git Bash on the host.
         cfg = self.read("revali.toml")
-        cfg = cfg.replace('setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"', 'setup = "%s --version"' % PY)
-        cfg = cfg.replace('test = ".venv/bin/python -m pytest -q"', 'test = %s' % toml_str(LOCAL_TEST))
-        cfg = cfg.replace('new_test = ".venv/bin/python -m pytest -q tests"', 'new_test = %s' % toml_str(LOCAL_NEW_TEST))
+        cfg = cfg.replace(
+            'setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"',
+            'setup = "%s --version"' % PY,
+        )
+        cfg = cfg.replace(
+            'test = ".venv/bin/python -m pytest -q"', "test = %s" % toml_str(LOCAL_TEST)
+        )
+        cfg = cfg.replace(
+            'new_test = ".venv/bin/python -m pytest -q tests"',
+            "new_test = %s" % toml_str(LOCAL_NEW_TEST),
+        )
         self.write("revali.toml", cfg)
         self.commit_all("bash-friendly commands")
 
     def test_script_shape(self):
         r = WslRunner(PlatformCfg(runner="wsl", distro="Ubuntu"))
-        text = r.script("/mnt/d/x y/repo", "/mnt/d/x y/logs", "/mnt/d/x y/extra", "abc123",
-                        [("setup", "python3 -m venv .venv"), ("build", ""), ("test", "pytest -q")],
-                        "validate-r1", "$HOME/.revali/sandbox/repo/validate-r1", 900)
+        text = r.script(
+            "/mnt/d/x y/repo",
+            "/mnt/d/x y/logs",
+            "/mnt/d/x y/extra",
+            "abc123",
+            [("setup", "python3 -m venv .venv"), ("build", ""), ("test", "pytest -q")],
+            "validate-r1",
+            "$HOME/.revali/sandbox/repo/validate-r1",
+            900,
+        )
         self.assertIn('HOST="/mnt/d/x y/repo"', text)
         self.assertIn("git -c safe.directory='*' clone -q --no-checkout", text)
         self.assertIn('git checkout -q --detach "$REF"', text)
@@ -197,44 +252,84 @@ class WslRunnerTests(RepoCase):
 
     @unittest.skipUnless(os.name == "nt" or os.path.exists("/bin/bash"), "needs bash")
     def test_run_through_bash(self):
-        from revali.runners import WslRunner as W
         from revali.config import load_project_config
+        from revali.runners import WslRunner as W
+
         cfg = load_project_config(self.repo)
         plat = cfg.validate.platforms["linux"]
         r = W(plat)
         logs = os.path.join(self.rdir(), "logs")
         head = git(["rev-parse", "HEAD"], self.repo).strip()
-        report = r.run(self.repo, head, [("setup", plat.setup), ("test", plat.test), ("new_test", plat.new_test)],
-                       {"tests/test_review_mul.py": "import unittest\nfrom src.calc import mul\n\nclass T(unittest.TestCase):\n    def test_m(self):\n        self.assertEqual(mul(2, 3), 6)\n"},
-                       logs, "validate-r1")
+        report = r.run(
+            self.repo,
+            head,
+            [("setup", plat.setup), ("test", plat.test), ("new_test", plat.new_test)],
+            {
+                "tests/test_review_mul.py": (
+                    "import unittest\nfrom src.calc import mul\n\n"
+                    "class T(unittest.TestCase):\n"
+                    "    def test_m(self):\n"
+                    "        self.assertEqual(mul(2, 3), 6)\n"
+                )
+            },
+            logs,
+            "validate-r1",
+        )
         self.assertEqual([s.name for s in report.steps], ["setup", "test", "new_test"])
         self.assertTrue(report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in report.steps])
         self.assertTrue(os.path.isfile(os.path.join(logs, "validate-r1.sh")))
         self.assertTrue(os.path.isfile(os.path.join(logs, "validate-r1-new_test.log")))
         self.assertIn("Ran 1 test", report.step("new_test").stdout)
-        sandbox = os.path.join(os.path.expanduser("~"), ".revali", "sandbox", "sample", "validate-r1")
+        sandbox = os.path.join(
+            os.path.expanduser("~"), ".revali", "sandbox", "sample", "validate-r1"
+        )
         self.assertFalse(os.path.exists(sandbox))
         self.assertFalse(os.path.isdir(os.path.join(logs, "validate-r1-extra")))
 
     @unittest.skipUnless(os.name == "nt" or os.path.exists("/bin/bash"), "needs bash")
     def test_run_reports_failing_step(self):
         from revali.runners import WslRunner as W
-        r = W(PlatformCfg(runner="wsl", distro="Ubuntu", command_timeout_min=1, sandbox_dir="~/.revali/sandbox"))
+
+        r = W(
+            PlatformCfg(
+                runner="wsl",
+                distro="Ubuntu",
+                command_timeout_min=1,
+                sandbox_dir="~/.revali/sandbox",
+            )
+        )
         logs = os.path.join(self.rdir(), "logs")
         head = git(["rev-parse", "HEAD"], self.repo).strip()
-        report = r.run(self.repo, head, [("setup", "true"), ("test", "exit 3"), ("new_test", "true")], {}, logs, "validate-r2")
+        report = r.run(
+            self.repo,
+            head,
+            [("setup", "true"), ("test", "exit 3"), ("new_test", "true")],
+            {},
+            logs,
+            "validate-r2",
+        )
         self.assertEqual([s.name for s in report.steps], ["setup", "test"])
         self.assertEqual(report.failed.name, "test")
         self.assertEqual(report.failed.returncode, 3)
 
-    @unittest.skipUnless(os.environ.get("REVALI_TEST_WSL") == "1", "set REVALI_TEST_WSL=1 to run against real WSL")
+    @unittest.skipUnless(
+        os.environ.get("REVALI_TEST_WSL") == "1", "set REVALI_TEST_WSL=1 to run against real WSL"
+    )
     def test_real_wsl(self):
         os.environ.pop("REVALI_WSL_CMD", None)
         from revali.runners import WslRunner as W
+
         r = W(PlatformCfg(runner="wsl", distro="Ubuntu", sandbox_dir="~/.revali/sandbox"))
         logs = os.path.join(self.rdir(), "logs")
         head = git(["rev-parse", "HEAD"], self.repo).strip()
-        report = r.run(self.repo, head, [("test", "python3 -m unittest discover -s tests -t . -p 'test_calc*.py'")], {}, logs, "validate-real")
+        report = r.run(
+            self.repo,
+            head,
+            [("test", "python3 -m unittest discover -s tests -t . -p 'test_calc*.py'")],
+            {},
+            logs,
+            "validate-real",
+        )
         self.assertTrue(report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in report.steps])
 
 

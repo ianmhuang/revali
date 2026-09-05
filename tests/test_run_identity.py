@@ -3,15 +3,15 @@ round 1 F1 this covers run_shell, the lint line and the LocalRunner steps, as we
 `run`, `wait` and `status` open with an identity line naming the working tree and the
 branch (AC-2), keeping the pid in every message that reports a process (AC-3) and the
 exit codes and wording that follow (AC-4)."""
+
 import os
 import subprocess
 import unittest
 from unittest import mock
 
-from tests.helpers import RepoCase, claude_entry, run_cli
-from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
-from revali import gitops, procs
+from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops, procs
 from revali.state import State, lock_owner_alive, lock_path, write_json_atomic
+from tests.helpers import RepoCase, claude_entry, run_cli
 
 NO_WINDOW = 0x08000000
 
@@ -78,8 +78,12 @@ class IdentityLineTests(RepoCase):
     def hold_lock(self):
         """A live lock owned by this test process: the run looks in progress."""
         os.makedirs(self.rdir(), exist_ok=True)
-        write_json_atomic(lock_path(self.rdir()), {"pid": os.getpid(), "since": "2026-09-04T00:00:00"})
-        self.addCleanup(lambda: os.path.isfile(lock_path(self.rdir())) and os.remove(lock_path(self.rdir())))
+        write_json_atomic(
+            lock_path(self.rdir()), {"pid": os.getpid(), "since": "2026-09-04T00:00:00"}
+        )
+        self.addCleanup(
+            lambda: os.path.isfile(lock_path(self.rdir())) and os.remove(lock_path(self.rdir()))
+        )
 
     def test_status_without_state(self):
         code, out = run_cli(["status"])
@@ -90,8 +94,9 @@ class IdentityLineTests(RepoCase):
     def test_status_with_branch_flag_names_that_branch(self):
         code, out = run_cli(["status", "--branch", "feature/other"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertEqual(self.first_line(out),
-                         "repo: %s  branch: feature/other" % gitops.repo_root(self.repo))
+        self.assertEqual(
+            self.first_line(out), "repo: %s  branch: feature/other" % gitops.repo_root(self.repo)
+        )
 
     def test_status_running_keeps_the_pid(self):
         self.hold_lock()
@@ -114,9 +119,16 @@ class IdentityLineTests(RepoCase):
         self.assertIn("still running (pid %d)" % os.getpid(), out)
 
     def test_wait_died_keeps_the_pid(self):
-        State(branch="feature/mul", base="main", stage="review", message="reviewer round 1",
-              last_exit=-1).save(self.rdir())
-        write_json_atomic(lock_path(self.rdir()), {"pid": 999999999, "since": "2026-09-04T00:00:00"})
+        State(
+            branch="feature/mul",
+            base="main",
+            stage="review",
+            message="reviewer round 1",
+            last_exit=-1,
+        ).save(self.rdir())
+        write_json_atomic(
+            lock_path(self.rdir()), {"pid": 999999999, "since": "2026-09-04T00:00:00"}
+        )
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertEqual(self.first_line(out), self.identity())
@@ -124,8 +136,13 @@ class IdentityLineTests(RepoCase):
         self.assertIn("(pid 999999999)", out)
 
     def test_wait_with_a_result(self):
-        State(branch="feature/mul", base="main", stage="needs_action", message="changes requested in round 1",
-              last_exit=EXIT_ACTION).save(self.rdir())
+        State(
+            branch="feature/mul",
+            base="main",
+            stage="needs_action",
+            message="changes requested in round 1",
+            last_exit=EXIT_ACTION,
+        ).save(self.rdir())
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_ACTION, out)
         self.assertEqual(self.first_line(out), self.identity())

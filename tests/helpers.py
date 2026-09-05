@@ -1,4 +1,5 @@
 """Shared test scaffolding: temp repos, fake gh/claude/runner, isolated REVALI_HOME."""
+
 import contextlib
 import io
 import json
@@ -20,7 +21,7 @@ FAKE_BIN = os.path.join(HERE, "fixtures", "fake_bin")
 GH_STUB = os.path.join(FAKE_BIN, "gh_stub.py")
 CLAUDE_STUB = os.path.join(FAKE_BIN, "claude_stub.py")
 
-TEST_REVIEW_MUL = '''import unittest
+TEST_REVIEW_MUL = """import unittest
 
 from src.calc import mul
 
@@ -31,12 +32,13 @@ class MulTests(unittest.TestCase):
 
     def test_zero(self):
         self.assertEqual(mul(9, 0), 0)
-'''
+"""
 
 
 def git(args, cwd):
-    return subprocess.run(["git"] + args, cwd=cwd, check=True, capture_output=True, text=True,
-                          encoding="utf-8").stdout
+    return subprocess.run(
+        ["git"] + args, cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8"
+    ).stdout
 
 
 def approve_response(**overrides):
@@ -50,8 +52,14 @@ def approve_response(**overrides):
         "scope_mismatch": [],
         "dependencies_changed": [],
         "test_changes": [],
-        "tests": [{"path": "tests/test_review_mul.py", "purpose": "product and zero",
-                   "covers": ["AC-1", "AC-2"], "expected": "mul(3,4)=12; mul(9,0)=0 per AC-1/AC-2"}],
+        "tests": [
+            {
+                "path": "tests/test_review_mul.py",
+                "purpose": "product and zero",
+                "covers": ["AC-1", "AC-2"],
+                "expected": "mul(3,4)=12; mul(9,0)=0 per AC-1/AC-2",
+            }
+        ],
         "not_testable": [],
         "suggestions": [],
     }
@@ -60,8 +68,12 @@ def approve_response(**overrides):
 
 
 def claude_entry(data=None, write_tests=True, **kw):
-    entry = {"exit": 0, "structured_output": data if data is not None else approve_response(),
-             "model": "claude-fable-5", "cost": 0.5}
+    entry = {
+        "exit": 0,
+        "structured_output": data if data is not None else approve_response(),
+        "model": "claude-fable-5",
+        "cost": 0.5,
+    }
     if write_tests:
         entry["write_files"] = {"tests/test_review_mul.py": TEST_REVIEW_MUL}
     entry.update(kw)
@@ -79,10 +91,12 @@ class RepoCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="revali test ")
         self.addCleanup(self._cleanup)
-        self.info = make_sample_repo.create(os.path.join(self.tmp, "sample"),
-                                            with_remote=self.with_remote,
-                                            with_branch=self.with_branch,
-                                            runner=self.runner)
+        self.info = make_sample_repo.create(
+            os.path.join(self.tmp, "sample"),
+            with_remote=self.with_remote,
+            with_branch=self.with_branch,
+            runner=self.runner,
+        )
         self.repo = self.info["repo"]
         self.home = os.path.join(self.tmp, "home")
         os.makedirs(self.home)
@@ -176,6 +190,7 @@ def captured():
 def run_cli(argv):
     """Run revali.cli.main in-process, returning (exit_code, stdout)."""
     from revali.cli import main
+
     with captured() as out:
         code = main(argv)
     return code, out.getvalue()
@@ -193,6 +208,7 @@ def rmtree_force(path):
             pass
 
     import time
+
     for attempt in range(4):  # a detached child may still hold the directory briefly
         if not os.path.isdir(path):
             return

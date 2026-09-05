@@ -3,13 +3,14 @@
 Executable lookup honours REVALI_<NAME>_CMD (e.g. REVALI_GH_CMD="python gh_stub.py")
 so tests and other CLIs can be substituted without touching PATH.
 """
+
 import os
 import shlex
 import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 
@@ -48,8 +49,10 @@ def resolve(name: str) -> list:
     if override:
         if os.name == "nt":
             # shlex keeps the quotes in non-posix mode; strip them per token.
-            return [tok[1:-1] if len(tok) > 1 and tok[0] == tok[-1] == '"' else tok
-                    for tok in shlex.split(override, posix=False)]
+            return [
+                tok[1:-1] if len(tok) > 1 and tok[0] == tok[-1] == '"' else tok
+                for tok in shlex.split(override, posix=False)
+            ]
         return shlex.split(override)
     path = shutil.which(name)
     if not path:
@@ -75,26 +78,43 @@ def _no_window() -> dict:
     return {}
 
 
-def run(cmd: list, cwd: Optional[str] = None, timeout: Optional[float] = None,
-        env: Optional[dict] = None, input_text: Optional[str] = None,
-        log: Optional[Callable[[str], None]] = None) -> Result:
+def run(
+    cmd: list,
+    cwd: Optional[str] = None,
+    timeout: Optional[float] = None,
+    env: Optional[dict] = None,
+    input_text: Optional[str] = None,
+    log: Optional[Callable[[str], None]] = None,
+) -> Result:
     """Run a command to completion. Never raises on non-zero exit; raises on timeout."""
     start = time.monotonic()
     if log:
         log("$ " + " ".join(shlex.quote(str(c)) for c in cmd))
     try:
         proc = subprocess.run(
-            [str(c) for c in cmd], cwd=cwd, env=child_env(env), input=input_text,
+            [str(c) for c in cmd],
+            cwd=cwd,
+            env=child_env(env),
+            input=input_text,
             stdin=None if input_text is not None else subprocess.DEVNULL,
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, **_no_window(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            **_no_window(),
         )
     except subprocess.TimeoutExpired as exc:
         raise ProcTimeout("timed out after %ss: %s" % (timeout, cmd[0])) from exc
     except FileNotFoundError as exc:
         raise ExeNotFound("cannot execute %s: %s" % (cmd[0], exc)) from exc
-    res = Result(cmd=list(cmd), returncode=proc.returncode, stdout=proc.stdout or "",
-                 stderr=proc.stderr or "", duration=time.monotonic() - start)
+    res = Result(
+        cmd=list(cmd),
+        returncode=proc.returncode,
+        stdout=proc.stdout or "",
+        stderr=proc.stderr or "",
+        duration=time.monotonic() - start,
+    )
     if log:
         log("  -> exit %d in %.1fs" % (res.returncode, res.duration))
     return res
@@ -114,8 +134,13 @@ def run_retry(cmd: list, retries: int = 1, wait: float = 3.0, **kw) -> Result:
 def spawn_detached(cmd: list, cwd: str, log_path: str, env: Optional[dict] = None) -> int:
     """Start a process that survives the parent; stdout/stderr appended to log_path."""
     log_file = open(log_path, "ab")
-    kwargs = dict(cwd=cwd, env=child_env(env), stdin=subprocess.DEVNULL,
-                  stdout=log_file, stderr=subprocess.STDOUT)
+    kwargs = dict(
+        cwd=cwd,
+        env=child_env(env),
+        stdin=subprocess.DEVNULL,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+    )
     if os.name == "nt":
         flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         kwargs["creationflags"] = flags
@@ -135,6 +160,7 @@ def pid_alive(pid: int) -> bool:
         return False
     if os.name == "nt":
         import ctypes
+
         kernel32 = ctypes.windll.kernel32
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
@@ -160,9 +186,12 @@ def kill_tree(pid: int) -> None:
     if not pid_alive(pid):
         return
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, **_no_window())
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, **_no_window()
+        )
         return
     import signal
+
     try:
         os.killpg(os.getpgid(pid), signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
@@ -176,21 +205,39 @@ def python_exe() -> str:
     return sys.executable
 
 
-def run_shell(cmd: str, cwd: Optional[str] = None, timeout: Optional[float] = None,
-              env: Optional[dict] = None, log: Optional[Callable[[str], None]] = None) -> Result:
+def run_shell(
+    cmd: str,
+    cwd: Optional[str] = None,
+    timeout: Optional[float] = None,
+    env: Optional[dict] = None,
+    log: Optional[Callable[[str], None]] = None,
+) -> Result:
     """Run a configured command string through the platform shell (lint/build/test lines)."""
     start = time.monotonic()
     if log:
         log("$ " + cmd)
     try:
         proc = subprocess.run(
-            cmd, shell=True, cwd=cwd, env=child_env(env), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout, **_no_window(),
+            cmd,
+            shell=True,
+            cwd=cwd,
+            env=child_env(env),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            **_no_window(),
         )
     except subprocess.TimeoutExpired as exc:
         raise ProcTimeout("timed out after %ss: %s" % (timeout, cmd)) from exc
-    res = Result(cmd=[cmd], returncode=proc.returncode, stdout=proc.stdout or "",
-                 stderr=proc.stderr or "", duration=time.monotonic() - start)
+    res = Result(
+        cmd=[cmd],
+        returncode=proc.returncode,
+        stdout=proc.stdout or "",
+        stderr=proc.stderr or "",
+        duration=time.monotonic() - start,
+    )
     if log:
         log("  -> exit %d in %.1fs" % (res.returncode, res.duration))
     return res

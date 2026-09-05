@@ -5,12 +5,13 @@ AC-5: README, templates/revali.toml and defaults.toml document the ssh runner an
 keys (host, connect_timeout_s, transfer_timeout_min; round 1, F5), and the empty code
 fence in the README Sandbox section is gone.
 """
+
 import os
 import unittest
 
-from tests.helpers import ROOT, RepoCase, run_cli
 from revali import EXIT_ERROR
 from revali.config import ConfigError, load_project_config
+from tests.helpers import ROOT, RepoCase, run_cli
 
 
 class SshConfigTests(RepoCase):
@@ -46,7 +47,9 @@ class SshConfigTests(RepoCase):
         plat = load_project_config(self.repo).validate.platforms["linux"]
         self.assertGreater(plat.connect_timeout_s, 0)
         self.assertGreater(plat.transfer_timeout_min, 0)
-        self.platform_table('runner = "ssh"\nhost = "user@box"\nconnect_timeout_s = 3\ntransfer_timeout_min = 2\n')
+        self.platform_table(
+            'runner = "ssh"\nhost = "user@box"\nconnect_timeout_s = 3\ntransfer_timeout_min = 2\n'
+        )
         plat = load_project_config(self.repo).validate.platforms["linux"]
         self.assertEqual((plat.connect_timeout_s, plat.transfer_timeout_min), (3, 2))
 
@@ -68,7 +71,9 @@ class SshConfigTests(RepoCase):
 
     def test_sandbox_dir_with_whitespace_stays_legal_for_wsl(self):
         self.platform_table('runner = "wsl"\ndistro = "Ubuntu"\nsandbox_dir = "~/sand box"\n')
-        self.assertEqual(load_project_config(self.repo).validate.platforms["linux"].sandbox_dir, "~/sand box")
+        self.assertEqual(
+            load_project_config(self.repo).validate.platforms["linux"].sandbox_dir, "~/sand box"
+        )
 
     def test_local_and_wsl_still_load(self):
         self.assertEqual(load_project_config(self.repo).validate.platforms["linux"].runner, "wsl")

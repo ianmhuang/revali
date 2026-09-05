@@ -2,16 +2,32 @@ import json
 import os
 import unittest
 
-from tests.helpers import RepoCase, ROOT, approve_response
 from revali.preflight import preflight
-from revali.review import (APPROVE, CHANGES_REQUESTED, NEEDS_INFO, ac_gaps, assemble_checklist,
-                           build_prompt, compute_verdict,
-                           render_review_md, validate_shape)
+from revali.review import (
+    APPROVE,
+    CHANGES_REQUESTED,
+    NEEDS_INFO,
+    ac_gaps,
+    assemble_checklist,
+    build_prompt,
+    compute_verdict,
+    render_review_md,
+    validate_shape,
+)
 from revali.state import State
+from tests.helpers import RepoCase, approve_response
 
 
 def finding(sev, kind, fid="F1"):
-    return {"id": fid, "file": "src/calc.py", "line": 3, "severity": sev, "kind": kind, "text": "t", "suggestion": ""}
+    return {
+        "id": fid,
+        "file": "src/calc.py",
+        "line": 3,
+        "severity": sev,
+        "kind": kind,
+        "text": "t",
+        "suggestion": "",
+    }
 
 
 class VerdictTests(unittest.TestCase):
@@ -19,14 +35,20 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(compute_verdict(approve_response(), [], True), (APPROVE, []))
 
     def test_high_correctness_blocks(self):
-        v, reasons = compute_verdict(approve_response(findings=[finding("high", "correctness")]), [], True)
+        v, reasons = compute_verdict(
+            approve_response(findings=[finding("high", "correctness")]), [], True
+        )
         self.assertEqual(v, CHANGES_REQUESTED)
         self.assertIn("F1", reasons[0])
 
     def test_medium_correctness_blocks_medium_convention_does_not(self):
-        v, _ = compute_verdict(approve_response(findings=[finding("medium", "correctness")]), [], True)
+        v, _ = compute_verdict(
+            approve_response(findings=[finding("medium", "correctness")]), [], True
+        )
         self.assertEqual(v, CHANGES_REQUESTED)
-        v, _ = compute_verdict(approve_response(findings=[finding("medium", "convention")]), [], True)
+        v, _ = compute_verdict(
+            approve_response(findings=[finding("medium", "convention")]), [], True
+        )
         self.assertEqual(v, APPROVE)
         v, _ = compute_verdict(approve_response(findings=[finding("high", "convention")]), [], True)
         self.assertEqual(v, CHANGES_REQUESTED)
@@ -36,13 +58,21 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(v, APPROVE)
 
     def test_unjustified_test_change_blocks(self):
-        data = approve_response(test_changes=[{"file": "tests/test_calc.py", "justified": False, "reason": "assert removed"}])
+        data = approve_response(
+            test_changes=[
+                {"file": "tests/test_calc.py", "justified": False, "reason": "assert removed"}
+            ]
+        )
         v, reasons = compute_verdict(data, [], True)
         self.assertEqual(v, CHANGES_REQUESTED)
         self.assertIn("without justification", reasons[0])
 
     def test_unjustified_dependency_blocks(self):
-        data = approve_response(dependencies_changed=[{"file": "requirements.txt", "justified": False, "reason": "no reason given"}])
+        data = approve_response(
+            dependencies_changed=[
+                {"file": "requirements.txt", "justified": False, "reason": "no reason given"}
+            ]
+        )
         self.assertEqual(compute_verdict(data, [], True)[0], CHANGES_REQUESTED)
 
     def test_gaps_block(self):
@@ -85,7 +115,13 @@ class CoverageAndShapeTests(unittest.TestCase):
 
     def test_render_review_md(self):
         data = approve_response(findings=[finding("high", "correctness")], suggestions=["rename x"])
-        md = render_review_md(data, CHANGES_REQUESTED, ["F1 ..."], {"round": 1, "model_actual": "m"}, ["AC-1", "AC-2", "AC-3"])
+        md = render_review_md(
+            data,
+            CHANGES_REQUESTED,
+            ["F1 ..."],
+            {"round": 1, "model_actual": "m"},
+            ["AC-1", "AC-2", "AC-3"],
+        )
         self.assertIn("# Review round 1: CHANGES_REQUESTED", md)
         self.assertIn("## Blocking", md)
         self.assertIn("**F1**", md)
@@ -99,11 +135,11 @@ class PromptTests(RepoCase):
         ctx = preflight(self.repo)
         state = State()
         prompt = build_prompt(ctx, state, self.rdir(), 1)
-        self.assertIn("add a mul(a, b) function", prompt)          # request verbatim
+        self.assertIn("add a mul(a, b) function", prompt)  # request verbatim
         self.assertIn("- AC-1:", prompt)
-        self.assertIn("def mul(a, b):", prompt)                    # the diff
-        self.assertIn("Built-in", prompt)                          # built-in checklist
-        self.assertIn("Project conventions", prompt)               # project layer
+        self.assertIn("def mul(a, b):", prompt)  # the diff
+        self.assertIn("Built-in", prompt)  # built-in checklist
+        self.assertIn("Project conventions", prompt)  # project layer
         self.assertIn("test_review_{topic}.py", prompt)
         self.assertNotIn("$diff", prompt)
         self.assertIn("required for kind feature", prompt)
@@ -125,7 +161,11 @@ class PromptTests(RepoCase):
     def test_round_two_includes_prior_findings_and_response(self):
         ctx = preflight(self.repo)
         os.makedirs(self.rdir(), exist_ok=True)
-        prev = {"data": approve_response(verdict=CHANGES_REQUESTED, findings=[finding("high", "correctness")])}
+        prev = {
+            "data": approve_response(
+                verdict=CHANGES_REQUESTED, findings=[finding("high", "correctness")]
+            )
+        }
         with open(os.path.join(self.rdir(), "review-1.json"), "w", encoding="utf-8") as fh:
             json.dump(prev, fh)
         with open(os.path.join(self.rdir(), "response-1.md"), "w", encoding="utf-8") as fh:

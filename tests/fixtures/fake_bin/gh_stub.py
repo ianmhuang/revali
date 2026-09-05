@@ -5,6 +5,7 @@ Env:
   REVALI_FAKE_LOG       path; every invocation's argv is appended as one JSON line
 Use via REVALI_GH_CMD="<python> <this file>".
 """
+
 import json
 import os
 import sys
@@ -53,13 +54,17 @@ def main(argv):
         print(sc["login"])
         return 0
     if argv[:2] == ["repo", "view"]:
-        print(json.dumps({
-            "owner": {"login": sc["owner"]},
-            "name": sc["name"],
-            "visibility": sc["visibility"],
-            "defaultBranchRef": {"name": sc["default_branch"]},
-            "url": sc["url"],
-        }))
+        print(
+            json.dumps(
+                {
+                    "owner": {"login": sc["owner"]},
+                    "name": sc["name"],
+                    "visibility": sc["visibility"],
+                    "defaultBranchRef": {"name": sc["default_branch"]},
+                    "url": sc["url"],
+                }
+            )
+        )
         return 0
     if argv[:2] == ["pr", "list"]:
         state = argv[argv.index("--state") + 1] if "--state" in argv else "open"
