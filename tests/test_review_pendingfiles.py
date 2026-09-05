@@ -382,9 +382,9 @@ class HookLivesInReview(PendingCase):
 
 class ReadmeDescribesIt(unittest.TestCase):
     def test_section_states_the_needs_info_rule(self):
-        with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8") as fh:
+        with open(os.path.join(ROOT, "docs", "side-effects.md"), "r", encoding="utf-8") as fh:
             text = fh.read()
-        section = text.split("## What revali does to your repository", 1)[1].split("\n## ", 1)[0]
+        section = text.split("# What revali does to your repository", 1)[1].split("\n## ", 1)[0]
         self.assertIn("NEEDS_INFO round keeps its test files", section)                    # AC-7
         self.assertIn("uncommitted in `test_dir`", section)
         self.assertIn("tolerates exactly those paths", section)

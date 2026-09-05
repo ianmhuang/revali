@@ -155,11 +155,11 @@ class Documented(unittest.TestCase):
             return fh.read()
 
     def test_readme_defaults_and_template_carry_the_change(self):
-        readme = self.read("README.md")
+        readme = self.read("docs", "workflow.md")
         self.assertIn("without a result", readme)                                               # AC-6: the crash message
         self.assertIn("died at stage", readme)
         self.assertIn("validation", readme.split("without a result", 1)[1][:1500])              # AC-6: the resume, nearby
-        self.assertIn("write_retry_s", readme)
+        self.assertIn("write_retry_s", self.read("docs", "files.md"))
         self.assertIn("write_retry_s", self.read("defaults.toml"))                              # AC-6: the constant
         self.assertIn("write_retry_s", self.read("templates", "user-config.toml"))
 

@@ -297,9 +297,9 @@ class AC7Docs(IsolatedHome):
         self.assertEqual(u.checklist, "")
 
     def test_readme_has_configuration_section(self):
-        with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8") as fh:
+        with open(os.path.join(ROOT, "docs", "configuration.md"), "r", encoding="utf-8") as fh:
             text = fh.read()
-        self.assertIn("## Configuration", text)
+        self.assertIn("# Configuration", text)
         for name in ("defaults.toml", "config.toml", "revali.toml"):
             self.assertIn(name, text)
 

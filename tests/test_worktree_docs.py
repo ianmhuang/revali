@@ -37,7 +37,7 @@ class DocsTests(unittest.TestCase):
     """AC-1, AC-2, AC-10"""
 
     def test_readme_has_the_several_agents_section(self):
-        text = read("README.md")
+        text = read("docs/workflow.md")
         self.assertIn("## Several agents on one repository", text)
         section = text.split("## Several agents on one repository", 1)[1].split("\n## ", 1)[0]
         for phrase in ("git worktree add", "git worktree remove", "tree.lock", "git pull",
@@ -50,8 +50,8 @@ class DocsTests(unittest.TestCase):
         self.assertIn("git worktree remove", text)
 
     def test_merge_bullet_lists_the_worktree_side_effects(self):
-        text = read("README.md")
-        bullet = " ".join(text.split("## What revali does to your repository", 1)[1].split())   # unwrap lines
+        text = read("docs/side-effects.md")
+        bullet = " ".join(text.split("# What revali does to your repository", 1)[1].split())   # unwrap lines
         for phrase in ("`gh pr merge --<method>` without `--delete-branch`", "git push origin --delete",
                        "git fetch --prune origin", "git checkout --detach FETCH_HEAD", "git branch -D",
                        "MERGED"):

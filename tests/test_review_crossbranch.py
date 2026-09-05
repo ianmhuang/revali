@@ -250,19 +250,20 @@ class HelpAndReadme(unittest.TestCase):
         self.assertIn("branch", text)
 
     def test_readme(self):                                                             # AC-5
-        with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8", newline="") as fh:
-            readme = fh.read()
+        def doc(name):
+            with open(os.path.join(ROOT, "docs", name), "r", encoding="utf-8", newline="") as fh:
+                return fh.read()
 
-        def section(title):
-            body = readme.split("\n## " + title + "\n", 1)[1]
+        def section(text, title):
+            body = text.split("\n## " + title + "\n", 1)[1]
             return body.split("\n## ", 1)[0]
 
-        files = section("Files")
+        files = doc("files.md")
         self.assertTrue(any(l.startswith("| `tree.lock`") for l in files.splitlines()), "no tree.lock row")
-        effects = section("What revali does to your repository")
+        effects = doc("side-effects.md")
         self.assertIn("tree.lock", effects)
         self.assertIn("HEAD", effects)                                                 # the mid-run check
-        usage = section("Usage")
+        usage = section(doc("workflow.md"), "Running")
         self.assertIn("wait --branch", usage)
         self.assertIn("stop", usage)
         self.assertIn("working tree", usage)

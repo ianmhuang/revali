@@ -339,9 +339,9 @@ class FlagFollowsTheSession(InterruptedCase):
 
 class ReadmeDescribesIt(unittest.TestCase):
     def test_section_mentions_restore_source_and_interrupted_cleanup(self):
-        with open(os.path.join(ROOT, "README.md"), "r", encoding="utf-8") as fh:
+        with open(os.path.join(ROOT, "docs", "side-effects.md"), "r", encoding="utf-8") as fh:
             text = fh.read()
-        section = text.split("## What revali does to your repository", 1)[1].split("\n## ", 1)[0]
+        section = text.split("# What revali does to your repository", 1)[1].split("\n## ", 1)[0]
         self.assertNotIn("do not clean up", section)                                       # AC-6
         self.assertNotIn("may leave such files for you to delete", section)
         self.assertIn("restored from HEAD", section)
