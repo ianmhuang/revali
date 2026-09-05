@@ -96,7 +96,9 @@ class StateDirAlreadyIgnored(GitExcludeCase):
 
 class StateDirNotIgnored(GitExcludeCase):
     """AC-2: nothing ignores the state directory, so the line is appended and committed as
-    before. These pass on the base branch too; they guard the path the fix must not break."""
+    before. The exact-content assertions also pin the append itself: one line, no blank
+    separator when the file already ends in a newline (base got that wrong), a separator
+    when it does not, nothing but the entry when the file is empty."""
 
     def chore_commit_files(self):
         sha = git(["log", "-1", "--format=%H", "--grep=^chore: ignore"], self.repo).strip()
@@ -110,6 +112,18 @@ class StateDirNotIgnored(GitExcludeCase):
         self.assertIn("chore: ignore .revali/", self.subjects())
         self.assertEqual(self.chore_commit_files(), [".gitignore"])
         self.assertIn(".revali/", self.head_gitignore())
+
+    def test_file_without_trailing_newline_gets_a_separator(self):
+        self.replace_gitignore(".venv/")
+        self.run_ok()
+        self.assertEqual(self.read(".gitignore"), ".venv/\n.revali/\n")
+        self.assertIn("chore: ignore .revali/", self.subjects())
+
+    def test_empty_file_gets_only_the_entry(self):
+        self.replace_gitignore("")
+        self.run_ok()
+        self.assertEqual(self.read(".gitignore"), ".revali/\n")
+        self.assertIn("chore: ignore .revali/", self.subjects())
 
     def test_missing_gitignore_is_created(self):
         git(["rm", "-q", "--", ".gitignore"], self.repo)
