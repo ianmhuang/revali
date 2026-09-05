@@ -242,8 +242,17 @@ def push_branch(branch: str, cwd: str, log: Logger = None, force: bool = False) 
     return run_retry(resolve("git") + args + ["origin", branch], cwd=cwd, log=log, timeout=300)
 
 
+def is_ignored(path: str, cwd: str) -> bool:
+    """True when git already ignores `path` by any rule (.gitignore, .git/info/exclude,
+    core.excludesFile). Exit 1 means not ignored; anything else is treated the same."""
+    return _git(["check-ignore", "-q", "--no-index", "--", path], cwd).ok
+
+
 def ensure_gitignore(repo: str, entry: str) -> bool:
-    """Append entry to .gitignore if missing. Returns True when the file was changed."""
+    """Append entry to .gitignore unless git already ignores it. Returns True when the
+    file was changed."""
+    if is_ignored(entry, repo):
+        return False
     path = os.path.join(repo, ".gitignore")
     lines = []
     if os.path.isfile(path):

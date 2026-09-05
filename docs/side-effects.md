@@ -3,7 +3,10 @@
 Read this before the first run. All of it is on the feature branch unless
 stated.
 
-- appends the state directory (`.revali/`) to `.gitignore` if missing
+- appends the state directory (`.revali/`) to `.gitignore` and commits that,
+  unless `git check-ignore` says the directory is already ignored by any
+  rule. To keep the line out of the tracked `.gitignore`, put `.revali/` in
+  `.git/info/exclude` (or your global excludes file) before the first run
 - holds one lock per working tree (`.revali/tree.lock`) for the length of a
   run, so a second `run` in the same checkout is refused whatever branch it
   is on; before spawning the reviewer, committing its tests, pushing, and
