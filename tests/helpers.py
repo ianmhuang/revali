@@ -188,11 +188,15 @@ def captured():
 
 
 def run_cli(argv):
-    """Run revali.cli.main in-process, returning (exit_code, stdout)."""
+    """Run revali.cli.main in-process, returning (exit_code, stdout). argparse ends
+    --version, -h and usage errors with SystemExit; its code is returned like any other."""
     from revali.cli import main
 
     with captured() as out:
-        code = main(argv)
+        try:
+            code = main(argv)
+        except SystemExit as exc:
+            code = int(exc.code or 0)
     return code, out.getvalue()
 
 

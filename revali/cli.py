@@ -4,7 +4,7 @@
 import argparse
 import sys
 
-from revali import NAME, pipeline
+from revali import NAME, VERSION, pipeline
 
 
 def _command(sub, name: str, sentence: str, func):
@@ -22,6 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Review, validate and merge a feature branch with headless reviewer sessions.",
     )
     parser.add_argument("--verbose", action="store_true", help="echo every command to the terminal")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%s %s" % (NAME, VERSION),
+        help="print the version and exit (same line as `%s version`)" % NAME,
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_run = _command(
