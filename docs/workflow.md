@@ -114,7 +114,9 @@ normal new round.
 
 Copy `templates/revali.toml` to the repo root and edit the commands; copy
 `templates/CONVENTIONS.md` if the project has none; add `.revali/` to
-`.gitignore`; paste `templates/CLAUDE-snippet.md` into the project's
+`.gitignore`, or to `.git/info/exclude` if the line must stay out of the
+tracked `.gitignore` (see `docs/side-effects.md`); paste
+`templates/CLAUDE-snippet.md` into the project's
 `CLAUDE.md`. Before each run the author writes
 `.revali/<branch>/change.md` from `templates/change.md` (branch `feature/x`
 maps to directory `feature__x`); see Workflow above.

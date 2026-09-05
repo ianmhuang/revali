@@ -110,6 +110,19 @@ class ApprovePath(RepoCase):
         self.assertIn(".revali/", self.read(".gitignore"))
         self.assertIn("chore: ignore .revali/", git(["log", "--format=%s"], self.repo))
 
+    def test_gitignore_untouched_when_git_already_ignores(self):
+        # .git/info/exclude ignores the state dir; .gitignore must stay as the project left it
+        self.write(".gitignore", ".venv/\n")
+        self.commit_all("drop ignore")
+        exclude = os.path.join(self.repo, ".git", "info", "exclude")
+        with open(exclude, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(".revali/\n")
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(self.read(".gitignore"), ".venv/\n")
+        self.assertNotIn("chore: ignore", git(["log", "--format=%s"], self.repo))
+
     def test_existing_open_pr_reused(self):
         self.scenario(
             {
