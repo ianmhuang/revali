@@ -211,6 +211,7 @@ class FakeRunner(Runner):
                             "ref": ref,
                             "scope": scope,
                             "steps": [n for n, c in steps if c.strip()],
+                            "cmds": {n: c for n, c in steps if c.strip()},
                             "extra_files": sorted(extra_files or {}),
                         }
                     )
@@ -716,6 +717,57 @@ def get_runner(plat: PlatformCfg) -> Runner:
     raise RunnerError("unknown runner '%s'" % plat.runner)
 
 
-def steps_for(plat: PlatformCfg, which: List[str]) -> List[Tuple[str, str]]:
+FILES_PLACEHOLDER = "{files}"
+
+
+def wants_files(cmd: str) -> bool:
+    """True when a new_test command names the reviewer's files through `{files}`."""
+    return FILES_PLACEHOLDER in cmd
+
+
+def files_argument(files: List[str]) -> str:
+    """The `{files}` expansion: paths relative to the repository root, forward slashes, space
+    separated. A path is double-quoted only when it contains whitespace, with the characters
+    a POSIX shell still interprets inside double quotes (`"`, `$`, backquote, backslash)
+    escaped; double quotes work for both the sandbox runners' shells and the Windows shell
+    of `local`, where such characters do not occur in test paths."""
+    out = []
+    for path in files:
+        path = path.replace("\\", "/")
+        if any(ch.isspace() for ch in path):
+            for ch in ("\\", '"', "$", "`"):
+                path = path.replace(ch, "\\" + ch)
+            path = '"%s"' % path
+        out.append(path)
+    return " ".join(out)
+
+
+def steps_for(
+    plat: PlatformCfg, which: List[str], files: Optional[List[str]] = None
+) -> List[Tuple[str, str]]:
+    """(name, command) for each step in `which`. With `files` given, a new_test command that
+    contains `{files}` gets the expansion; an empty list turns it into an empty command (the
+    step is skipped, see `steps_with_files`). `files=None` leaves every command as written."""
     table = {"setup": plat.setup, "build": plat.build, "test": plat.test, "new_test": plat.new_test}
-    return [(name, table[name]) for name in which]
+    steps = []
+    for name in which:
+        cmd = table[name]
+        if name == "new_test" and files is not None and wants_files(cmd):
+            cmd = cmd.replace(FILES_PLACEHOLDER, files_argument(files)) if files else ""
+        steps.append((name, cmd))
+    return steps
+
+
+def steps_with_files(
+    plat: PlatformCfg,
+    which: List[str],
+    files: List[str],
+    log: Optional[Callable[[str, str], None]],
+    stage: str,
+) -> List[Tuple[str, str]]:
+    """`steps_for` with the placeholder filled and empty commands dropped. When new_test
+    asks for `{files}` and there is no file to name, the step is skipped and `log(stage,
+    message)` says so rather than running the command with an empty list."""
+    if "new_test" in which and wants_files(plat.new_test) and not files and log:
+        log(stage, "new_test skipped: {files} names no test file")
+    return [s for s in steps_for(plat, which, files=files) if s[1].strip()]

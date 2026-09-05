@@ -69,7 +69,7 @@ sandbox_dir = "~/.revali/sandbox"   # inside the WSL distro or on the ssh host; 
 setup = ""
 build = ""
 test = ""
-new_test = ""
+new_test = ""                        # may contain {files}: the reviewer's test files, space separated
 check_name = ""
 
 [merge]

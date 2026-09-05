@@ -21,7 +21,7 @@ that moves it.
 | diagnosis prompt and schema | revali | diagnosis session | `prompts/diagnose.md`, `schemas/diagnose.schema.json` in revali | `[validate] prompt`, `schema` |
 | how tests are added here | the project | Reviewer | none | `[project] test_guide` |
 | sandbox clone | Validator | Validator; deleted after the run | `~/.revali/sandbox/<repo>/<branch>/<label>/` inside WSL or on the ssh host | `[validate.<platform>] sandbox_dir` |
-| run history | revali | `revali stats` | `~/.revali/history.jsonl` | `history_path` or `[paths] history_file` in `~/.revali/config.toml` (user level only) |
+| run history | revali | `revali stats` | `~/.revali/history.jsonl` (one row per `run`, `merge` or `stop`; rows written by `run` carry `stage_s` and `sandbox_s`, the seconds each stage and each sandbox session took) | `history_path` or `[paths] history_file` in `~/.revali/config.toml` (user level only) |
 
 Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves
 with the `REVALI_HOME` environment variable.

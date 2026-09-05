@@ -47,7 +47,10 @@ command_timeout_min = 15
 setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"
 build = ""
 test = ".venv/bin/python -m pytest -q"            # existing suite; may be empty
-new_test = ".venv/bin/python -m pytest -q tests"  # required: how to run test_dir
+# required: how to run the reviewer's tests. {files} stands for their paths (this round's
+# files in the smoke run, every reviewer file on the branch in validation); a command
+# without {files} runs as written, e.g. ".venv/bin/python -m pytest -q tests".
+new_test = ".venv/bin/python -m pytest -q {files}"
 
 [merge]
 method = "squash"

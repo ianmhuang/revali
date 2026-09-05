@@ -2,10 +2,12 @@
 
 import json
 import os
+import re
 import unittest
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK
 from revali.state import State, read_history
+from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST
 from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
 
 
@@ -19,6 +21,50 @@ def finding(sev="high", kind="correctness", fid="F1"):
         "text": "mul ignores negative numbers",
         "suggestion": "handle them",
     }
+
+
+class NewTestFiles(RepoCase):
+    """`{files}` in new_test names the reviewer's files; a plain command is untouched."""
+
+    def use_files_placeholder(self, command="run-new {files}"):
+        toml = self.read("revali.toml")
+        new, n = re.subn(
+            r"^new_test = .*$", "new_test = %s" % json.dumps(command), toml, flags=re.M
+        )
+        self.assertEqual(n, 1, toml)
+        self.write("revali.toml", new)
+        self.commit_all("new_test names the files")
+
+    def runner_call(self, label):
+        calls = [c for c in self.fake_calls("runner") if c["label"] == label]
+        self.assertEqual(len(calls), 1, label)
+        return calls[0]
+
+    def test_smoke_run_and_validation_name_the_reviewer_files(self):
+        self.use_files_placeholder()
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(
+            self.runner_call("smoke-r1-1")["cmds"]["new_test"], "run-new tests/test_review_mul.py"
+        )
+        self.assertEqual(
+            self.runner_call("validate-r1")["cmds"]["new_test"], "run-new tests/test_review_mul.py"
+        )
+        self.assertNotIn("{files}", self.runner_call("baseline")["cmds"].get("test", ""))
+        # the step log records the expanded command
+        self.assertIn(
+            "$ run-new tests/test_review_mul.py",
+            self.read(".revali/feature__mul/logs/smoke-r1-1-new_test.log"),
+        )
+        self.assertNotIn("new_test skipped", self.read(".revali/feature__mul/logs/revali.log"))
+
+    def test_without_the_placeholder_the_command_runs_as_written(self):
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(self.runner_call("smoke-r1-1")["cmds"]["new_test"], LOCAL_NEW_TEST)
+        self.assertEqual(self.runner_call("validate-r1")["cmds"]["new_test"], LOCAL_NEW_TEST)
 
 
 class ApprovePath(RepoCase):
@@ -122,6 +168,64 @@ class ApprovePath(RepoCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assertEqual(self.read(".gitignore"), ".venv/\n")
         self.assertNotIn("chore: ignore", git(["log", "--format=%s"], self.repo))
+
+    def test_timing_line_and_history_fields(self):
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        log = self.read(".revali/feature__mul/logs/revali.log")
+        timing = [line for line in log.splitlines() if "] run: timing " in line]
+        self.assertEqual(len(timing), 1, log)
+        self.assertEqual(timing[0], log.splitlines()[-1])  # the last line of the run
+        for word in ("preflight", "pr", "review", "validate", "baseline", "smoke-r1-1"):
+            self.assertIn(word, timing[0])
+        self.assertIn("validate-r1", timing[0])
+        # the result lines of the sandbox sessions carry their wall time
+        self.assertRegex(log, r"preflight: baseline passed \(\d+(m\d+)?s\)")
+        self.assertRegex(log, r"review: smoke run finished \(\d+(m\d+)?s\)")
+        self.assertRegex(log, r"validate: run 1: PASS \(\d+(m\d+)?s\)")
+        rows = read_history(os.path.join(self.home, "history.jsonl"))
+        self.assertEqual(list(rows[0]["stage_s"]), ["preflight", "pr", "review", "validate"])
+        self.assertEqual(list(rows[0]["sandbox_s"]), ["baseline", "smoke-r1-1", "validate-r1"])
+        for value in list(rows[0]["stage_s"].values()) + list(rows[0]["sandbox_s"].values()):
+            self.assertIsInstance(value, float)
+            self.assertGreaterEqual(value, 0)
+
+    def test_timing_line_on_a_run_that_stops_early(self):
+        self.scenario({"prs_all": [{"number": 3, "url": "u", "state": "CLOSED"}]})
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR)
+        log = self.read(".revali/feature__mul/logs/revali.log")
+        timing = [line for line in log.splitlines() if "] run: timing " in line]
+        self.assertEqual(len(timing), 1, log)
+        self.assertIn("preflight", timing[0])
+        self.assertIn("pr ", timing[0])
+        self.assertNotIn("review", timing[0])
+        rows = read_history(os.path.join(self.home, "history.jsonl"))
+        self.assertEqual(list(rows[0]["stage_s"]), ["preflight", "pr"])
+        self.assertEqual(list(rows[0]["sandbox_s"]), ["baseline"])
+
+    def test_preflight_time_covers_the_baseline_even_when_it_fails(self):
+        self.runner_scenario({"default": 0, "results": {"baseline": {"test": 1}}})
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        log = self.read(".revali/feature__mul/logs/revali.log")
+        self.assertRegex(log, r"preflight: baseline failed at test \(\d+(m\d+)?s\)")
+        timing = [line for line in log.splitlines() if "] run: timing " in line]
+        self.assertEqual(len(timing), 1, log)
+        self.assertEqual(timing[0], log.splitlines()[-1])
+        self.assertRegex(timing[0], r"timing preflight \d+(m\d+)?s; sandbox baseline ")
+        rows = read_history(os.path.join(self.home, "history.jsonl"))
+        self.assertEqual(list(rows[0]["stage_s"]), ["preflight"])
+        self.assertGreaterEqual(rows[0]["stage_s"]["preflight"], rows[0]["sandbox_s"]["baseline"])
+
+    def test_dry_run_reports_its_timing_too(self):
+        code, out = run_cli(["run", "--foreground", "--dry-run"])
+        self.assertEqual(code, EXIT_OK, out)
+        log = self.read(".revali/feature__mul/logs/revali.log")
+        self.assertEqual(len([line for line in log.splitlines() if "] run: timing " in line]), 1)
 
     def test_existing_open_pr_reused(self):
         self.scenario(

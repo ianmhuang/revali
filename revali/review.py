@@ -5,6 +5,7 @@ guard the working tree, check AC coverage, smoke-run the new tests, commit them.
 import json
 import os
 import string
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
@@ -12,7 +13,7 @@ from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
 from revali.preflight import Context, Stop, check_tree_unmoved
 from revali.procs import resolve, run
-from revali.runners import RunnerError, get_runner, steps_for
+from revali.runners import RunnerError, get_runner, steps_with_files
 from revali.state import (
     RunLog,
     State,
@@ -22,6 +23,7 @@ from revali.state import (
     write_json_atomic,
     write_text,
 )
+from revali.timing import fmt_duration
 
 APPROVE, CHANGES_REQUESTED, NEEDS_INFO = "APPROVE", "CHANGES_REQUESTED", "NEEDS_INFO"
 MANIFEST_PATTERNS = [
@@ -787,11 +789,16 @@ def smoke_run(
     label = "smoke-r%d-%d" % (round_no, attempt)
     if log:
         log.stage("review", "smoke run of %d new test file(s) on %s" % (len(extra), runner.name))
+    # new_test names this round's files when it asks for {files}
+    steps = steps_with_files(
+        plat, ["setup", "build", "new_test"], sorted(extra), log.stage if log else None, "review"
+    )
+    started = time.monotonic()
     try:
         report = runner.run(
             ctx.repo_root,
             "HEAD",
-            steps_for(plat, ["setup", "build", "new_test"]),
+            steps,
             extra,
             ctx.logs,
             label,
@@ -800,6 +807,10 @@ def smoke_run(
         )
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc) from exc
+    took = time.monotonic() - started
+    if log:
+        log.timing.sandbox(label, took)
+        log.stage("review", "smoke run finished (%s)" % fmt_duration(took))
     failed = report.failed
     if failed is None:
         return None
