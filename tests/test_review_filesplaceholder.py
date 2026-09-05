@@ -156,6 +156,33 @@ class PlaceholderNamesTheFiles(FilesCase):
             self.step_cmd("validate-r1", "new_test"), 'run-new "my tests/test_review_mul.py"'
         )
 
+    def test_a_quoted_path_escapes_what_the_shell_reads_inside_double_quotes(self):
+        """A whitespace path is double-quoted (AC-4); a `$` inside it would still be expanded
+        by the sandbox shells, so the expansion escapes it and the command names the file as
+        it is on disk."""
+        self.set_toml("test_dir", "my $dir")
+        self.set_toml("new_test", "run-new {files}")
+        entry = claude_entry(
+            approve_response(
+                tests=[
+                    {
+                        "path": "my $dir/test_review_mul.py",
+                        "purpose": "product and zero",
+                        "covers": ["AC-1", "AC-2"],
+                        "expected": "mul(3,4)=12; mul(9,0)=0",
+                    }
+                ]
+            ),
+            write_tests=False,
+            write_files={"my $dir/test_review_mul.py": TEST_REVIEW_MUL},
+        )
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        expected = 'run-new "my \\$dir/test_review_mul.py"'
+        self.assertEqual(self.step_cmd("smoke-r1-1", "new_test"), expected)  # AC-4
+        self.assertEqual(self.step_cmd("validate-r1", "new_test"), expected)  # AC-4
+
 
 class WithoutThePlaceholder(FilesCase):
     def test_the_command_runs_as_written(self):

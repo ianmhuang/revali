@@ -126,6 +126,40 @@ class TheTimingLine(TimingCase):
         self.assert_seconds(row["stage_s"])
         self.assert_seconds(row["sandbox_s"])
 
+    def test_a_stage_wall_time_covers_its_sandbox_session(self):
+        """With the real local runner every sandbox session takes measurable time (a git
+        worktree and a python process). AC-1 asks for the wall time of each stage, so the
+        preflight time includes the baseline it ran, the review time the smoke run, and the
+        validate time the validation run; a stage clock started after its session would be
+        shorter than the session itself."""
+        self.use_real_local_runner()
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        row = self.history_row()
+        stage, sandbox = row["stage_s"], row["sandbox_s"]
+        self.assertGreater(sandbox["baseline"], 0, sandbox)  # the session really ran
+        self.assertGreaterEqual(stage["preflight"], sandbox["baseline"], row)  # AC-1
+        self.assertGreaterEqual(stage["review"], sandbox["smoke-r1-1"], row)  # AC-1
+        self.assertGreaterEqual(stage["validate"], sandbox["validate-r1"], row)  # AC-1
+        self.the_timing_line()  # AC-1: one line, last of the run
+
+    def test_the_line_ends_the_log_even_when_the_state_file_cannot_be_written(self):
+        """state.json is a directory, so no state write can succeed: the run ends on its own
+        with exit 1 and reports that the state file could not be updated. AC-1 still wants
+        the `run: timing` line as the last line of the run, and AC-2 the history row."""
+        os.makedirs(os.path.join(self.rdir(), "state.json"))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("state file could not be updated", out)
+        self.the_timing_line()  # AC-1: exactly one, and the last line
+        row = self.history_row()
+        self.assertEqual(row["exit"], EXIT_ERROR)
+        self.assertIn("stage_s", row)  # AC-2
+        self.assertIn("sandbox_s", row)
+        self.assert_seconds(row["stage_s"])
+        self.assert_seconds(row["sandbox_s"])
+
     def test_needs_human_exit_3_ends_with_the_line(self):
         cr = approve_response(verdict="CHANGES_REQUESTED", findings=[finding()])
         self.claude(
