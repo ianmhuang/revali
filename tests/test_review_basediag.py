@@ -95,7 +95,9 @@ class DiagnosisPrompt(RepoCase):
     def test_prompt_states_only_what_ran_when_the_rerun_is_off(self):
         # round 1 F2: with the key false nothing ran on base; the section still names the
         # base branch and sha, gives the reason, and does not say anything was copied
-        cfg = self.read("revali.toml").replace("[validate]\n", "[validate]\nrerun_on_base = false\n")
+        cfg = self.read("revali.toml").replace(
+            "[validate]\n", "[validate]\nrerun_on_base = false\n"
+        )
         self.write("revali.toml", cfg)
         self.commit_all("rerun off")
         prompt = self.failing()

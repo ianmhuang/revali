@@ -11,7 +11,8 @@
 config_version = 1
 base_branch = "main"              # empty = the repo's default branch (via gh)
 platforms = ["linux"]             # v1.0 supports linux only
-lint = ""                         # e.g. "ruff check . && black --check ."; failure blocks review
+lint = ""                         # e.g. "ruff check . && black --check ."; also run on the reviewer's
+                                  # test files before they are committed; a failure blocks the run
 test_dir = "tests"
 test_file_pattern = "test_review_{topic}.py"
 test_guide = ""                   # optional doc telling the reviewer how tests are added

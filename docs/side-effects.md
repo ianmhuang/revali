@@ -15,6 +15,13 @@ stated.
   pushing nothing from that point; `merge` holds the same lock while it
   checks out the base branch and pulls
 - `git push -u origin <branch>` and `gh pr create --draft`
+- runs `[project] lint` a second time after the reviewer has written its test
+  files, over the working tree with those files in it (preflight ran the same
+  line before the reviewer started, so a failure now is the reviewer's files);
+  on a failure the reviewer is sent back once with the command and the output
+  tail, a second failure ends the run with exit 1 and no test commit. A
+  NEEDS_INFO round is checked the same way, since its files stay in the tree.
+  An empty `lint` line skips this and preflight prints a note saying so
 - commits the reviewer's test files into `test_dir`, with
   `Co-Authored-By: Claude` and `Revali-Round: <n>` trailers; only new files
   and the files the reviewer wrote in an earlier round. The

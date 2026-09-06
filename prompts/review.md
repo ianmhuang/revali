@@ -79,6 +79,7 @@ Each file goes into `tests` with `covers` listing the AC ids it checks and
 `expected` stating input, expected output, and why that follows from the AC.
 Every AC must appear in some `covers` list or in `not_testable` with a
 reason. Do not run the tests; the script runs them in a sandbox.
+$lint_section
 $test_guide_section
 $prior_tests_section
 $pending_tests_section

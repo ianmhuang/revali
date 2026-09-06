@@ -19,7 +19,7 @@ from revali.config import (
     paths_for,
     tool_file,
 )
-from revali.procs import ExeNotFound, ProcTimeout, run_shell
+from revali.procs import ProcTimeout, run_shell
 from revali.secretscan import format_hits, scan_diff
 from revali.state import RunLog, review_dir
 
@@ -259,6 +259,10 @@ def check_secrets(ctx: Context) -> None:
 def check_lint(ctx: Context) -> None:
     cmd = ctx.cfg.project.lint.strip()
     if not cmd:
+        ctx.notes.append(
+            "lint is empty; formatting and style are not checked, neither on this diff "
+            "nor on the reviewer's tests before they are committed ([project] lint)"
+        )
         return
     ctx.say("lint: %s" % cmd)
     if ctx.dry_run:
@@ -267,8 +271,6 @@ def check_lint(ctx: Context) -> None:
         res = run_shell(
             cmd, cwd=ctx.repo_root, timeout=ctx.cfg.review.timeout_min * 60, log=ctx.detail
         )
-    except ExeNotFound as exc:
-        raise Stop(EXIT_ERROR, "lint command could not start: %s" % exc) from exc
     except ProcTimeout as exc:
         raise Stop(EXIT_ERROR, "lint timed out: %s" % exc) from exc
     if not res.ok:
