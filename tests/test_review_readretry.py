@@ -2,7 +2,9 @@
 rename (PermissionError on Windows) keeps trying for the writer's window, `[paths]
 write_retry_s` of the repository holding the file (defaults.toml outside one), returns the
 parsed state once the file is released, and re-raises the original error after the window.
-Other errors are not retried; a zero window is one attempt. Time is faked."""
+Other errors are not retried; a zero window is one attempt. Time is faked. Round 2 adds the
+lookup cost: the window is resolved on the first refusal only, never on a first open that
+succeeds."""
 
 import builtins
 import os
@@ -11,7 +13,7 @@ import unittest
 from unittest import mock
 
 from revali.config import load_defaults
-from revali.state import State, write_json_atomic
+from revali.state import State, read_json_retry, write_json_atomic, write_retry_s
 from tests.helpers import RepoCase, rmtree_force
 
 DENIED = PermissionError(13, "Access is denied")
@@ -126,6 +128,55 @@ class OutsideARepository(unittest.TestCase):
         self.assertEqual(len(attempts), 3)
         state = State.load(self.tmp)
         self.assertEqual(state.stage, "done")
+
+
+class WindowLookup(unittest.TestCase):
+    """Round 1 F2: the `[paths] write_retry_s` lookup (a walk to `.git` and the layered config)
+    is paid on the first refusal only. `wait` and `status` poll through `State.load`, and their
+    first open almost always succeeds."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="revali read retry ")
+        self.addCleanup(rmtree_force, self.tmp)
+        self.path = State.path(self.tmp)
+        self.clock = fake_clock(self)
+        State(branch="feature/mul", stage="review").save(self.tmp)
+        self.lookups = mock.patch("revali.state.write_retry_s", wraps=write_retry_s)
+        self.lookup = self.lookups.start()
+        self.addCleanup(self.lookups.stop)
+
+    def test_resolved_once_and_only_when_refused(self):
+        self.assertEqual(State.load(self.tmp).stage, "review")
+        self.assertEqual(self.lookup.call_count, 0)  # a first open that succeeds: no lookup
+        opener = refuse(self, self.path, refusals=3)
+        self.assertEqual(State.load(self.tmp).stage, "review")  # AC-3: retried
+        self.assertEqual(opener.calls, 4)
+        self.assertEqual(self.lookup.call_count, 1)  # one lookup for three refusals
+        self.lookup.assert_called_with(self.path)
+
+    def test_an_explicit_window_needs_no_lookup(self):
+        opener = refuse(self, self.path, refusals=2)
+        self.assertEqual(read_json_retry(self.path, retry_s=1.0)["stage"], "review")
+        self.assertEqual(opener.calls, 3)
+        self.assertEqual(self.lookup.call_count, 0)
+
+    def test_the_writer_pays_the_lookup_on_refusal_only(self):
+        write_json_atomic(self.path, {"stage": "done"})
+        self.assertEqual(self.lookup.call_count, 0)  # the rename went through first time
+        attempts = []
+        real = os.replace
+
+        def replace(src, dst):
+            attempts.append(dst)
+            if len(attempts) <= 2:
+                raise DENIED
+            real(src, dst)
+
+        with mock.patch("revali.state.os.replace", replace):
+            write_json_atomic(self.path, {"stage": "merge"})
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(self.lookup.call_count, 1)
+        self.assertEqual(State.load(self.tmp).stage, "merge")
 
 
 class InsideARepository(RepoCase):

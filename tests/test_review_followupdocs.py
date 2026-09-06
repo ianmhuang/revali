@@ -53,6 +53,35 @@ class FilesMd(unittest.TestCase):
         self.assertNotIn("issue-<n>", self.text)
 
 
+class WriteRetryKey(unittest.TestCase):
+    """Round 1 F1: `[paths] write_retry_s` now bounds a read waiting for a writer as well as a
+    write waiting for a reader, and every place that describes the key says so."""
+
+    def test_files_md_state_row_names_both_directions(self):
+        rows = table_rows(repo_file("docs", "files.md"))
+        row = next(r for r in rows if r[0].startswith("`state.json`"))
+        note = row[-1]
+        self.assertIn("write_retry_s", note)
+        self.assertRegex(note, r"write waits for a reader")
+        self.assertRegex(note, r"read[^|]*waits for a writer")
+        self.assertIn("`wait`", note)  # the readers that poll
+
+    def test_defaults_toml_comment_names_both_directions(self):
+        line = self.key_line(repo_file("defaults.toml"))
+        self.assertIn("write", line)
+        self.assertRegex(line, r"read that a writer blocks")
+
+    def test_user_config_template_comment_names_both_directions(self):
+        line = self.key_line(repo_file("templates", "user-config.toml"))
+        self.assertIn("write waits for a reader", line)
+        self.assertRegex(line, r"read for a writer")
+
+    def key_line(self, text):
+        hits = [ln for ln in text.splitlines() if re.match(r"^#?\s*write_retry_s\s*=", ln)]
+        self.assertEqual(len(hits), 1, hits)
+        return hits[0]
+
+
 class ReadmeDiagram(unittest.TestCase):
     def setUp(self):
         self.text = repo_file("README.md")
