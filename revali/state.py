@@ -144,13 +144,18 @@ def write_retry_s(path: str) -> float:
 def _until_permitted(attempt, path: str, retry_s: Optional[float]):
     """`attempt()`, repeated while it raises PermissionError, for up to `retry_s` seconds
     (`[paths] write_retry_s` for the repository holding `path` when None); the last error
-    propagates once the window is over. Other errors are not retried."""
-    deadline = time.monotonic() + (write_retry_s(path) if retry_s is None else retry_s)
+    propagates once the window is over. Other errors are not retried. The window, and the
+    config lookup behind it, is resolved on the first refusal only: `wait` and `status` poll
+    through `State.load`, and the common case is a first attempt that succeeds."""
+    deadline = None
     pause = 0.02
     while True:
         try:
             return attempt()
         except PermissionError:
+            if deadline is None:
+                window = write_retry_s(path) if retry_s is None else retry_s
+                deadline = time.monotonic() + window
             if time.monotonic() >= deadline:
                 raise
         time.sleep(pause)
@@ -227,6 +232,8 @@ def lock_path(rdir: str) -> str:
 
 
 def read_lock(rdir: str) -> Optional[dict]:
+    """Deliberately not `read_json_retry`: a lock that cannot be read right now is treated
+    as absent, and the caller's own write settles who holds it."""
     path = lock_path(rdir)
     if not os.path.isfile(path):
         return None
@@ -281,6 +288,7 @@ def tree_lock_path(repo_root: str, state_dir: str) -> str:
 
 
 def read_tree_lock(path: str) -> Optional[dict]:
+    """Same rule as `read_lock`: no `read_json_retry`, an unreadable lock counts as absent."""
     if not os.path.isfile(path):
         return None
     try:

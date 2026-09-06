@@ -71,7 +71,9 @@ def title(tests: List[str], base: str) -> str:
 def already_open(state: State, tests: List[str]) -> List[dict]:
     """The issues of this branch that together name every one of `tests`, newest first: the
     newest single issue naming them all when there is one, else the newest issues whose union
-    does (each contributing at least one test not named by a newer one), else nothing."""
+    does (each contributing at least one test not named by a newer one), else nothing. The
+    greedy pass can keep an issue an older one makes redundant (#42 names c, #41 a, #40 a and
+    b, failures a b c -> #41 stays); the note lists one issue too many then, nothing worse."""
     wanted = set(tests)
     for issue in reversed(state.issues):
         if wanted <= set(issue.get("tests", [])):

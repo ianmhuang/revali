@@ -10,8 +10,10 @@ GitHub repositories. Three roles take part.
   diff against the acceptance criteria and writes the acceptance tests. It
   does not run them.
 - **Validator**: a sandbox run of the existing suite plus the Reviewer's
-  tests. On failure only, a diagnosis session reads the output and says
-  whether the code, the test, or the environment is at fault.
+  tests. On failure only, the Reviewer's tests run again on the base tip
+  and a diagnosis session reads the output and says whether the code, the
+  test, or the environment is at fault, and whether the branch or the base
+  introduced it; a bug the base already had gets a GitHub issue.
 
 **Why separate sessions.** Each role runs in its own session with its own
 inputs, so nobody grades their own work: the Reviewer gets the acceptance

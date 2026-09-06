@@ -482,6 +482,8 @@ class Units(unittest.TestCase):
         self.assertEqual(numbers([a, b]), [42, 41])  # AC-4: two issues together, newest first
         self.assertEqual(numbers([a, b, c]), [42, 41])  # #40 adds nothing #42 does not name
         self.assertEqual(numbers([b, "t::new"]), [])  # one test nobody names: open a new one
+        state.issues = [{"number": 40, "tests": [a, b]}, {"number": 41, "tests": [a, b]}]
+        self.assertEqual(numbers([a, b]), [41])  # a single newest cover, not both
 
     def test_issue_ref_line(self):
         self.assertEqual(IssueRef(7, "u").line(), "issue: #7 u")
