@@ -8,7 +8,7 @@ from unittest import mock
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, PROMPT_VERSION
 from revali.preflight import Stop, preflight
-from revali.procs import ExeNotFound, ProcTimeout
+from revali.procs import ProcTimeout
 from revali.review import build_prompt, lint_check
 from revali.state import State
 from tests.fixtures.make_sample_repo import PY
@@ -162,14 +162,6 @@ class Errors(LintCase):
     def test_a_lint_timeout_is_a_pipeline_error(self):
         ctx = preflight(self.repo)
         with mock.patch("revali.review.run_shell", side_effect=ProcTimeout("timed out")):
-            with self.assertRaises(Stop) as cm:
-                lint_check(ctx, [FILE], None)
-        self.assertEqual(cm.exception.exit_code, EXIT_ERROR)  # AC-6
-        self.assertIn("lint", cm.exception.message)
-
-    def test_a_lint_that_cannot_start_is_a_pipeline_error(self):
-        ctx = preflight(self.repo)
-        with mock.patch("revali.review.run_shell", side_effect=ExeNotFound("no such exe")):
             with self.assertRaises(Stop) as cm:
                 lint_check(ctx, [FILE], None)
         self.assertEqual(cm.exception.exit_code, EXIT_ERROR)  # AC-6

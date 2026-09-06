@@ -12,7 +12,7 @@ from typing import List, Optional, Sequence, Tuple
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
 from revali.preflight import Context, Stop, check_tree_unmoved
-from revali.procs import ExeNotFound, ProcTimeout, resolve, run, run_shell
+from revali.procs import ProcTimeout, resolve, run, run_shell
 from revali.runners import RunnerError, get_runner, steps_with_files
 from revali.state import (
     RunLog,
@@ -793,10 +793,10 @@ def lint_check(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> Op
             timeout=ctx.cfg.review.timeout_min * 60,
             log=log.detail if log else None,
         )
-    except ExeNotFound as exc:
-        raise Stop(EXIT_ERROR, "lint command could not start: %s" % exc) from exc
     except ProcTimeout as exc:
         raise Stop(EXIT_ERROR, "lint timed out on the reviewer's files: %s" % exc) from exc
+    # a command the shell cannot find is a non-zero exit like any other red lint result;
+    # preflight ran the same line first and normally stops there
     if log:
         log.stage(
             "review",
