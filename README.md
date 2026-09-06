@@ -43,14 +43,19 @@ sequenceDiagram
         R->>G: push, draft PR
         R->>B: diff, change.md, checklist, previous round
         B-->>R: verdict, findings, acceptance tests
+        R->>R: AC coverage, the project's lint line, smoke run of the tests
         R->>G: commit tests, PR comment
         alt APPROVE
-            R->>V: sandbox: existing suite + new tests
+            R->>V: sandbox: new tests, plus the existing suite unless the baseline still covers it
             alt PASS
                 R->>G: PR marked ready
                 R-->>D: READY TO MERGE, exit 0
             else FAIL
-                V->>V: diagnosis session (code / test / env)
+                R->>V: the new tests again, on the base tip
+                V->>V: diagnosis session (code / test / env; introduced by branch or base)
+                opt bug the base already had
+                    R->>G: issue
+                end
                 R-->>D: exit 2
             end
         else CHANGES_REQUESTED / NEEDS_INFO
@@ -64,6 +69,7 @@ sequenceDiagram
     U->>D: merge
     D->>R: revali merge
     R->>G: wait for CI, squash merge, delete branch
+    R->>G: comment on the issues a branch commit says it fixes
 ```
 
 The preflight baseline (the existing suite in the sandbox) runs on every
@@ -74,8 +80,8 @@ not a FAIL verdict.
 | Role | Started by | Reads | Writes | Model |
 |---|---|---|---|---|
 | Developer | the user | the request, the repo | `change.md`, code, its own tests | whatever the user's session runs; recorded as `author_model` |
-| Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir`, and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment; does not run the tests | `auto`: one tier above the Developer |
-| Validator | revali, after APPROVE | a sandbox clone of the branch; on FAIL, one of the base tip with the Reviewer's tests copied in | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers (with `introduced_by`: branch or base) and revali writes `diagnose-n.json` | the runner needs none; diagnosis `auto`: one tier below the Developer |
+| Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir` (committed once they pass the project's `lint` line and a smoke run), and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment; does not run the tests | `auto`: one tier above the Developer |
+| Validator | revali, after APPROVE | a sandbox clone of the branch; on FAIL, one of the base tip with the Reviewer's tests copied in | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers (with `introduced_by`: branch or base) and revali writes `diagnose-n.json`, and opens a GitHub issue for a bug the base already had | the runner needs none; diagnosis `auto`: one tier below the Developer |
 
 Three user actions (approve the AC, `/revali`, `revali merge`) are the gates;
 everything between them is automatic. Exit codes: `0` done / ready to merge,
@@ -83,11 +89,16 @@ everything between them is automatic. Exit codes: `0` done / ready to merge,
 answer a question), `3` a human must decide, `4` (`wait` only) still running.
 
 Status: package version 0.2.0, the v1.0 feature set plus the multi-session
-work of PR #21 to #24: no console windows, identity lines, one run per
-working tree, sandbox directories per branch, merge from a worktree.
-Verified end to end on a private GitHub repository with real Reviewer
-sessions and real WSL and ssh sandboxes (`docs/sandbox.md` has the record);
-revali reviews its own changes on this public one.
+work of PR #21 to #24 (no console windows, identity lines, one run per
+working tree, sandbox directories per branch, merge from a worktree) and
+the validation work of PR #28 to #33: stage and sandbox timings in the log
+and history, the baseline reused when only the reviewer's test commits
+changed, the reviewer's tests rerun on the base tip before a failure is
+diagnosed, the project's `lint` line gating those tests, and a GitHub issue
+for a bug the base already had. Verified end to end on a private GitHub
+repository with real Reviewer sessions and real WSL and ssh sandboxes
+(`docs/sandbox.md` has the record); revali reviews its own changes on this
+public one.
 
 ## Requirements
 
@@ -113,8 +124,12 @@ sandbox as a baseline), push + draft PR, reviewer round (`claude -p` with the
 diff, change.md, and the checklist; writes tests into `test_dir`; the script
 checks AC coverage, runs `lint` over them, smoke-runs them, commits them), validation
 (the new tests in the sandbox, plus the existing suite unless nothing but
-the reviewer's test commits changed since the baseline ran it; a diagnoser
-session only on failure), then READY TO MERGE. Every result lands in `.revali/<branch>/`
+the reviewer's test commits changed since the baseline ran it; on failure
+the new tests run once more on the base tip, a diagnoser session says whether
+code, test or environment is at fault and whether the branch or the base
+introduced it, and a bug the base already had gets a GitHub issue), then
+READY TO MERGE. Each stage's and each sandbox session's seconds go to the log
+and the history row. Every result lands in `.revali/<branch>/`
 (`review-<n>.md`, `tests.md`, `diagnose-<n>.json`, `logs/`) and as PR comments.
 
 ## Documentation

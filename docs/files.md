@@ -11,7 +11,8 @@ that moves it.
 | `tests.md` | revali, from the Reviewer's answer; validation results appended, on FAIL with a `### Base rerun` block (the reviewer's tests on the base tip) and the diagnosis | you, diagnosis session | same | same |
 | `diagnose-n.json` | revali, from the diagnosis session | you | same | same |
 | `state.json` (stage, rounds, validations with their base rerun result, issues opened for pre-existing bugs, exit) | revali | `wait`, `status`, the next `run`, `merge` | same | same; `[paths] write_retry_s` is how long a write waits for a reader to release the file (Windows) |
-| issue body for a pre-existing bug | revali, from `templates/issue.md` | GitHub (`gh issue create`); a copy in `logs/issue-<n>.md` | `templates/issue.md` in revali | `[validate] issue_template` |
+| issue body for a pre-existing bug | revali, from `templates/issue.md` | GitHub (`gh issue create`); a copy in `logs/issue-<validation>.md`, numbered by the validation that opened it | `templates/issue.md` in revali | `[validate] issue_template` |
+| issue comment after the merge (the merged PR, the fixing commit, the cause and fix recorded with the issue) | `revali merge` | GitHub (`gh issue comment`); a copy in `logs/issue-<issue number>-merged.md`, gone with `.revali/<branch>/` when the merge removes it | `.revali/<branch>/logs/` | `[paths] logs_dir` |
 | `tree.lock` (pid, branch, since of the run holding the working tree) | revali | `run`, `stop` | `.revali/` | `[paths] state_dir` |
 | logs, prompts, raw answers (`<label>-<step>.log` per sandbox step; `base-r<round>-*` is the rerun on the base tip) | revali | you | `.revali/<branch>/logs/` | `[paths] logs_dir` |
 | acceptance tests | Reviewer | Validator; merged into `main` | `tests/test_review_<topic>.py` | `[project] test_dir`, `test_file_pattern` |

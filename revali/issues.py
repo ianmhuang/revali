@@ -20,8 +20,10 @@ from revali.state import RunLog, State, now_iso, read_text, write_text
 LABEL = "bug"  # attached only when the repository has it; never created
 WITHHELD = "(withheld: non-private repository)"
 OUTPUT_LINES = 40
-# `Fixes #12`, `closes: #3`, `Resolved #7`: the words GitHub closes an issue on
-FIX_REF = re.compile(r"\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s*#(\d+)", re.I)
+# `Fixes #12`, `closes #3`, `Resolved #7`: one of GitHub's closing keywords, whitespace, `#n`.
+# Not `fix#12` or `fixes: #12`, which GitHub does not close on. Repository-qualified references
+# (`owner/repo#n`) and issue URLs are not recognised: there is no slug here to check them with.
+FIX_REF = re.compile(r"\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s+#(\d+)\b", re.I)
 
 
 @dataclass
@@ -29,14 +31,16 @@ class IssueRef:
     number: int
     url: str
     existing: bool = False  # opened by an earlier validation of this branch
+    also: Tuple[int, ...] = ()  # older issues that, with this one, name the failing tests
 
     def line(self) -> str:
-        """`issue: #12 <url>`, with a note when it was already open."""
-        return "issue: #%d%s %s" % (
-            self.number,
-            " (already open)" if self.existing else "",
-            self.url,
-        )
+        """`issue: #12 <url>`, with a note when it was already open (and which other issues
+        share the coverage)."""
+        note = ""
+        if self.existing:
+            others = ", ".join("#%d" % n for n in self.also)
+            note = " (already open%s)" % (", with " + others if others else "")
+        return "issue: #%d%s %s" % (self.number, note, self.url)
 
 
 def base_failures(diagnosis: Optional[dict]) -> List[dict]:
@@ -64,12 +68,24 @@ def title(tests: List[str], base: str) -> str:
     return "Pre-existing: %s and %d more fail on %s" % (tests[0], len(tests) - 1, base)
 
 
-def already_open(state: State, tests: List[str]) -> Optional[dict]:
-    """The latest issue of this branch naming every one of `tests`, if there is one."""
+def already_open(state: State, tests: List[str]) -> List[dict]:
+    """The issues of this branch that together name every one of `tests`, newest first: the
+    newest single issue naming them all when there is one, else the newest issues whose union
+    does (each contributing at least one test not named by a newer one), else nothing."""
+    wanted = set(tests)
     for issue in reversed(state.issues):
-        if set(tests) <= set(issue.get("tests", [])):
-            return issue
-    return None
+        if wanted <= set(issue.get("tests", [])):
+            return [issue]
+    out: List[dict] = []
+    left = set(wanted)
+    for issue in reversed(state.issues):
+        named = left & set(issue.get("tests", []))
+        if named:
+            out.append(issue)
+            left -= named
+            if not left:
+                return out
+    return []
 
 
 def _covers_for(test: str, test_files: List[str], reviewer_tests: List[dict]) -> List[str]:
@@ -106,7 +122,7 @@ def _evidence(outcome, base: str, withhold: bool) -> str:
     if branch_step is not None:
         lines.append("On the branch: `%s` exit %d." % (branch_step.name, branch_step.returncode))
     if rerun is not None:
-        lines.append("On base `%s` at %s: %s." % (base, rerun.sha[:10], rerun.one_line()))
+        lines.append("Base branch `%s`, %s." % (base, rerun.one_line()))
     if withhold:
         lines += ["", "Output: " + WITHHELD]
     elif rerun is not None and rerun.available:
@@ -178,13 +194,16 @@ def maybe_open(
     tests = test_ids(failures)
     known = already_open(state, tests)
     if known:
+        numbers = [int(i.get("number", 0)) for i in known]
         if log:
             log.stage(
                 "validate",
-                "pre-existing failure already has issue #%d (%s)"
-                % (int(known.get("number", 0)), ", ".join(tests)),
+                "pre-existing failure already has issue %s (%s)"
+                % (", ".join("#%d" % n for n in numbers), ", ".join(tests)),
             )
-        return IssueRef(int(known.get("number", 0)), str(known.get("url", "")), existing=True)
+        return IssueRef(
+            numbers[0], str(known[0].get("url", "")), existing=True, also=tuple(numbers[1:])
+        )
 
     from revali.pr import is_public
 
