@@ -1,14 +1,15 @@
 """AC-6 of feature/reviewer-lint, white-box: the lint run over the reviewer's files ends the
-run with exit 1 (a pipeline error, as preflight's lint does) when the command cannot start
-or exceeds `[review] timeout_min`; the timeout is the configured one; nothing runs when
-the reviewer wrote no file or the line is empty (AC-1)."""
+run with exit 1 (a pipeline error, as preflight's lint does) when the command exceeds
+`[review] timeout_min`; a command the shell cannot find is a red lint result, not a crash;
+the timeout is the configured one; nothing runs when the reviewer wrote no file or the line
+is empty (AC-1)."""
 
 import unittest
 from unittest import mock
 
 from revali import EXIT_ERROR
 from revali.preflight import Stop, preflight
-from revali.procs import ExeNotFound, ProcTimeout, Result
+from revali.procs import ProcTimeout, Result
 from revali.review import lint_check
 from tests.fixtures.make_sample_repo import PY
 from tests.helpers import RepoCase
@@ -33,12 +34,15 @@ class WithLint(RepoCase):
         self.assertEqual(cm.exception.exit_code, EXIT_ERROR)  # AC-6
         self.assertIn("lint", cm.exception.message)
 
-    def test_a_command_that_cannot_start_is_a_pipeline_error(self):
-        with mock.patch("revali.review.run_shell", side_effect=ExeNotFound("no such exe")):
-            with self.assertRaises(Stop) as cm:
-                lint_check(self.ctx, [FILE], None)
-        self.assertEqual(cm.exception.exit_code, EXIT_ERROR)  # AC-6
-        self.assertIn("lint", cm.exception.message)
+    def test_a_command_the_shell_cannot_find_is_a_red_lint_result(self):
+        # AC-6: the line runs through the platform shell, so a missing executable is a
+        # non-zero shell exit (1 on cmd.exe, 127 on sh) and is reported like any red lint;
+        # no exception escapes and no Stop is raised. Real shell, no mock.
+        self.ctx.cfg.project.lint = "revali-no-such-lint-tool-xyz --check ."
+        problem = lint_check(self.ctx, [FILE], None)
+        self.assertIsNotNone(problem)
+        self.assertIn("revali-no-such-lint-tool-xyz", problem)  # names the command
+        self.assertIn("exit", problem)  # carries the shell's exit code
 
     def test_the_lint_runs_in_the_repo_root_with_the_review_timeout(self):
         green = Result(cmd=["x"], returncode=0, stdout="", stderr="", duration=0.1)
