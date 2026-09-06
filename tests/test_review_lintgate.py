@@ -214,7 +214,7 @@ class EmptyLine(RepoCase):
     """The fixture leaves `[project] lint` empty."""
 
     def note_lines(self, out):
-        return [line for line in out.splitlines() if line.startswith("note: lint is empty")]
+        return [line for line in out.splitlines() if "note: lint is empty" in line]
 
     def test_preflight_prints_the_note_once(self):
         code, out = run_cli(["preflight"])
