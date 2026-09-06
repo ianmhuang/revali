@@ -26,8 +26,7 @@ $log_tail
 
 ## The same test files on the base branch
 
-revali copied the reviewer's test files onto a sandbox clone of `$base` at
-`$base_sha` (the branch's changes absent) and ran `new_test` there.
+The base branch is `$base` at `$base_sha`.
 $base_rerun
 
 # What to decide

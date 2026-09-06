@@ -289,12 +289,15 @@ def rerun_on_base(
         out.reason = "[validate] rerun_on_base is false"
     extra = {}
     if not out.reason:
-        extra = {
-            rel: read_text(os.path.join(ctx.repo_root, rel))
-            for rel in state.test_files
-            if os.path.isfile(os.path.join(ctx.repo_root, rel))
-        }
-        if not extra:
+        try:
+            extra = {
+                rel: read_text(os.path.join(ctx.repo_root, rel))
+                for rel in state.test_files
+                if os.path.isfile(os.path.join(ctx.repo_root, rel))
+            }
+        except (OSError, UnicodeDecodeError) as exc:
+            out.reason = "could not read a reviewer test file: %s" % exc
+        if not extra and not out.reason:
             out.reason = "no reviewer test file to rerun"
     if out.reason:
         if log:
@@ -359,14 +362,20 @@ def rerun_on_base(
 
 
 def _base_rerun_for_prompt(rerun: Optional[BaseRerun]) -> str:
+    """The `$base_rerun` value of the diagnosis prompt: what happened on base, phrased so
+    it is true whether the rerun ran, ran without a usable result, or did not run."""
     if rerun is None or not rerun.available:
         why = rerun.reason if rerun else "no base rerun"
-        return "No base output: %s. Answer `introduced_by: unknown`." % why
+        return (
+            "revali has no `new_test` result from the base branch (%s). "
+            "Answer `introduced_by: unknown`." % why
+        )
     step = rerun.new_test
-    return "`new_test` exited %d on base. Its output (last %d lines):\n\n```\n%s\n```" % (
-        step.returncode,
-        LOG_LINES,
-        tail(step.text, LOG_LINES) or "(empty)",
+    return (
+        "revali copied the reviewer's test files onto a sandbox clone of that commit (the "
+        "branch's changes absent) and ran `new_test` there; `new_test` exited %d on base. "
+        "Its output (last %d lines):\n\n```\n%s\n```"
+        % (step.returncode, LOG_LINES, tail(step.text, LOG_LINES) or "(empty)")
     )
 
 

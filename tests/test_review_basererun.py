@@ -137,9 +137,7 @@ class TheRerun(BaseRerunCase):
         self.assertEqual(code, EXIT_ACTION, out)
         self.write("src/calc.py", self.read("src/calc.py") + "\n# fix\n")
         self.commit_all("fix")
-        self.claude(
-            claude_entry(write_tests=False), claude_entry(diagnosis(), write_tests=False)
-        )
+        self.claude(claude_entry(write_tests=False), claude_entry(diagnosis(), write_tests=False))
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
         self.assertEqual(len(self.runner_calls("base-r2")), 1, self.fake_calls("runner"))
