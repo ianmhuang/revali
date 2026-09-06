@@ -9,6 +9,7 @@ from typing import Optional
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.config import PlatformCfg
 from revali.engines import EngineRequest
+from revali.issues import IssueRef, maybe_open
 from revali.preflight import Context, Stop
 from revali.review import TRAILER, under_test_dir
 from revali.runners import (
@@ -55,6 +56,16 @@ class BaseRerun:
             return head + "new_test exit %d" % self.new_test.returncode
         return head + ("unavailable, " if self.ran else "not run, ") + self.reason
 
+    def as_dict(self) -> dict:
+        """The `base_rerun` entry of a validation record: `exit` is the base `new_test` exit
+        code with an empty `reason` when that result is usable, else None with the reason."""
+        return {
+            "sha": self.sha,
+            "ran": self.ran,
+            "exit": self.new_test.returncode if self.available else None,
+            "reason": "" if self.available else self.reason,
+        }
+
 
 @dataclass
 class ValidationOutcome:
@@ -72,6 +83,7 @@ class ValidationOutcome:
     skipped_reason: str = ""
     suite_note: str = ""  # why the existing suite was not rerun, when it was not
     base_rerun: Optional[BaseRerun] = None  # set on FAIL
+    issue: Optional[IssueRef] = None  # the issue for a pre-existing bug, when one applies
 
     @property
     def introduced_by(self) -> str:
@@ -237,6 +249,7 @@ def run_validation(
             outcome.base_rerun = rerun_on_base(ctx, state, failed, max(1, len(state.rounds)), log)
             if not ctx.dry_run:
                 _diagnose(ctx, state, rdir, failed, outcome, log)
+                outcome.issue = maybe_open(ctx, state, rdir, outcome, log)
     outcome.section_md = render_section(ctx, outcome)
     path = os.path.join(rdir, "tests.md")
     existing = read_text(path) if os.path.isfile(path) else "# Tests\n"
@@ -250,6 +263,8 @@ def run_validation(
             "head_sha": ctx.head_sha,
             "cause": (outcome.diagnosis or {}).get("cause", ""),
             "introduced_by": outcome.introduced_by,
+            "base_rerun": outcome.base_rerun.as_dict() if outcome.base_rerun else None,
+            "issue": outcome.issue.number if outcome.issue else 0,
             "model": outcome.model_actual,
             "fallback": outcome.fallback,
             "cost_usd": outcome.cost,
@@ -361,14 +376,13 @@ def rerun_on_base(
     return out
 
 
-def _base_rerun_for_prompt(rerun: Optional[BaseRerun]) -> str:
+def _base_rerun_for_prompt(rerun: BaseRerun) -> str:
     """The `$base_rerun` value of the diagnosis prompt: what happened on base, phrased so
     it is true whether the rerun ran, ran without a usable result, or did not run."""
-    if rerun is None or not rerun.available:
-        why = rerun.reason if rerun else "no base rerun"
+    if not rerun.available:
         return (
             "revali has no `new_test` result from the base branch (%s). "
-            "Answer `introduced_by: unknown`." % why
+            "Answer `introduced_by: unknown`." % rerun.reason
         )
     step = rerun.new_test
     return (
@@ -560,6 +574,8 @@ def render_section(ctx: Context, o: ValidationOutcome) -> str:
         out += ["", "recommendation: %s" % d.get("recommendation", "")]
     elif o.diagnosis_error:
         out += ["", "diagnosis unavailable: %s" % o.diagnosis_error]
+    if o.issue:
+        out += ["", "pre-existing bug, " + o.issue.line()]
     out.append("")
     return "\n".join(out)
 
@@ -600,6 +616,8 @@ def render_section_summary(o: ValidationOutcome, state_dir: str) -> str:
             )
         elif o.diagnosis_error:
             out.append("diagnosis unavailable")
+        if o.issue:
+            out.append("pre-existing bug, " + o.issue.line())
         out.append("")
     out += ["Full text: `%s/<branch>/tests.md` on the author's machine." % state_dir, ""]
     return "\n".join(out)
@@ -613,6 +631,8 @@ def summary_for_author(o: ValidationOutcome, rdir: str) -> str:
         lines.append("recommendation: %s" % o.diagnosis.get("recommendation", ""))
     elif o.diagnosis_error:
         lines.append("diagnosis unavailable: %s" % o.diagnosis_error)
+    if o.issue:
+        lines.append("pre-existing bug, " + o.issue.line())
     if o.report and o.report.failed:
         lines.append("log: %s" % o.report.failed.log_path)
     lines.append("details: %s" % os.path.join(rdir, "tests.md"))

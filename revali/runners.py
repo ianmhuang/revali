@@ -30,6 +30,9 @@ SSH_PROBE = "git --version && command -v timeout && command -v bash"
 SHORT_MARGIN_S = 60
 SESSION_MARGIN_S = 300
 BUNDLE_TIMEOUT_S = 300
+# what `timeout(1)` returns when a step overruns; the sandbox script and the fake runner
+# both mark that exit as a timeout
+TIMEOUT_EXIT = 124
 
 
 class RunnerError(Exception):
@@ -182,8 +185,8 @@ class LocalRunner(Runner):
 
 class FakeRunner(Runner):
     """Scenario file: {"default": 0, "results": {"<label>": {"<step>": <exit>}}, "outputs":
-    {...}, "errors": {"<label>": "<message>"}}. Exit 124 counts as a timeout, as in the
-    sandbox script; a label under "errors" raises RunnerError instead of running."""
+    {...}, "errors": {"<label>": "<message>"}}. Exit TIMEOUT_EXIT counts as a timeout, as in
+    the sandbox script; a label under "errors" raises RunnerError instead of running."""
 
     name = "fake"
 
@@ -234,7 +237,7 @@ class FakeRunner(Runner):
                 cmd=cmd,
                 returncode=rc,
                 stdout=out,
-                timed_out=(rc == 124),
+                timed_out=(rc == TIMEOUT_EXIT),
                 log_path=os.path.join(logs_dir, "%s-%s.log" % (label, name)),
             )
             write_text(step.log_path, "$ %s\n(exit %d)\n\n%s" % (cmd, rc, out))
@@ -276,7 +279,7 @@ ulimit -u 512 -f 4000000 2>/dev/null
 run_step() {
     local name="$1" rc to
     (cd "$SB/repo" && timeout "${STEP_TIMEOUT}s" bash "$CMDS/$LABEL-$name.cmd") > "$LOGS/$LABEL-$name.log" 2>&1
-    rc=$?; to=0; if [ "$rc" -eq 124 ]; then to=1; fi
+    rc=$?; to=0; if [ "$rc" -eq __TIMEOUT_EXIT__ ]; then to=1; fi
     printf "%s\t%s\t%s\n" "$name" "$rc" "$to" >> "$RES"
     [ "$rc" -eq 0 ]
 }
@@ -341,6 +344,7 @@ def render_script(
         ("__EXTRA__", extra),
         ("__LABEL__", label),
         ("__REF__", ref),
+        ("__TIMEOUT_EXIT__", str(TIMEOUT_EXIT)),
         ("__TIMEOUT__", str(int(timeout_s))),
         ("__STEPS__", "\n".join(step_lines)),
         ("__SCOPE__", scope),

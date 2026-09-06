@@ -60,6 +60,11 @@ reuse_baseline = true            # validation skips `test` when every commit sin
 rerun_on_base = true             # when the reviewer's tests fail in validation, run the same files
                                  # once more on the base tip so the diagnosis can tell a bug the
                                  # branch introduced from one it inherited; evidence only
+issue_on = true                  # when the diagnosis marks a failure `cause: code` and
+                                 # `introduced_by: base`, open one GitHub issue for that validation
+                                 # (gh issue create, as the author; label `bug` if the repo has it)
+issue_assignee = "author"        # "author" = the PR author's gh login; "" = leave it unassigned
+issue_template = ""              # empty = templates/issue.md ($placeholders, see docs/configuration.md)
 
 # Defaults for every [validate.<platform>] table; a user or project file may
 # repeat this table to change the defaults for all of its platforms.

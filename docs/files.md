@@ -10,7 +10,8 @@ that moves it.
 | `review-n.md` / `.json` | revali, from the Reviewer's answer | you, the PR | same | same |
 | `tests.md` | revali, from the Reviewer's answer; validation results appended, on FAIL with a `### Base rerun` block (the reviewer's tests on the base tip) and the diagnosis | you, diagnosis session | same | same |
 | `diagnose-n.json` | revali, from the diagnosis session | you | same | same |
-| `state.json` (stage, rounds, validations, exit) | revali | `wait`, `status`, the next `run` | same | same; `[paths] write_retry_s` is how long a write waits for a reader to release the file (Windows) |
+| `state.json` (stage, rounds, validations with their base rerun result, issues opened for pre-existing bugs, exit) | revali | `wait`, `status`, the next `run`, `merge` | same | same; `[paths] write_retry_s` is how long a write waits for a reader to release the file (Windows) |
+| issue body for a pre-existing bug | revali, from `templates/issue.md` | GitHub (`gh issue create`); a copy in `logs/issue-<n>.md` | `templates/issue.md` in revali | `[validate] issue_template` |
 | `tree.lock` (pid, branch, since of the run holding the working tree) | revali | `run`, `stop` | `.revali/` | `[paths] state_dir` |
 | logs, prompts, raw answers (`<label>-<step>.log` per sandbox step; `base-r<round>-*` is the rerun on the base tip) | revali | you | `.revali/<branch>/logs/` | `[paths] logs_dir` |
 | acceptance tests | Reviewer | Validator; merged into `main` | `tests/test_review_<topic>.py` | `[project] test_dir`, `test_file_pattern` |

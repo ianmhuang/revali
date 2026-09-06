@@ -79,6 +79,8 @@ def summarise(rows: List[dict]) -> str:
     for r in runs:
         verdicts[r.get("last_verdict") or "-"] += 1
     out += ["last verdicts: " + ", ".join("%s %d" % (k, v) for k, v in sorted(verdicts.items()))]
+    issues = sum(int(r.get("issues", 0) or 0) for r in runs)
+    out += ["issues opened: %d" % issues]
     return "\n".join(out)
 
 

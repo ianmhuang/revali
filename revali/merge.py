@@ -7,7 +7,7 @@ import stat
 import time
 from typing import List, Optional
 
-from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops
+from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops, issues
 from revali.config import ConfigError, load_project_config
 from revali.preflight import Stop
 from revali.procs import resolve, run, run_retry
@@ -21,6 +21,21 @@ def _poll_seconds() -> float:
         return float(os.environ.get(POLL_ENV, "20"))
     except ValueError:
         return 20.0
+
+
+def _branch_messages(state: State, root: str, log: RunLog) -> List[tuple]:
+    """(sha, message) of the branch's commits since the base the run compared against;
+    nothing when the state has no issue to look for or no base sha to start from."""
+    if not state.issues:
+        return []
+    if not state.base_sha:
+        log.stage("merge", "note: no base sha in the state; issue comments skipped")
+        return []
+    try:
+        return gitops.commit_messages(state.base_sha, "HEAD", root)
+    except gitops.GitError as exc:
+        log.stage("merge", "note: could not read the branch's commits: %s" % exc)
+        return []
 
 
 def remove_tree(path: str) -> None:
@@ -131,6 +146,9 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
     if cfg.merge.wait_for_checks:
         wait_for_checks(state.pr_number, root, cfg.merge.checks_timeout_min, log)
 
+    # read before the merge: `--delete-branch` makes the branch's commits unreachable
+    fixes = issues.referenced_issues(_branch_messages(state, root, log), state.issues)
+
     argv = ["pr", "merge", str(state.pr_number), "--%s" % cfg.merge.method]
     if elsewhere:
         log.stage(
@@ -157,6 +175,7 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
             raise Stop(EXIT_ERROR, "gh pr merge failed: %s" % res.text.strip()[:400])
     state.pending_effect = ""
     state.set_stage(rdir, "merged", "merged PR #%d into %s" % (state.pr_number, base), EXIT_OK)
+    issues.comment_after_merge(state, fixes, root, os.path.join(rdir, cfg.paths.logs_dir), log)
 
     if elsewhere:
         _worktree_follow_up(root, branch, base, elsewhere, log)
