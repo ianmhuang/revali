@@ -259,6 +259,10 @@ def check_secrets(ctx: Context) -> None:
 def check_lint(ctx: Context) -> None:
     cmd = ctx.cfg.project.lint.strip()
     if not cmd:
+        ctx.notes.append(
+            "lint is empty; formatting and style are not checked, neither on this diff "
+            "nor on the reviewer's tests before they are committed ([project] lint)"
+        )
         return
     ctx.say("lint: %s" % cmd)
     if ctx.dry_run:

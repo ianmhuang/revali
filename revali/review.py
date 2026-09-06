@@ -12,7 +12,7 @@ from typing import List, Optional, Sequence, Tuple
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
 from revali.preflight import Context, Stop, check_tree_unmoved
-from revali.procs import resolve, run
+from revali.procs import ExeNotFound, ProcTimeout, resolve, run, run_shell
 from revali.runners import RunnerError, get_runner, steps_with_files
 from revali.state import (
     RunLog,
@@ -300,6 +300,16 @@ def _existing_tests_section(ctx: Context, state: State) -> str:
     )
 
 
+def _lint_section(ctx: Context) -> str:
+    cmd = ctx.cfg.project.lint.strip()
+    if not cmd:
+        return ""
+    return (
+        "The project's lint command `%s` must pass on your files: the script runs it over "
+        "the tree before the smoke run and sends you back once when it fails.\n" % cmd
+    )
+
+
 def _bounce_section(notes: str) -> str:
     if not notes:
         return ""
@@ -343,6 +353,7 @@ def build_prompt(
         "prior_section": _prior_findings_section(rdir, round_no),
         "response_section": _response_section(rdir, round_no),
         "bounce_section": _bounce_section(bounce_notes),
+        "lint_section": _lint_section(ctx),
         "test_dir": cfg.project.test_dir,
         "tests_required": tests_required,
         "test_guide_section": guide,
@@ -768,6 +779,40 @@ def compute_verdict(data: dict, gaps: List[str], needs_info_allowed: bool) -> Tu
     return APPROVE, []
 
 
+def lint_check(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> Optional[str]:
+    """Run `[project] lint` over the working tree with the reviewer's files in it. None =
+    green or nothing to check; a string = red (bounce to the reviewer). Preflight ran the
+    same line on the tree before the reviewer wrote anything, so red here is its files."""
+    cmd = ctx.cfg.project.lint.strip()
+    if not cmd or not test_files:
+        return None
+    try:
+        res = run_shell(
+            cmd,
+            cwd=ctx.repo_root,
+            timeout=ctx.cfg.review.timeout_min * 60,
+            log=log.detail if log else None,
+        )
+    except ExeNotFound as exc:
+        raise Stop(EXIT_ERROR, "lint command could not start: %s" % exc) from exc
+    except ProcTimeout as exc:
+        raise Stop(EXIT_ERROR, "lint timed out on the reviewer's files: %s" % exc) from exc
+    if log:
+        log.stage(
+            "review",
+            "lint of %d new test file(s) with `%s`: exit %d"
+            % (len(test_files), cmd, res.returncode),
+        )
+    if res.ok:
+        return None
+    tail = "\n".join(res.text.strip().splitlines()[-30:])
+    return "the project's lint command `%s` fails (exit %d) on the tree with your files:\n%s" % (
+        cmd,
+        res.returncode,
+        tail,
+    )
+
+
 def smoke_run(
     ctx: Context,
     test_files: List[str],
@@ -1157,6 +1202,9 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
         restored = restore_protected_tests(ctx, state, log)
         files = new_test_files(ctx)
         gaps = ac_gaps(rr.data, ctx.doc.ac_ids)
+        # lint first (cheap, local, also for a NEEDS_INFO round whose files stay uncommitted
+        # and would otherwise fail the next run's preflight), then the sandbox smoke run
+        lint_problem = lint_check(ctx, files, log)
         smoke_problem = None
         if files and ctx.doc.kind in ("feature", "fix") and rr.data.get("verdict") != NEEDS_INFO:
             smoke_problem = smoke_run(ctx, files, rdir, round_no, attempt, log)
@@ -1173,6 +1221,8 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
                 "These acceptance criteria are neither covered by a test nor listed in "
                 "`not_testable` with a reason: %s. Cover them or explain." % ", ".join(gaps)
             )
+        if lint_problem:
+            problems.append("Fix the test files so they pass lint: " + lint_problem)
         if smoke_problem:
             problems.append("Fix the test files so they run: " + smoke_problem)
         if problems and bounces == 0:
@@ -1193,6 +1243,10 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
             "the reviewer modified existing test file(s) it did not write on the last "
             "attempt of round %d; restored, no tests committed: %s"
             % (round_no, ", ".join(restored)),
+        )
+    if lint_problem:
+        raise Stop(
+            EXIT_ERROR, "the reviewer's tests still fail lint after a retry; " + lint_problem
         )
     if smoke_problem:
         raise Stop(

@@ -31,6 +31,12 @@ in the reviewer's tests (`new_test`) run the same test files once more on
 the base tip, so the diagnosis session can tell whether the branch
 introduced the failure or inherited it (`introduced_by` in its answer);
 see `docs/sandbox.md`. False skips that rerun.
+`[project] lint` is one shell line (`ruff check . && black --check .`, say)
+that preflight runs on the working tree and stops on with exit 2; the same
+line gates the reviewer's tests: after the reviewer writes them the line
+runs again, a failure sends the reviewer back once, a second failure ends
+the run. Leave it empty and nothing checks formatting or style, for your
+diff or for the reviewer's files; preflight prints a note when that is so.
 
 Models: `model = "auto"` (the default) picks the Reviewer one tier above
 the Developer's model (`author_model` in `change.md`) and the diagnosis
