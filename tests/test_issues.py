@@ -5,7 +5,7 @@ import os
 import unittest
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
-from revali.issues import FIX_REF, referenced_issues, title
+from revali.issues import FIX_REF, IssueRef, already_open, referenced_issues, title
 from revali.runners import TIMEOUT_EXIT
 from revali.state import State
 from tests.helpers import ROOT, RepoCase, claude_entry, git, run_cli
@@ -121,6 +121,16 @@ class OpenIssue(IssueCase):
         self.assertIn(line, self.read(".revali/feature__mul/logs/comment-validate-1.md"))
         self.assertIn(line, out)
         self.assertIn("opened issue #41 for the pre-existing failure", self.read(REVALI_LOG))
+
+    def test_evidence_names_the_base_once(self):
+        self.fail_run()
+        body = self.read(BODY)
+        evidence = body.split("## Evidence")[1].split("## ")[0]
+        sha = self.base_sha()[:10]
+        line = "Base branch `main`, on base %s: new_test exit 1." % sha
+        self.assertIn(line, evidence)  # AC-1: one_line() carries the sha
+        self.assertEqual(evidence.count(sha), 1)  # AC-1: and it is not repeated
+        self.assertIn("On the branch: `new_test` exit 1.", evidence)
 
     def test_several_tests_share_one_issue(self):
         other = "tests/test_review_mul.py::MulTests::test_zero"
@@ -281,6 +291,39 @@ class NoIssue(IssueCase):
         self.assertIn(link, out)
         self.assertIn(link, self.read(TESTS_MD).split("## Validation 2")[1])
 
+    def test_two_issues_together_cover_the_failures(self):
+        other = "tests/test_review_mul.py::MulTests::test_zero"
+        url42 = ISSUE_URL.replace("41", "42")
+
+        def touch_and_fail(round_no, tests):
+            self.write("src/calc.py", self.read("src/calc.py") + "\n# touched %d\n" % round_no)
+            self.commit_all("touch %d" % round_no)
+            self.runner_scenario(failing(round_no))
+            diag = diagnosis(
+                failures=[
+                    {"test": t, "cause": "code", "introduced_by": "base", "note": "n"}
+                    for t in tests
+                ]
+            )
+            self.claude(claude_entry(write_tests=False), claude_entry(diag, write_tests=False))
+            code, out = run_cli(["run", "--foreground"])
+            self.assertEqual(code, EXIT_ACTION, out)
+            return out
+
+        self.fail_run()  # issue #41 names TEST_ID
+        self.scenario({"issue_create": {"number": 42, "url": url42}})
+        touch_and_fail(2, [other])  # issue #42 names the other test
+        self.assertEqual(len(self.gh("issue", "create")), 2)
+        out = touch_and_fail(3, [TEST_ID, other])  # both fail: nothing new
+        self.assertEqual(len(self.gh("issue", "create")), 2)  # AC-4: no third issue
+        state = State.load(self.rdir())
+        self.assertEqual([i["number"] for i in state.issues], [41, 42])
+        self.assertEqual(state.validations[2]["issue"], 42)  # the newest covering issue
+        self.assertIn("already has issue #42, #41", self.read(REVALI_LOG))
+        link = "issue: #42 (already open, with #41) %s" % url42
+        self.assertIn(link, out)
+        self.assertIn(link, self.read(TESTS_MD).split("## Validation 3")[1])
+
 
 class BaseRerunRecord(IssueCase):
     def test_recorded_on_fail(self):
@@ -407,10 +450,48 @@ class Units(unittest.TestCase):
         self.assertEqual(title(["a", "b", "c"], "dev"), "Pre-existing: a and 2 more fail on dev")
 
     def test_fix_reference_words(self):
-        for text in ("Fixes #12", "fixed #12", "close #12", "Closes: #12", "RESOLVED #12"):
-            self.assertEqual(FIX_REF.search(text).group(1), "12", text)
-        for text in ("see #12", "prefix #12", "fixes 12", "refs #12"):
+        # AC-5: GitHub's nine closing keywords, whitespace, `#n`; nothing looser
+        for word in "close closes closed fix fixes fixed resolve resolves resolved".split():
+            for text in (word + " #12", word.upper() + "  #12", "wip\n\n%s\t#12\n" % word):
+                self.assertEqual(FIX_REF.search(text).group(1), "12", text)
+        for text in (
+            "see #12",
+            "prefix #12",
+            "fixes 12",
+            "refs #12",
+            "fix#12",
+            "fixes: #12",
+            "Closes: #12",
+            "fixing #12",
+            "fixes #12a",
+        ):
             self.assertIsNone(FIX_REF.search(text), text)
+
+    def test_already_open_prefers_one_issue_then_the_union(self):
+        a, b, c = "t::a", "t::b", "t::c"
+        state = State(
+            issues=[
+                {"number": 40, "tests": [a]},
+                {"number": 41, "tests": [b]},
+                {"number": 42, "tests": [a, c]},
+            ]
+        )
+        numbers = lambda tests: [i["number"] for i in already_open(state, tests)]  # noqa: E731
+        self.assertEqual(numbers([a]), [42])  # newest single cover wins
+        self.assertEqual(numbers([a, c]), [42])
+        self.assertEqual(numbers([a, b]), [42, 41])  # AC-4: two issues together, newest first
+        self.assertEqual(numbers([a, b, c]), [42, 41])  # #40 adds nothing #42 does not name
+        self.assertEqual(numbers([b, "t::new"]), [])  # one test nobody names: open a new one
+        state.issues = [{"number": 40, "tests": [a, b]}, {"number": 41, "tests": [a, b]}]
+        self.assertEqual(numbers([a, b]), [41])  # a single newest cover, not both
+
+    def test_issue_ref_line(self):
+        self.assertEqual(IssueRef(7, "u").line(), "issue: #7 u")
+        self.assertEqual(IssueRef(7, "u", existing=True).line(), "issue: #7 (already open) u")
+        self.assertEqual(
+            IssueRef(7, "u", existing=True, also=(5, 3)).line(),
+            "issue: #7 (already open, with #5, #3) u",
+        )  # AC-4
 
     def test_referenced_issues_first_commit_wins(self):
         issues = [{"number": 41}, {"number": 42}]
