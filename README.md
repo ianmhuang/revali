@@ -75,7 +75,7 @@ not a FAIL verdict.
 |---|---|---|---|---|
 | Developer | the user | the request, the repo | `change.md`, code, its own tests | whatever the user's session runs; recorded as `author_model` |
 | Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir`, and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment; does not run the tests | `auto`: one tier above the Developer |
-| Validator | revali, after APPROVE | a sandbox clone of the branch | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers and revali writes `diagnose-n.json` | the runner needs none; diagnosis `auto`: one tier below the Developer |
+| Validator | revali, after APPROVE | a sandbox clone of the branch; on FAIL, one of the base tip with the Reviewer's tests copied in | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers (with `introduced_by`: branch or base) and revali writes `diagnose-n.json` | the runner needs none; diagnosis `auto`: one tier below the Developer |
 
 Three user actions (approve the AC, `/revali`, `revali merge`) are the gates;
 everything between them is automatic. Exit codes: `0` done / ready to merge,

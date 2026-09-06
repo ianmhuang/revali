@@ -71,6 +71,7 @@ def diagnosis():
                 "note": DIAG_NOTE,
             }
         ],
+        "introduced_by": "unknown",
         "recommendation": RECOMMENDATION,
     }
 

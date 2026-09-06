@@ -120,9 +120,7 @@ class RoundOneReusesTheBaseline(ReuseCase):
         self.assertEqual(len(lines), 1, self.validate_lines())
         self.assertIn(reviewed[:10], lines[0])
         # AC-2: the run line lists the steps that ran, without `test`
-        run_line = [
-            ln for ln in self.validate_lines() if "run 1:" in ln and "(validate-r1)" in ln
-        ]
+        run_line = [ln for ln in self.validate_lines() if "run 1:" in ln and "(validate-r1)" in ln]
         self.assertEqual(len(run_line), 1, self.validate_lines())
         self.assertNotRegex(run_line[0], r"run 1: .*\btest\b, ")
         self.assertIn("new_test", run_line[0])
@@ -153,6 +151,7 @@ class RoundOneReusesTheBaseline(ReuseCase):
         self.assertEqual(self.steps("validate-r2"), [["new_test"]])
         self.assertEqual(State.load(self.rdir()).baseline_sha, reviewed)
         self.assertIn(NOTE, self.validation_section(1))
+
 
 class TheBaselineRecordsItsCommit(ReuseCase):
     def test_a_failed_baseline_records_nothing(self):

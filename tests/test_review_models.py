@@ -116,6 +116,7 @@ class PipelineUsesAuto(RepoCase):
             "summary": "product wrong",
             "cause": "code",
             "failures": [],
+            "introduced_by": "unknown",
             "recommendation": "return a * b",
         }
         self.claude(
@@ -147,6 +148,7 @@ class PipelineUsesAuto(RepoCase):
             "summary": "product wrong",
             "cause": "code",
             "failures": [],
+            "introduced_by": "unknown",
             "recommendation": "return a * b",
         }
         self.claude(

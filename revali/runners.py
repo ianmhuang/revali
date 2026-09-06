@@ -182,7 +182,8 @@ class LocalRunner(Runner):
 
 class FakeRunner(Runner):
     """Scenario file: {"default": 0, "results": {"<label>": {"<step>": <exit>}}, "outputs":
-    {...}}."""
+    {...}, "errors": {"<label>": "<message>"}}. Exit 124 counts as a timeout, as in the
+    sandbox script; a label under "errors" raises RunnerError instead of running."""
 
     name = "fake"
 
@@ -217,6 +218,9 @@ class FakeRunner(Runner):
                     )
                     + "\n"
                 )
+        error = (sc.get("errors") or {}).get(label)
+        if error:
+            raise RunnerError(str(error))
         report = RunReport(label=label)
         results = (sc.get("results") or {}).get(label, {})
         outputs = (sc.get("outputs") or {}).get(label, {})
@@ -230,6 +234,7 @@ class FakeRunner(Runner):
                 cmd=cmd,
                 returncode=rc,
                 stdout=out,
+                timed_out=(rc == 124),
                 log_path=os.path.join(logs_dir, "%s-%s.log" % (label, name)),
             )
             write_text(step.log_path, "$ %s\n(exit %d)\n\n%s" % (cmd, rc, out))

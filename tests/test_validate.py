@@ -25,6 +25,7 @@ def diagnosis(cause="code", **kw):
                 "note": "expected 12, got 7",
             }
         ],
+        "introduced_by": "unknown",
         "recommendation": "return a * b",
     }
     data.update(kw)

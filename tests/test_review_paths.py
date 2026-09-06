@@ -264,6 +264,7 @@ class FileOverrides(RepoCase):
             "summary": "product wrong",
             "cause": "code",
             "failures": [],
+            "introduced_by": "unknown",
             "recommendation": "return a * b",
         }
         self.claude(claude_entry(), claude_entry(diag, write_tests=False))

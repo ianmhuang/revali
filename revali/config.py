@@ -114,6 +114,7 @@ class ValidateCfg:
     prompt: str = ""
     schema: str = ""
     reuse_baseline: bool = False  # skip `test` when only reviewer test commits followed it
+    rerun_on_base: bool = False  # on a new_test FAIL, rerun the reviewer's files on the base tip
     platforms: dict = field(default_factory=dict)  # name -> PlatformCfg
 
 

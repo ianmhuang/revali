@@ -22,9 +22,15 @@ any layer sets the defaults for every `[validate.<name>]` table.
 `[validate] reuse_baseline` (default true) lets validation skip the
 existing suite (`test`) when the baseline already ran it on the same tree:
 every commit since the baseline carries the reviewer's `Revali-Round`
-trailer and touches only `test_dir`. A fix round, an author commit, a
-rebase or `revali reset` all bring the full suite back; set the key to
-false to run it every time.
+trailer and touches only `test_dir`. A fix round, an author commit or a
+rebase brings the full suite back; `revali reset` makes the next run redo
+the baseline, after which validation may reuse it again. Set the key to
+false to run the suite every time.
+`[validate] rerun_on_base` (default true) makes a validation that fails
+in the reviewer's tests (`new_test`) run the same test files once more on
+the base tip, so the diagnosis session can tell whether the branch
+introduced the failure or inherited it (`introduced_by` in its answer);
+see `docs/sandbox.md`. False skips that rerun.
 
 Models: `model = "auto"` (the default) picks the Reviewer one tier above
 the Developer's model (`author_model` in `change.md`) and the diagnosis
