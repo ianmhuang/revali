@@ -24,7 +24,7 @@ above the Developer) and, at the engine seam, by vendor
 (only `claude` exists today). Fresh context removes the author's bias toward
 its own change, not the blind spots the models share, which is why
 `revali stats` tracks the first-try approval rate. The full argument is in
-`docs/workflow.md`.
+[`docs/workflow.md`](docs/workflow.md).
 
 ```mermaid
 sequenceDiagram
@@ -54,7 +54,7 @@ sequenceDiagram
                 R-->>D: READY TO MERGE, exit 0
             else FAIL
                 R->>V: the new tests again, on the base tip
-                V->>V: diagnosis session (code / test / env; introduced by branch or base)
+                V->>V: diagnosis session (code / test / env, introduced by branch or base)
                 opt bug the base already had
                     R->>G: issue
                 end
@@ -99,7 +99,7 @@ changed, the reviewer's tests rerun on the base tip before a failure is
 diagnosed, the project's `lint` line gating those tests, and a GitHub issue
 for a bug the base already had. Verified end to end on a private GitHub
 repository with real Reviewer sessions and real WSL and ssh sandboxes
-(`docs/sandbox.md` has the record); revali reviews its own changes on this
+([`docs/sandbox.md`](docs/sandbox.md) has the record); revali reviews its own changes on this
 public one.
 
 ## Requirements
@@ -108,7 +108,9 @@ public one.
 - Claude Code CLI on PATH (`claude`), for the reviewer / diagnoser sessions
 - A place to run the sandbox: on Windows, WSL with an Ubuntu distro; on any
   host, a Linux machine reachable by key-based ssh (`runner = "ssh"`) with
-  git, bash and coreutils installed
+  git, bash and coreutils installed. `runner = "local"` runs the steps in a
+  git worktree on the host itself, with no isolation: a host that is its
+  own sandbox, or a first look before setting one up
 
 ## Usage
 
@@ -136,15 +138,19 @@ and the history row. Every result lands in `.revali/<branch>/`
 
 ## Documentation
 
-- `docs/workflow.md`: why the sessions are separate, the acceptance
+- [`docs/workflow.md`](docs/workflow.md): why the sessions are separate, the acceptance
   criteria before the code, project setup, what `run` prints and checks,
   what happens after exit 2 or a dead run, several agents on one repository
-- `docs/configuration.md`: the three layers, models, `REVALI_DISABLE`
-- `docs/files.md`: every file revali reads or writes and the key that moves it
-- `docs/sandbox.md`: the `wsl`, `ssh` and `local` runners, and the
+- [`docs/configuration.md`](docs/configuration.md): the three layers, models, `REVALI_DISABLE`
+- [`docs/files.md`](docs/files.md): every file revali reads or writes and the key that moves it
+- [`docs/sandbox.md`](docs/sandbox.md): the `wsl`, `ssh` and `local` runners, and the
   verification record
-- `docs/side-effects.md`: every git and GitHub action revali takes, read
+- [`docs/side-effects.md`](docs/side-effects.md): every git and GitHub action revali takes, read
   before the first run
+- [`skill/SKILL.md`](skill/SKILL.md): the Claude Code skill behind `/revali`, the
+  Developer's side of the workflow; [`templates/CLAUDE-snippet.md`](templates/CLAUDE-snippet.md)
+  is the paragraph that goes into a project's `CLAUDE.md` so an authoring
+  session follows it without being asked
 
 ## Development
 
@@ -160,4 +166,4 @@ test builds its own repository, which is why the parallel runner exists.
 
 ## License
 
-MIT, see `LICENSE`.
+MIT, see [`LICENSE`](LICENSE).

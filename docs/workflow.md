@@ -2,7 +2,7 @@
 
 How a change moves from a request to a merged PR, what the three sessions
 see, and how several agent sessions share one repository. The command
-reference is in the README; configuration keys are in `configuration.md`.
+reference is in the README; configuration keys are in [`configuration.md`](configuration.md).
 
 ## Why separate sessions
 
@@ -21,8 +21,8 @@ why `revali stats` tracks the first-try approval rate.
 
 The acceptance criteria come before the code. In a project that has
 `revali.toml`, the author session (Claude Code following
-`skill/SKILL.md`, or you) starts a change by writing
-`.revali/<branch>/change.md` from `templates/change.md` with the
+[`skill/SKILL.md`](../skill/SKILL.md), or you) starts a change by writing
+`.revali/<branch>/change.md` from [`templates/change.md`](../templates/change.md) with the
 `Request`, `Goal`, numbered acceptance criteria, `Out of scope`, and
 `Dependencies` sections, keeps `status: draft` in the front matter, and
 shows the criteria to the user. Approval means deleting the `status: draft`
@@ -33,7 +33,7 @@ fills in `What`, commits, and the user types `/revali`. The reviewer's
 acceptance tests come on top of the author's tests, not instead of them.
 
 To make an authoring session do this without being asked each time, paste
-`templates/CLAUDE-snippet.md` into the project's `CLAUDE.md`.
+[`templates/CLAUDE-snippet.md`](../templates/CLAUDE-snippet.md) into the project's `CLAUDE.md`.
 
 ## Several agents on one repository
 
@@ -112,13 +112,13 @@ normal new round.
 
 ## Project setup
 
-Copy `templates/revali.toml` to the repo root and edit the commands; copy
-`templates/CONVENTIONS.md` if the project has none; add `.revali/` to
+Copy [`templates/revali.toml`](../templates/revali.toml) to the repo root and edit the commands; copy
+[`templates/CONVENTIONS.md`](../templates/CONVENTIONS.md) if the project has none; add `.revali/` to
 `.gitignore`, or to `.git/info/exclude` if the line must stay out of the
-tracked `.gitignore` (see `docs/side-effects.md`); paste
-`templates/CLAUDE-snippet.md` into the project's
+tracked `.gitignore` (see [`docs/side-effects.md`](side-effects.md)); paste
+[`templates/CLAUDE-snippet.md`](../templates/CLAUDE-snippet.md) into the project's
 `CLAUDE.md`. Before each run the author writes
-`.revali/<branch>/change.md` from `templates/change.md` (branch `feature/x`
+`.revali/<branch>/change.md` from [`templates/change.md`](../templates/change.md) (branch `feature/x`
 maps to directory `feature__x`); see Workflow above.
 
 User-level options live in `~/.revali/config.toml` (see
