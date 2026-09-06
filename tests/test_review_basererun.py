@@ -4,10 +4,16 @@ Covers AC-1, AC-2, AC-3, AC-4, AC-6, AC-7. Every case drives `revali run` end to
 the fixture repository with the fake runner and the fake claude."""
 
 import json
+import os
+import shutil
+import tempfile
+import types
 import unittest
 
 from revali import EXIT_ACTION, EXIT_OK
+from revali.config import PlatformCfg
 from revali.state import State
+from revali.validate import rerun_on_base
 from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, PY, toml_str
 from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
 
@@ -371,6 +377,91 @@ class IntroducedBy(BaseRerunCase):
         self.assertNotIn("did not match the schema", out)
         self.assertIn("introduced by: **unknown**", self.read(TESTS_MD))
         self.assertEqual(State.load(self.rdir()).validations[0]["introduced_by"], "unknown")
+
+
+class UnreadableReviewerFile(unittest.TestCase):
+    """Round 1 F3 / AC-3: a reviewer file that exists but cannot be decoded is a reason on
+    the result, not an exception out of rerun_on_base. Drives the function directly on a
+    temporary tree with the fake runner, so no sandbox and no git are involved."""
+
+    BASE_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="revali-base-rerun-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        os.makedirs(os.path.join(self.tmp, "tests"))
+        self.logs = os.path.join(self.tmp, "logs")
+        self.scenario = os.path.join(self.tmp, "runner.json")
+        with open(self.scenario, "w", encoding="utf-8") as fh:
+            json.dump({"default": 0, "results": {"base-r1": {"new_test": 1}}}, fh)
+        backup = dict(os.environ)
+
+        def restore():
+            os.environ.clear()
+            os.environ.update(backup)
+
+        self.addCleanup(restore)
+        os.environ["REVALI_FAKE_RUNNER"] = self.scenario
+        os.environ.pop("REVALI_FAKE_LOG", None)  # no call log outside a RepoCase
+
+    def ctx(self):
+        plat = PlatformCfg(name="linux", runner="local", new_test="python -m unittest {files}")
+        return types.SimpleNamespace(
+            cfg=types.SimpleNamespace(
+                validate=types.SimpleNamespace(rerun_on_base=True, platforms={"linux": plat}),
+                project=types.SimpleNamespace(platforms=["linux"], test_dir="tests"),
+            ),
+            base="main",
+            base_sha=self.BASE_SHA,
+            branch="feature/mul",
+            repo_root=self.tmp,
+            logs=self.logs,
+        )
+
+    def write(self, rel, data):
+        with open(os.path.join(self.tmp, rel), "wb") as fh:
+            fh.write(data)
+
+    def test_undecodable_file_becomes_a_reason(self):
+        rel = "tests/test_review_x.py"
+        self.write(rel, b"# \xff\xfe not utf-8\n")
+        st = State()
+        st.test_files = [rel]
+        failed = types.SimpleNamespace(name="new_test")
+        r = rerun_on_base(self.ctx(), st, failed, 1, None)  # must not raise
+        self.assertFalse(r.ran)
+        self.assertFalse(r.available)
+        self.assertIn("could not read a reviewer test file", r.reason)
+        self.assertTrue(r.one_line().startswith("on base %s: not run, " % self.BASE_SHA[:10]))
+        self.assertIn("could not read", r.one_line())
+        self.assertFalse(os.path.isfile(os.path.join(self.logs, "base-r1-new_test.log")))
+
+    def test_one_bad_file_among_good_ones_is_still_a_reason(self):
+        # the whole file set is what reruns; a single unreadable file means no rerun
+        self.write("tests/test_review_a.py", b"# fine\n")
+        self.write("tests/test_review_b.py", b"\xff\xfe\n")
+        st = State()
+        st.test_files = ["tests/test_review_a.py", "tests/test_review_b.py"]
+        r = rerun_on_base(self.ctx(), st, types.SimpleNamespace(name="new_test"), 1, None)
+        self.assertFalse(r.ran)
+        self.assertIn("could not read a reviewer test file", r.reason)
+
+    def test_readable_file_runs(self):
+        # the guard does not swallow the normal case: decodable files reach the sandbox,
+        # a recorded file missing from the tree is simply left out
+        rel = "tests/test_review_x.py"
+        self.write(rel, b"# fine\n")
+        st = State()
+        st.test_files = [rel, "tests/does_not_exist.py"]
+        r = rerun_on_base(self.ctx(), st, types.SimpleNamespace(name="new_test"), 1, None)
+        self.assertTrue(r.ran)
+        self.assertTrue(r.available, r.reason)
+        self.assertEqual(r.reason, "")
+        self.assertEqual(r.new_test.returncode, 1)
+        self.assertIn(rel, r.new_test.cmd)
+        self.assertNotIn("does_not_exist", r.new_test.cmd)
+        self.assertEqual(r.one_line(), "on base %s: new_test exit 1" % self.BASE_SHA[:10])
+        self.assertTrue(os.path.isfile(os.path.join(self.logs, "base-r1-new_test.log")))
 
 
 if __name__ == "__main__":

@@ -87,6 +87,36 @@ class DiagnosisPrompt(RepoCase):
         self.assertIn("clone blew up", prompt)
         self.assertNotIn(BASE_OUT, prompt)
         self.assertIn("unknown", prompt)
+        # round 1 F2: the prompt must not claim the files were copied and run on base
+        self.assertNotIn("copied the reviewer's test files", prompt)
+        section = prompt.split("## The same test files on the base branch")[1]
+        self.assertNotIn("exited", section.split("# What to decide")[0])
+
+    def test_prompt_states_only_what_ran_when_the_rerun_is_off(self):
+        # round 1 F2: with the key false nothing ran on base; the section still names the
+        # base branch and sha, gives the reason, and does not say anything was copied
+        cfg = self.read("revali.toml").replace("[validate]\n", "[validate]\nrerun_on_base = false\n")
+        self.write("revali.toml", cfg)
+        self.commit_all("rerun off")
+        prompt = self.failing()
+        base = git(["rev-parse", "origin/main"], self.repo).strip()
+        section = prompt.split("## The same test files on the base branch")[1]
+        section = section.split("# What to decide")[0]
+        self.assertIn(base, section)
+        self.assertIn("`main`", section)
+        self.assertIn("rerun_on_base", section)
+        self.assertNotIn("copied", section)
+        self.assertNotIn(BASE_OUT, section)
+        self.assertIn("unknown", section)
+        self.assertEqual([c for c in self.fake_calls("runner") if c["label"] == "base-r1"], [])
+
+    def test_prompt_claims_the_copy_only_when_it_happened(self):
+        prompt = self.failing()
+        section = prompt.split("## The same test files on the base branch")[1]
+        section = section.split("# What to decide")[0]
+        self.assertIn("copied the reviewer's test files", section)
+        self.assertIn("exited 1 on base", section)
+        self.assertIn(BASE_OUT, section)
 
     def test_prompt_names_the_reviewer_files_the_rerun_used(self):
         cfg = self.read("revali.toml").replace(
