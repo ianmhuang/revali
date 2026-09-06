@@ -37,6 +37,7 @@ fallback_model = "auto"
 budget_usd = 1.0
 reuse_baseline = true             # skip the existing suite in validation when only the reviewer's
                                   # test commits followed the baseline; false = run it every time
+rerun_on_base = true              # rerun the reviewer's failing tests on the base tip for the diagnosis
 
 [validate.linux]
 runner = "wsl"                    # wsl | local | ssh

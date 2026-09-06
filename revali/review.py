@@ -243,7 +243,7 @@ def branch_test_commits(ctx: Context) -> List[Tuple[str, List[str]]]:
         paths = [
             p
             for p in gitops.commit_paths(sha, ctx.repo_root)
-            if _under_test_dir(p, test_dir) and p in tracked
+            if under_test_dir(p, test_dir) and p in tracked
         ]
         out.append((sha, sorted(paths)))
     return out
@@ -480,7 +480,7 @@ def discard_unfinished_tests(
             continue
         if (
             code.strip() == "??"
-            and _under_test_dir(path, ctx.cfg.project.test_dir)
+            and under_test_dir(path, ctx.cfg.project.test_dir)
             and gitops.matches_any(path, [pattern])
         ):
             try:
@@ -580,7 +580,9 @@ def interruption_cleanup(state: State, rdir: str, log: Optional[RunLog]):
     return hook
 
 
-def _under_test_dir(path: str, test_dir: str) -> bool:
+def under_test_dir(path: str, test_dir: str) -> bool:
+    """True when `path` lies under `test_dir`, whichever way either is spelled (trailing
+    slash, backslashes). validate.py decides baseline reuse with the same check."""
     p = path.replace("\\", "/").rstrip("/")
     d = test_dir.replace("\\", "/").rstrip("/") + "/"
     return p.startswith(d)
@@ -618,7 +620,7 @@ def guard_worktree(ctx: Context, log: Optional[RunLog]) -> List[str]:
     offenders = []
     for entry in gitops.dirty_paths(root, (ctx.cfg.paths.state_dir + "/",)):
         code, path = entry.split(" ", 1)
-        if _under_test_dir(path, ctx.cfg.project.test_dir):
+        if under_test_dir(path, ctx.cfg.project.test_dir):
             continue
         offenders.append(path)
         if code == "??" or code[0] == "A":
@@ -642,7 +644,7 @@ def restore_protected_tests(ctx: Context, state: State, log: Optional[RunLog]) -
     for entry in gitops.dirty_paths(root, (ctx.cfg.paths.state_dir + "/",)):
         code, path = entry.split(" ", 1)
         path = path.replace("\\", "/")
-        if code == "??" or code[0] == "A" or not _under_test_dir(path, ctx.cfg.project.test_dir):
+        if code == "??" or code[0] == "A" or not under_test_dir(path, ctx.cfg.project.test_dir):
             continue  # new files are the reviewer's own
         if path in state.test_files:
             continue
@@ -662,7 +664,7 @@ def new_test_files(ctx: Context) -> List[str]:
     files = []
     for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",)):
         _, path = entry.split(" ", 1)
-        if _under_test_dir(path, ctx.cfg.project.test_dir):
+        if under_test_dir(path, ctx.cfg.project.test_dir):
             files.append(path.replace("\\", "/"))
     return sorted(files)
 

@@ -20,6 +20,18 @@ the same tree (every commit since the baseline is a reviewer test commit
 touching only `test_dir`; `[validate] reuse_baseline = false` disables
 this), and says so in the log, in `tests.md` and in the PR comment; a fix
 round, an author commit or a rewritten history brings the full suite back.
+When validation fails in `new_test`, the reviewer's test files are run once
+more on the base tip (the commit preflight compared the branch against),
+copied into a sandbox clone of that commit, with `setup` and `build` first,
+under the label `base-r<round>` (`[validate] rerun_on_base = false`
+disables this). The result is evidence for the diagnosis session, which
+answers `introduced_by` per failure: `branch` when the test passes on base
+or fails there only because the change is absent, `base` when it fails on
+both for the same reason, `unknown` otherwise. The rerun never changes the
+PASS / FAIL result; when it cannot produce a result (`setup` or `build`
+failing on base, a sandbox error, a timeout) `tests.md` records it as
+unavailable and the run goes on. It does not happen when the existing
+suite (`test`) is what failed, or when the reviewer wrote no test file.
 Every sandbox session's wall time appears in the log line that
 reports its result and, with the per-stage times, in the run's final
 `run: timing` line. The distro needs git and whatever `setup` installs; on

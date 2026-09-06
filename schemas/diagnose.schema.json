@@ -1,7 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary", "cause", "failures", "recommendation"],
+  "required": ["summary", "cause", "introduced_by", "failures", "recommendation"],
   "properties": {
     "summary": {"type": "string", "description": "Two to four sentences: what failed and why."},
     "cause": {
@@ -9,15 +9,21 @@
       "enum": ["code", "test", "env", "unknown"],
       "description": "Overall: the change is wrong (code), the reviewer's test is wrong (test), the sandbox is at fault (env)."
     },
+    "introduced_by": {
+      "type": "string",
+      "enum": ["branch", "base", "unknown"],
+      "description": "Overall: the failing behaviour is new on the branch (branch), was already wrong on the base branch (base), or cannot be told (unknown)."
+    },
     "failures": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["test", "cause", "note"],
+        "required": ["test", "cause", "introduced_by", "note"],
         "properties": {
           "test": {"type": "string", "description": "test id or file::name as printed by the runner"},
           "cause": {"type": "string", "enum": ["code", "test", "env", "unknown"]},
+          "introduced_by": {"type": "string", "enum": ["branch", "base", "unknown"]},
           "note": {"type": "string"}
         }
       }

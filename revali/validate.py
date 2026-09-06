@@ -10,13 +10,50 @@ from revali import EXIT_ERROR, engines, gitops, models
 from revali.config import PlatformCfg
 from revali.engines import EngineRequest
 from revali.preflight import Context, Stop
-from revali.review import TRAILER
-from revali.runners import RunnerError, RunReport, get_runner, steps_for, steps_with_files, tail
+from revali.review import TRAILER, under_test_dir
+from revali.runners import (
+    RunnerError,
+    RunReport,
+    get_runner,
+    steps_for,
+    steps_with_files,
+    tail,
+)
 from revali.state import RunLog, State, now_iso, read_text, safe_branch, write_text
 from revali.timing import fmt_duration
 
 PASS, FAIL = "PASS", "FAIL"
 LOG_LINES = 200
+INTRODUCED_BY = ("branch", "base", "unknown")
+SUITE_FAILED_REASON = "existing suite failed; base rerun applies to the reviewer's tests only"
+
+
+@dataclass
+class BaseRerun:
+    """The reviewer's test files run once more on the base tip after they failed on the
+    branch. Evidence for the diagnosis only: `reason` says why it did not run or why what
+    ran is unusable (setup or build failed on base, a sandbox error, a timeout)."""
+
+    sha: str = ""
+    ran: bool = False  # a sandbox session was started
+    report: Optional[RunReport] = None
+    reason: str = ""
+
+    @property
+    def new_test(self):
+        return self.report.step("new_test") if self.report else None
+
+    @property
+    def available(self) -> bool:
+        step = self.new_test
+        return step is not None and not step.timed_out and not self.reason
+
+    def one_line(self) -> str:
+        """`on base <sha>: new_test exit N`, or the reason there is no such result."""
+        head = "on base %s: " % self.sha[:10]
+        if self.available:
+            return head + "new_test exit %d" % self.new_test.returncode
+        return head + ("unavailable, " if self.ran else "not run, ") + self.reason
 
 
 @dataclass
@@ -34,6 +71,11 @@ class ValidationOutcome:
     section_md: str = ""
     skipped_reason: str = ""
     suite_note: str = ""  # why the existing suite was not rerun, when it was not
+    base_rerun: Optional[BaseRerun] = None  # set on FAIL
+
+    @property
+    def introduced_by(self) -> str:
+        return (self.diagnosis or {}).get("introduced_by", "")
 
 
 def platform(ctx: Context) -> PlatformCfg:
@@ -115,8 +157,8 @@ def baseline_reusable(ctx: Context, state: State) -> str:
         trailer = {c for c, _ in gitops.trailer_commits(sha, "HEAD", TRAILER, root)}
         if any(c not in trailer for c in gitops.rev_list(sha, "HEAD", root)):
             return ""
-        test_dir = ctx.cfg.project.test_dir.strip("/").replace("\\", "/") + "/"
-        if any(not p.startswith(test_dir) for p in gitops.changed_files(sha, "HEAD", root)):
+        test_dir = ctx.cfg.project.test_dir
+        if any(not under_test_dir(p, test_dir) for p in gitops.changed_files(sha, "HEAD", root)):
             return ""
     return sha
 
@@ -143,9 +185,13 @@ def run_validation(
     if ctx.doc.kind == "docs":
         outcome.skipped_reason = "kind docs: nothing to run"
     elif not any(name in ("test", "new_test") for name, _ in steps):
-        outcome.skipped_reason = "nothing to run: " + (
-            outcome.suite_note + " and no new test file" if reused else "no test command"
-        )
+        # `test` is empty and new_test (required by preflight) was skipped: `{files}` had no
+        # file to name
+        if reused:
+            why = outcome.suite_note + " and no new test file"
+        else:
+            why = "no test command and new_test names no test file"
+        outcome.skipped_reason = "nothing to run: " + why
         if log:
             log.stage("validate", "run %d: %s" % (number, outcome.skipped_reason))
     else:
@@ -188,6 +234,7 @@ def run_validation(
                 )
             outcome.result = FAIL
             outcome.failed_step = failed.name
+            outcome.base_rerun = rerun_on_base(ctx, state, failed, max(1, len(state.rounds)), log)
             if not ctx.dry_run:
                 _diagnose(ctx, state, rdir, failed, outcome, log)
     outcome.section_md = render_section(ctx, outcome)
@@ -202,6 +249,7 @@ def run_validation(
             "round": len(state.rounds),
             "head_sha": ctx.head_sha,
             "cause": (outcome.diagnosis or {}).get("cause", ""),
+            "introduced_by": outcome.introduced_by,
             "model": outcome.model_actual,
             "fallback": outcome.fallback,
             "cost_usd": outcome.cost,
@@ -225,6 +273,101 @@ def run_validation(
             ),
         )
     return outcome
+
+
+def rerun_on_base(
+    ctx: Context, state: State, failed, round_no: int, log: Optional[RunLog]
+) -> BaseRerun:
+    """After the reviewer's tests failed on the branch, run the same files (taken from the
+    working tree, so they exist on base too) with `setup`, `build`, `new_test` on the base
+    tip preflight resolved, under the label `base-r<round>`. Evidence for the diagnosis:
+    whatever goes wrong here is a reason on the result, never a Stop."""
+    out = BaseRerun(sha=ctx.base_sha)
+    if failed.name != "new_test":
+        out.reason = SUITE_FAILED_REASON
+    elif not ctx.cfg.validate.rerun_on_base:
+        out.reason = "[validate] rerun_on_base is false"
+    extra = {}
+    if not out.reason:
+        extra = {
+            rel: read_text(os.path.join(ctx.repo_root, rel))
+            for rel in state.test_files
+            if os.path.isfile(os.path.join(ctx.repo_root, rel))
+        }
+        if not extra:
+            out.reason = "no reviewer test file to rerun"
+    if out.reason:
+        if log:
+            log.stage("validate", "base rerun not run: %s" % out.reason)
+        return out
+    runner = _runner(ctx)
+    label = "base-r%d" % round_no
+    files = sorted(extra)
+    steps = steps_with_files(
+        platform(ctx), ["setup", "build", "new_test"], files, log.stage if log else None, "validate"
+    )
+    if log:
+        log.stage(
+            "validate",
+            "base rerun: %d reviewer test file(s) on %s at %s (%s)"
+            % (len(files), ctx.base, out.sha[:10], label),
+        )
+    out.ran = True
+    started = time.monotonic()
+    try:
+        out.report = runner.run(
+            ctx.repo_root,
+            out.sha,
+            steps,
+            extra,
+            ctx.logs,
+            label,
+            log.detail if log else None,
+            scope=safe_branch(ctx.branch),
+        )
+    except RunnerError as exc:
+        out.reason = "sandbox error: %s" % exc
+    took = time.monotonic() - started
+    if log:
+        log.timing.sandbox(label, took)
+    if out.report is not None:
+        step = out.report.failed
+        if step is not None and step.name != "new_test":
+            out.reason = "%s failed on base (exit %d%s)" % (
+                step.name,
+                step.returncode,
+                ", timed out" if step.timed_out else "",
+            )
+        elif step is not None and step.timed_out:
+            out.reason = "new_test timed out on base (exit %d)" % step.returncode
+        elif out.new_test is None:
+            out.reason = "new_test did not run on base"
+    if log:
+        log.stage(
+            "validate",
+            "base rerun: %s (%s)"
+            % (
+                (
+                    "new_test exit %d" % out.new_test.returncode
+                    if out.available
+                    else "unavailable, " + out.reason
+                ),
+                fmt_duration(took),
+            ),
+        )
+    return out
+
+
+def _base_rerun_for_prompt(rerun: Optional[BaseRerun]) -> str:
+    if rerun is None or not rerun.available:
+        why = rerun.reason if rerun else "no base rerun"
+        return "No base output: %s. Answer `introduced_by: unknown`." % why
+    step = rerun.new_test
+    return "`new_test` exited %d on base. Its output (last %d lines):\n\n```\n%s\n```" % (
+        step.returncode,
+        LOG_LINES,
+        tail(step.text, LOG_LINES) or "(empty)",
+    )
 
 
 def _diagnose(
@@ -256,6 +399,8 @@ def _diagnose(
         "test_files": "\n".join("- " + p for p in state.test_files) or "(none)",
         "log_lines": LOG_LINES,
         "log_tail": tail(failed.text, LOG_LINES) or "(empty)",
+        "base_sha": ctx.base_sha,
+        "base_rerun": _base_rerun_for_prompt(outcome.base_rerun),
     }
     prompt = string.Template(read_text(ctx.diagnose_prompt)).safe_substitute(values)
     write_text(os.path.join(ctx.logs, "prompt-diagnose-%d.md" % outcome.number), prompt)
@@ -293,7 +438,11 @@ def _diagnose(
             log.stage("validate", "diagnosis unavailable: %s" % stop.message)
         return
     data = result.data
-    if not data.get("summary") or data.get("cause") not in ("code", "test", "env", "unknown"):
+    if (
+        not data.get("summary")
+        or data.get("cause") not in ("code", "test", "env", "unknown")
+        or data.get("introduced_by") not in INTRODUCED_BY
+    ):
         outcome.diagnosis_error = "diagnoser output did not match the schema"
     else:
         outcome.diagnosis = data
@@ -319,6 +468,36 @@ def _diagnose(
         )
         + "\n",
     )
+
+
+def _base_rerun_lines(r: BaseRerun) -> list:
+    """The `### Base rerun` block: the step table and the new_test output when it ran, else
+    one line saying why not."""
+    if r.report is None:
+        return [("unavailable: " if r.ran else "not run: ") + r.reason]
+    out = ["| step | exit | log |", "|---|---|---|"]
+    for s in r.report.steps:
+        out.append(
+            "| %s | %s%s | `%s` |"
+            % (
+                s.name,
+                s.returncode,
+                " (timed out)" if s.timed_out else "",
+                os.path.basename(s.log_path or ""),
+            )
+        )
+    if not r.available:
+        out += ["", "unavailable: " + r.reason]
+        return out
+    out += [
+        "",
+        "new_test output on base (last 40 lines):",
+        "",
+        "```",
+        tail(r.new_test.text, 40) or "(empty)",
+        "```",
+    ]
+    return out
 
 
 def render_section(ctx: Context, o: ValidationOutcome) -> str:
@@ -349,6 +528,9 @@ def render_section(ctx: Context, o: ValidationOutcome) -> str:
             tail(o.report.failed.text, 40) or "(empty)",
             "```",
         ]
+    if o.result == FAIL and o.base_rerun:
+        out += ["", "### Base rerun (%s)" % o.base_rerun.sha[:10], ""]
+        out += _base_rerun_lines(o.base_rerun)
     if o.diagnosis:
         d = o.diagnosis
         out += [
@@ -356,12 +538,16 @@ def render_section(ctx: Context, o: ValidationOutcome) -> str:
             "### Diagnosis (%s%s)" % (o.model_actual, ", fallback" if o.fallback else ""),
             "",
             "cause: **%s**" % d.get("cause"),
+            "introduced by: **%s**" % d.get("introduced_by"),
             "",
             d.get("summary", "").strip(),
             "",
         ]
         for f in d.get("failures", []):
-            out.append("- `%s`: %s. %s" % (f.get("test"), f.get("cause"), f.get("note", "")))
+            out.append(
+                "- `%s`: %s, introduced by %s. %s"
+                % (f.get("test"), f.get("cause"), f.get("introduced_by"), f.get("note", ""))
+            )
         out += ["", "recommendation: %s" % d.get("recommendation", "")]
     elif o.diagnosis_error:
         out += ["", "diagnosis unavailable: %s" % o.diagnosis_error]
@@ -391,12 +577,15 @@ def render_section_summary(o: ValidationOutcome, state_dir: str) -> str:
         out.append("")
     if o.result == FAIL:
         out.append("failed at step `%s`" % o.failed_step)
+        if o.base_rerun:
+            out.append(o.base_rerun.one_line())
         if o.diagnosis:
             out.append(
-                "diagnosis (%s): cause **%s**, %d failure(s) examined"
+                "diagnosis (%s): cause **%s**%s, %d failure(s) examined"
                 % (
                     o.model_actual or "?",
                     o.diagnosis.get("cause"),
+                    ", introduced by **base**" if o.introduced_by == "base" else "",
                     len(o.diagnosis.get("failures", [])),
                 )
             )
@@ -411,6 +600,7 @@ def summary_for_author(o: ValidationOutcome, rdir: str) -> str:
     lines = ["validation %d FAILED at step %s" % (o.number, o.failed_step)]
     if o.diagnosis:
         lines.append("cause: %s. %s" % (o.diagnosis.get("cause"), o.diagnosis.get("summary", "")))
+        lines.append("introduced by: %s" % o.introduced_by)
         lines.append("recommendation: %s" % o.diagnosis.get("recommendation", ""))
     elif o.diagnosis_error:
         lines.append("diagnosis unavailable: %s" % o.diagnosis_error)

@@ -4,7 +4,6 @@ and documented in docs/configuration.md (AC-4); README.md and docs/sandbox.md de
 rule (AC-6); the state file layout bump is recorded (AC-1)."""
 
 import os
-import re
 import tomllib
 import unittest
 

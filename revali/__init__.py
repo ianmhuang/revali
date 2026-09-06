@@ -4,7 +4,7 @@ NAME = "revali"
 VERSION = "0.2.0"
 CONFIG_VERSION = 1
 STATE_VERSION = 4
-PROMPT_VERSION = "5"  # bumped when prompts/, schemas/ or checklists/ change
+PROMPT_VERSION = "6"  # bumped when prompts/, schemas/ or checklists/ change
 
 # Exit codes shared by every subcommand.
 EXIT_OK = 0  # done / ready to merge

@@ -289,6 +289,7 @@ class ResumeAtValidation(RepoCase):
             "failures": [
                 {"test": "tests/test_calc.py::test_add", "cause": "code", "note": "7 != 12"}
             ],
+            "introduced_by": "unknown",
             "recommendation": "fix add",
         }
         self.claude(claude_entry(diagnosis, write_tests=False, model="claude-opus-5", cost=0.2))

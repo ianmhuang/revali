@@ -19,6 +19,7 @@ DIAGNOSIS = {
     "summary": "add regressed.",
     "cause": "code",
     "failures": [{"test": "tests/test_calc.py::test_add", "cause": "code", "note": "7 != 12"}],
+    "introduced_by": "unknown",
     "recommendation": "fix add",
 }
 
