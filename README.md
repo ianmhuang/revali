@@ -109,8 +109,8 @@ public one.
 - A place to run the sandbox: on Windows, WSL with an Ubuntu distro; on any
   host, a Linux machine reachable by key-based ssh (`runner = "ssh"`) with
   git, bash and coreutils installed. `runner = "local"` runs the steps in a
-  git worktree on the host itself, with no isolation: a Linux or macOS
-  machine that is its own sandbox, or a first look before setting one up
+  git worktree on the host itself, with no isolation: a host that is its
+  own sandbox, or a first look before setting one up
 
 ## Usage
 
