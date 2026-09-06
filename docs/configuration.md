@@ -31,6 +31,26 @@ in the reviewer's tests (`new_test`) run the same test files once more on
 the base tip, so the diagnosis session can tell whether the branch
 introduced the failure or inherited it (`introduced_by` in its answer);
 see `docs/sandbox.md`. False skips that rerun.
+`[validate] issue_on` (default true) opens one GitHub issue when the
+diagnosis of a failed validation marks a failure `cause: code` and
+`introduced_by: base`: the reviewer's test fails on the base tip for the
+same reason as on the branch, so the code was wrong before the branch. The
+issue is created with `gh issue create` as the author, titled
+`Pre-existing: <test id> fails on <base>`, labelled `bug` when the
+repository has that label (revali creates no label), and assigned to the
+author's gh login when `issue_assignee = "author"` (the default; `""`
+leaves it unassigned). Its body is `templates/issue.md` in revali, a
+`$placeholder` template (`$pr`, `$pr_url`, `$round`, `$validation`,
+`$version`, `$branch`, `$base`, `$base_sha`, `$tests`, `$evidence`,
+`$diagnosis`, `$acceptance`, `$fix`); `issue_template` names a project file
+to use instead. On a repository that is not private the output, the
+diagnosis text and the suggested fix are withheld, as in PR comments. One
+validation opens one issue for all such failures; a later validation whose
+failing tests an earlier issue of the branch already names links that issue
+instead. The issue numbers are in `state.json` (`issues`), `tests.md`, the
+PR comment and the `ACTION NEEDED` summary; `revali merge` comments on
+every one a branch commit references with `Fixes #n` (see
+`docs/side-effects.md`). False opens nothing.
 `[project] lint` is one shell line (`ruff check . && black --check .`, say)
 that preflight runs on the working tree and stops on with exit 2; the same
 line gates the reviewer's tests: after the reviewer writes them the line

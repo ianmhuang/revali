@@ -115,6 +115,9 @@ class ValidateCfg:
     schema: str = ""
     reuse_baseline: bool = False  # skip `test` when only reviewer test commits followed it
     rerun_on_base: bool = False  # on a new_test FAIL, rerun the reviewer's files on the base tip
+    issue_on: bool = False  # open a GitHub issue when a failure is diagnosed as a pre-existing bug
+    issue_assignee: str = ""  # "author" (the PR author's gh login) or "" (nobody)
+    issue_template: str = ""  # empty = templates/issue.md shipped with revali
     platforms: dict = field(default_factory=dict)  # name -> PlatformCfg
 
 
@@ -416,6 +419,10 @@ def parse_project_config(
         problems.append("review.max_fixes must be >= 0")
     if merge.method not in ("squash", "merge", "rebase"):
         problems.append("merge.method must be squash, merge or rebase")
+    if validate.issue_assignee not in ("author", ""):
+        problems.append(
+            'validate.issue_assignee must be "author" or "" (got %r)' % validate.issue_assignee
+        )
     if merge.auto_merge:
         warnings.append("merge.auto_merge is ignored in this version; merges stay manual")
         merge.auto_merge = False
@@ -442,6 +449,7 @@ def parse_project_config(
             ("review.checklist_builtin", review.checklist_builtin),
             ("validate.prompt", validate.prompt),
             ("validate.schema", validate.schema),
+            ("validate.issue_template", validate.issue_template),
         ):
             if value and not os.path.isfile(tool_file(value, repo_root)):
                 problems.append("%s: file not found: %s" % (key, value))

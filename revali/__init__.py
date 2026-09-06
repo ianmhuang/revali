@@ -3,7 +3,7 @@
 NAME = "revali"
 VERSION = "0.2.0"
 CONFIG_VERSION = 1
-STATE_VERSION = 4
+STATE_VERSION = 5
 PROMPT_VERSION = "7"  # bumped when prompts/, schemas/ or checklists/ change
 
 # Exit codes shared by every subcommand.

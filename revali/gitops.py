@@ -3,6 +3,7 @@
 import fnmatch
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
@@ -195,6 +196,17 @@ def trailer_commits(base: str, head: str, key: str, cwd: str) -> List[Tuple[str,
     return out
 
 
+def commit_messages(base: str, head: str, cwd: str) -> List[Tuple[str, str]]:
+    """(sha, full message) of the commits in base..head, oldest first."""
+    res = git_ok(["log", "--reverse", "--format=%H%x1f%B%x1e", "%s..%s" % (base, head)], cwd)
+    out = []
+    for record in res.stdout.split("\x1e"):
+        sha, _, message = record.strip("\n").partition("\x1f")
+        if sha.strip():
+            out.append((sha.strip(), message))
+    return out
+
+
 def commit_paths(sha: str, cwd: str, diff_filter: str = "AM") -> List[str]:
     """Paths one commit touches, filtered like `git diff --diff-filter` (default: added or
     modified), forward slashes, NUL-separated so a path with spaces arrives unquoted."""
@@ -340,6 +352,41 @@ def gh_pr_open(branch: str, cwd: str, log: Logger = None) -> Optional[dict]:
     except ValueError:
         return None
     return items[0] if items else None
+
+
+def gh_labels(cwd: str, log: Logger = None) -> List[str]:
+    """The repository's label names."""
+    res = _gh(["label", "list", "--json", "name", "--limit", "200"], cwd, log)
+    if not res.ok:
+        raise GhError("gh label list failed: %s" % res.text.strip())
+    try:
+        items = json.loads(res.stdout or "[]")
+    except ValueError as exc:
+        raise GhError("gh label list returned invalid JSON: %s" % exc) from exc
+    return [str(i.get("name", "")) for i in items if isinstance(i, dict)]
+
+
+def gh_issue_create(
+    title: str, body_path: str, labels: List[str], assignee: str, cwd: str, log: Logger = None
+) -> Tuple[int, str]:
+    """`gh issue create`; (number, url) parsed from the URL gh prints."""
+    args = ["issue", "create", "--title", title, "--body-file", body_path]
+    for label in labels:
+        args += ["--label", label]
+    if assignee:
+        args += ["--assignee", assignee]
+    res = _gh(args, cwd, log)
+    if not res.ok:
+        raise GhError("gh issue create failed: %s" % res.text.strip())
+    url = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else ""
+    m = re.search(r"/issues/(\d+)", url)
+    if not m:
+        raise GhError("gh issue create printed no issue URL: %s" % res.text.strip()[:200])
+    return int(m.group(1)), url
+
+
+def gh_issue_comment(number: int, body_path: str, cwd: str, log: Logger = None) -> Result:
+    return _gh(["issue", "comment", str(number), "--body-file", body_path], cwd, log)
 
 
 def gh_pr_any(branch: str, cwd: str, log: Logger = None) -> List[dict]:

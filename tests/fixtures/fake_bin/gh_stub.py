@@ -24,6 +24,11 @@ DEFAULT = {
     "checks": [],
     "merge_exit": 0,
     "comment_exit": 0,
+    "labels": ["bug"],
+    "label_list_exit": 0,
+    "issue_create": {"number": 41, "url": "https://github.example/me/sample/issues/41"},
+    "issue_exit": 0,
+    "issue_comment_exit": 0,
 }
 
 
@@ -38,9 +43,18 @@ def load_scenario():
 
 def log(argv):
     path = os.environ.get("REVALI_FAKE_LOG")
-    if path:
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"exe": "gh", "argv": argv}) + "\n")
+    if not path:
+        return
+    entry = {"exe": "gh", "argv": argv}
+    if "--body-file" in argv:
+        # recorded here because the caller may remove the file afterwards
+        # (`merge` deletes the record directory once the PR is merged)
+        body_path = argv[argv.index("--body-file") + 1]
+        if os.path.isfile(body_path):
+            with open(body_path, "r", encoding="utf-8") as fh:
+                entry["body"] = fh.read()
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry) + "\n")
 
 
 def main(argv):
@@ -102,6 +116,20 @@ def main(argv):
         return 0
     if argv[:2] == ["pr", "merge"]:
         return int(sc["merge_exit"])
+    if argv[:2] == ["label", "list"]:
+        if int(sc["label_list_exit"]):
+            print("gh_stub: label list failed", file=sys.stderr)
+            return int(sc["label_list_exit"])
+        print(json.dumps([{"name": n} for n in sc["labels"]]))
+        return 0
+    if argv[:2] == ["issue", "create"]:
+        if int(sc["issue_exit"]):
+            print("gh_stub: issue create failed", file=sys.stderr)
+            return int(sc["issue_exit"])
+        print(sc["issue_create"]["url"])
+        return 0
+    if argv[:2] == ["issue", "comment"]:
+        return int(sc["issue_comment_exit"])
     print("gh_stub: unhandled: %s" % " ".join(argv), file=sys.stderr)
     return 2
 

@@ -279,6 +279,7 @@ def _record_history(state: State, exit_code: int, log: Optional[RunLog] = None) 
                 "models": state.models_used,
                 "fallback": state.fallback,
                 "pr": state.pr_number,
+                "issues": len(state.issues),
                 **timing,
             },
         )

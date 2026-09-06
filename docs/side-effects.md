@@ -47,6 +47,24 @@ stated.
   ids with severity and location, test files, AC coverage, validation exit
   codes, diagnosis cause) and the PR body withholds the `Request` section;
   the full text stays in the state directory
+- after a failed validation whose diagnosis marks a failure `cause: code`
+  and `introduced_by: base` (with `[validate] issue_on`, the default): one
+  `gh issue create` as the author, title `Pre-existing: <test> fails on
+  <base>`, body from `templates/issue.md`, `--label bug` only when
+  `gh label list` shows that label, `--assignee <author>` unless
+  `issue_assignee = ""`; on a repository that is not private the output,
+  the diagnosis text and the suggested fix are withheld from the body. The
+  body passes the same credential scan as a comment. A second validation
+  whose base-introduced failures an issue of this branch already names
+  opens nothing. A failing `gh` call here is a warning in the log; the
+  validation result and exit code stand
+- once `revali merge` has merged the PR, for every such issue that a commit
+  in `<base sha>..HEAD` references with `Fixes #n`, `Closes #n` or
+  `Resolves #n`: one
+  `gh issue comment` naming the merged PR, the commit, and the diagnosis
+  cause and suggested fix recorded when the issue was opened (the fix text
+  withheld on a repository that is not private). Closing the issue is left
+  to GitHub's handling of those keywords
 - on `revali merge` (human-started, refused unless the last run ended READY
   TO MERGE and HEAD has not moved): waits for CI checks if the PR has any,
   then `gh pr merge --<method> --delete-branch`, which also deletes the

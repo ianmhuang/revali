@@ -62,6 +62,7 @@ class Context:
     builtin_checklist: str = ""
     diagnose_prompt: str = ""
     diagnose_schema: str = ""
+    issue_template: str = ""  # body of the issue opened for a pre-existing bug
 
     def say(self, msg: str) -> None:
         if self.log:
@@ -127,6 +128,9 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
         ctx.diagnose_prompt = tool_file(ctx.cfg.validate.prompt, root, "prompts", "diagnose.md")
         ctx.diagnose_schema = tool_file(
             ctx.cfg.validate.schema, root, "schemas", "diagnose.schema.json"
+        )
+        ctx.issue_template = tool_file(
+            ctx.cfg.validate.issue_template, root, "templates", "issue.md"
         )
         problems.extend(check_engines(ctx.cfg))
 
