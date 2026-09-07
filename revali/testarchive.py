@@ -208,7 +208,8 @@ def remove_placed(
     early); the archive keeps the previous round's content. Only the paths place_back
     recorded go (untracked ones; a file that was already there when place_back refused to
     copy is not among them), plus the reviewer's files a failed take could not move: an
-    archived path an author's file occupies is never deleted.
+    archived path an author's file occupies is never deleted. The directories the deletion
+    leaves empty go too, up to (not including) `test_dir`, as after take.
     Returns (removed, stuck), like discard_unfinished_tests."""
     tracked = _tracked(ctx)
     removed = []
@@ -226,6 +227,9 @@ def remove_placed(
         except OSError as exc:
             stuck.append(rel)
             reasons.append("%s (%s)" % (rel, exc))
+    stop = os.path.join(ctx.repo_root, ctx.cfg.project.test_dir)  # test_dir itself stays
+    for rel in removed:  # the directories that held only copies are empty now, like after take
+        _prune(os.path.dirname(os.path.join(ctx.repo_root, rel)), stop)
     state.placed_test_files = []
     if removed and log:
         log.stage(

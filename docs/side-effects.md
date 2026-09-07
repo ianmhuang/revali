@@ -130,8 +130,9 @@ stated.
   same cleanups also delete the copies of the archived files the round had
   placed in `test_dir` (by the state's list, whatever their names) and,
   when the move into the archive failed, the files the reviewer left that
-  were not moved yet; the archive under `.revali/<branch>/tests/` keeps
-  the previous round's content and is never touched by a cleanup. A move
+  were not moved yet, and the directories that deletion leaves empty (up
+  to `test_dir`, which stays); the archive under `.revali/<branch>/tests/`
+  keeps the previous round's content and is never touched by a cleanup. A move
   that fails part way (a file held open on Windows) is not rolled back:
   the files moved before it hold the new content, the rest the previous
   one, and the next round places that mix back for the reviewer.

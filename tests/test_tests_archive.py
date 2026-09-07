@@ -90,6 +90,9 @@ class ArchiveCase(RepoCase):
     def status(self):
         return git(["status", "--porcelain"], self.repo).strip()
 
+    def isdir(self, rel):
+        return os.path.isdir(os.path.join(self.repo, rel))
+
     def head(self):
         return git(["rev-parse", "HEAD"], self.repo).strip()
 
@@ -208,6 +211,7 @@ class FirstRound(ArchiveCase):
         out = self.run_ok(approving(**{FILE: TEST_REVIEW_MUL}))
         self.assertEqual(len(self.trailer_commits()), 1)
         self.assertIn("  tests landing: " + FILE, out)
+        self.assertNotIn("archived test file(s) under", out)  # no archive, no note
         self.assertFalse(os.path.isdir(archive_dir(self.rdir())))
         state = self.state()
         self.assertEqual(state.tests_mode, "commit")
@@ -390,6 +394,79 @@ class Interrupted(ArchiveCase):
         self.assertFalse(state.reviewer_running)
 
 
+class Pruning(ArchiveCase):
+    def test_the_cleanup_prunes_the_directories_it_emptied(self):
+        # fix/archive-followups AC-1: a directory that held only placed copies goes, one that
+        # still holds the author's file stays, test_dir stays; after a failed session and reset
+        keep = "tests/review_data/keep.json"
+        extra = "tests/z_data/extra.json"
+        self.write(keep, "{}\n")
+        self.commit_all("the author's data file")
+        self.claude(requesting_changes(**{FILE: TEST_REVIEW_MUL, HELPER: "{}\n", extra: "[]\n"}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assertFalse(self.isdir("tests/z_data"))  # take prunes after a finished round
+        self.write("src/calc.py", self.read("src/calc.py") + "\n# negatives handled\n")
+        self.commit_all("fix")
+        self.claude(claude_entry(is_error=True))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("removed 3 working-tree copies", out)
+        self.assertFalse(self.isdir("tests/z_data"))
+        self.assertTrue(self.isdir("tests/review_data"))
+        self.assertEqual(self.read(keep), "{}\n")
+        self.assertTrue(self.isdir("tests"))
+        self.assertEqual(self.status(), "")
+        placed = sorted([FILE, HELPER, extra])
+        for rel in placed:  # a killed round, then reset
+            self.write(rel, "x\n")
+        state = self.state()
+        state.reviewer_running = True
+        state.placed_test_files = placed
+        state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.isdir("tests/z_data"))
+        self.assertTrue(self.isdir("tests/review_data"))
+        self.assertTrue(self.isdir("tests"))
+        self.assertEqual(self.status(), "")
+        self.assertEqual(archived_files(self.rdir()), placed)
+
+
+class Status(ArchiveCase):
+    def test_status_prints_the_recorded_mode(self):
+        # fix/archive-followups AC-2
+        code, out = run_cli(["status"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("tests:", out)  # no round yet, no recorded mode
+        self.claude(requesting_changes(**{FILE: TEST_REVIEW_MUL}))
+        self.assertEqual(run_cli(["run", "--foreground"])[0], EXIT_ACTION)
+        code, out = run_cli(["status"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("\ntests: archive\n", out)
+        self.assertIn("\nround: 1, fixes: 0,", out)  # the rounds recorded, not a dead field
+
+    def test_status_prints_commit_for_a_state_from_before_the_key(self):
+        # round 1 F1: a state with rounds and no recorded mode runs as commit, status says so
+        self.claude(requesting_changes(**{FILE: TEST_REVIEW_MUL}))
+        self.assertEqual(run_cli(["run", "--foreground"])[0], EXIT_ACTION)
+        state = self.state()
+        state.tests_mode = ""
+        state.save(self.rdir())
+        code, out = run_cli(["status"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("\ntests: commit\n", out)
+
+    def test_status_prints_commit_for_the_default_mode(self):
+        # fix/archive-followups AC-2
+        self.switch_mode("commit")
+        self.claude(requesting_changes(**{FILE: TEST_REVIEW_MUL}))
+        self.assertEqual(run_cli(["run", "--foreground"])[0], EXIT_ACTION)
+        code, out = run_cli(["status"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("\ntests: commit\n", out)
+
+
 class Ownership(ArchiveCase):
     def test_a_path_head_tracks_is_the_authors(self):
         # AC-6
@@ -459,6 +536,22 @@ class ModeSwitch(ArchiveCase):
         self.assertEqual(read(self.archived(FILE)), TEST_REVIEW_MUL)
         self.switch_mode("archive")
         self.run_ok(approving(**{FILE: TEST_REVIEW_MUL}))
+
+    def test_commit_mode_reports_a_stale_archive_after_a_reset(self):
+        # fix/archive-followups AC-3: the files are named, nothing is deleted
+        self.claude(requesting_changes(**{FILE: TEST_REVIEW_MUL}))
+        self.assertEqual(run_cli(["run", "--foreground"])[0], EXIT_ACTION)
+        self.assertEqual(run_cli(["reset"])[0], EXIT_OK)
+        self.switch_mode("commit")
+        out = self.run_ok(approving(**{FILE: TEST_REVIEW_MUL}))
+        self.assertIn(
+            "1 archived test file(s) under .revali/feature__mul/tests from earlier "
+            "archive-mode rounds; commit mode does not use them",
+            out,
+        )
+        self.assertIn("archive_dir at merge unless you delete that directory: " + FILE, out)
+        self.assertEqual(read(self.archived(FILE)), TEST_REVIEW_MUL)
+        self.assertEqual(len(self.trailer_commits()), 1)  # commit mode as usual
 
     def test_switching_to_archive_is_refused_and_an_old_state_counts_as_commit(self):
         # AC-7

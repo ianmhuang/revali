@@ -67,7 +67,11 @@ revali in different checkouts can tell their output apart; every message
 that reports a live or dead run carries its pid. On Windows the detached
 run starts every subprocess (git, gh, claude, wsl, the `lint` line and the
 `local` runner's steps) with `CREATE_NO_WINDOW`, so no console windows
-appear while it works.
+appear while it works. `status` then prints the stage, the last message,
+the round / fix-cycle / cost counters, the PR, and, once the branch has a
+review round, `tests: commit` or `tests: archive`: the mode its rounds run
+in, fixed for the branch (`[review] tests` in
+[docs/configuration.md](configuration.md)).
 
 A working tree runs one pipeline at a time: `run` takes `.revali/tree.lock`
 next to the branch lock, and a second `run` in the same checkout, on any
