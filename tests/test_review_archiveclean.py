@@ -4,7 +4,9 @@ from the archive and a tracked path is the author's (AC-6), and the mode is fixe
 life of a branch (AC-7)."""
 
 import os
+import shutil
 import unittest
+from unittest import mock
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
 from revali.state import State
@@ -158,6 +160,52 @@ class StoppedRoundTests(InterruptedRoundCase):
         self.assertEqual(sorted(self.state().test_files), [DATA, FILE])
         self.assertEqual(self.status(), "")
         self.assertEqual(self.runner_calls("validate-r1")[-1]["extra_files"], [DATA, FILE])
+
+
+class ArchiveFailureTests(InterruptedRoundCase):
+    def test_a_file_the_archive_cannot_take_is_a_stop_naming_it(self):
+        # AC-5 (round 3): an OSError while a file moves into the archive (one held open on
+        # Windows) ends the run with exit 1 and the path, not a traceback; the archived file
+        # the move could not replace keeps round 1, the copies and the new draft leave
+        # test_dir, and the next run goes on from the archive
+        real_move = shutil.move
+
+        def move(src, dst, *args, **kwargs):
+            if dst.replace("\\", "/").endswith(FILE):
+                raise PermissionError(13, "held open by an editor", dst)
+            return real_move(src, dst, *args, **kwargs)
+
+        self.claude(
+            approving({FILE: TEST_REVIEW_MUL + "\n# round 2\n", DATA: "{}\n", SECOND: SECOND_TEXT})
+        )
+        with mock.patch("revali.testarchive.shutil.move", side_effect=move):
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn(FILE, out)
+        self.assertIn("held open by an editor", out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.status(), "")
+        self.assertFalse(self.exists(FILE))
+        self.assertFalse(self.exists(DATA))
+        self.assertFalse(self.exists(SECOND))
+        self.assertEqual(read(self.archived(FILE)), TEST_REVIEW_MUL)
+        state = self.state()
+        self.assertFalse(state.reviewer_running)
+        self.assertEqual(state.placed_test_files, [])
+        self.assertEqual(len(state.rounds), 1)
+        # the next run picks the files up from the archive and archives the new round
+        self.claude(
+            approving({FILE: TEST_REVIEW_MUL + "\n# round 3\n", DATA: "{}\n", SECOND: SECOND_TEXT})
+        )
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(self.status(), "")
+        self.assertEqual(self.trailers(), [])
+        self.assertEqual(read(self.archived(FILE)), TEST_REVIEW_MUL + "\n# round 3\n")
+        self.assertEqual(read(self.archived(DATA)), "{}\n")
+        self.assertEqual(read(self.archived(SECOND)), SECOND_TEXT)
+        self.assertEqual(sorted(self.state().test_files), [DATA, FILE, SECOND])
+        self.assertEqual(self.runner_calls("validate-r2")[-1]["extra_files"], [DATA, FILE, SECOND])
 
 
 class OwnershipTests(ArchiveModeCase):
