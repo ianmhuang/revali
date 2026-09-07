@@ -68,10 +68,13 @@ class PublicRepoComments(RepoCase):
         self.assertIn("summary only", c)
         # the full text is still on disk
         self.assertIn(FINDING_TEXT, self.read(".revali/feature__mul/review-1.md"))
-        # the PR body withholds the request
+        # the PR body has no Request section at all
         body = self.read(".revali/feature__mul/logs/pr-body.md")
-        self.assertIn("(withheld: public repository)", body)
+        self.assertNotIn("## Request", body)
+        self.assertNotIn("withheld", body)
         self.assertNotIn("multiplies two numbers", body)
+        self.assertIn("## Goal", body)
+        self.assertIn("- AC-1:", body)
         # the validation comment shows exit codes, no logs
         v = self.comment("validate-1")
         self.assertIn("## Validation 1: PASS", v)
@@ -120,8 +123,12 @@ class PrivateRepoComments(RepoCase):
         self.assertIn(FINDING_TEXT, c)
         self.assertIn(SUGGESTION, c)
         self.assertNotIn("summary only", c)
+        # the PR body drops the request on a private repository too (AC-1)
         body = self.read(".revali/feature__mul/logs/pr-body.md")
         self.assertNotIn("withheld", body)
+        self.assertNotIn("## Request", body)
+        self.assertNotIn("multiplies two numbers", body)
+        self.assertIn("- AC-1:", body)
 
 
 if __name__ == "__main__":

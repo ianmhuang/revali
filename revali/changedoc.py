@@ -30,6 +30,19 @@ SECTION_KEYS = {
     "dependencies": "dependencies",
 }
 AC_RE = re.compile(r"^\s*[-*]\s*(AC-\d+)\s*[:：]\s*(.+?)\s*$")
+HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")  # a section heading, on a line without its newline
+
+
+def section_key(line: str) -> str:
+    """The section key a heading line opens ("request", "goal", ...), "" for any other line.
+    The one rule for what counts as a heading, shared with pr.strip_request."""
+    m = HEADING_RE.match(line.rstrip("\r\n"))
+    if not m:
+        return ""
+    name = m.group(1).strip().lower()
+    return SECTION_KEYS.get(name, name.replace(" ", "_"))
+
+
 FRONT_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*?)\s*$")
 
 
@@ -74,10 +87,9 @@ def parse(text: str) -> ChangeDoc:
     current = None
     buf: Dict[str, List[str]] = {}
     for line in lines[idx:]:
-        m = re.match(r"^##\s+(.+?)\s*$", line)
-        if m:
-            name = m.group(1).strip().lower()
-            current = SECTION_KEYS.get(name, name.replace(" ", "_"))
+        key = section_key(line)
+        if key:
+            current = key
             buf.setdefault(current, [])
             continue
         if current is None:

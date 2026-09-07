@@ -3,7 +3,8 @@
 `revali merge` used to delete `.revali/<branch>/`. What survived is on GitHub and in the
 history file:
 
-- the PR body: change.md (the Request is withheld on public repositories) plus the
+- the PR body: change.md without its Request section (revali never publishes the request;
+  PRs from before that rule carried a "withheld" marker on public repositories) plus the
   status table revali appends;
 - the PR comments revali posted: one per review round, one per validation;
 - the history file (`~/.revali/history.jsonl` unless the user file moves it): one row
@@ -181,8 +182,8 @@ def plan_files(pr, repo, history):
         "",
         "## What is here",
         "",
-        "- change.md: the PR body without the status table (the Request is withheld on a",
-        "  public repository)",
+        "- change.md: the PR body without the status table (no Request section: revali keeps",
+        '  the request local; older PRs may show a "withheld" marker instead)',
         "- review-<n>.md: the review comments (full text on a private repository, summaries",
         "  on a public one)",
         "- tests.md: the validation comments, in order",

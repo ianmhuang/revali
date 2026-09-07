@@ -4,7 +4,7 @@ import os
 import re
 from typing import Optional
 
-from revali import EXIT_ERROR, gitops
+from revali import EXIT_ERROR, changedoc, gitops
 from revali.preflight import Context, Stop, check_tree_unmoved
 from revali.procs import resolve, run, run_retry
 from revali.secretscan import scan_text
@@ -119,16 +119,26 @@ def is_public(ctx: Context) -> bool:
     return bool(ctx.repo) and ctx.repo.visibility != "PRIVATE"
 
 
+def strip_request(text: str) -> str:
+    """change.md without its Request section: the heading line and everything up to the next
+    heading (or the end). A heading is what changedoc.parse takes for one (`## request`,
+    `##  Request`, a CRLF line), so whatever validated as the Request is what goes; the words
+    inside another section stay. Line endings are kept as they are."""
+    kept = []
+    skipping = False
+    for line in text.splitlines(keepends=True):
+        key = changedoc.section_key(line)
+        if key:
+            skipping = key == "request"
+        if not skipping:
+            kept.append(line)
+    return "".join(kept)
+
+
 def pr_body(ctx: Context, state: Optional[State]) -> str:
-    """change.md minus the verbatim request when the repo is public, plus a status table."""
-    body = ctx.doc.raw.strip()
-    if is_public(ctx):
-        body = re.sub(
-            r"## Request\n.*?(?=\n## )",
-            "## Request\n(withheld: public repository)\n",
-            body,
-            flags=re.S,
-        )
+    """change.md minus the request (the user's verbatim words stay local, on every repository),
+    plus a status table once there are rounds."""
+    body = strip_request(ctx.doc.raw).strip()
     if state and state.rounds:
         rows = [
             "",

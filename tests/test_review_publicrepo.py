@@ -189,12 +189,14 @@ class PublicRepoReviewComment(CommentCase):
         self.assertNotIn(QUESTION, c)
         self.assertIn(QUESTION, out)
 
-    def test_pr_body_withholds_the_request(self):
+    def test_pr_body_has_no_request_section(self):
+        # the section is dropped since the PR body carries no Request (see change.md of
+        # feature/pr-body-no-request); it used to be replaced by a "withheld" marker here
         self.claude(claude_entry(changes_requested()))
         run_cli(["run", "--foreground"])
         body = self.read(os.path.join(".revali", "feature__mul", "logs", "pr-body.md"))
-        self.assertIn("## Request", body)
-        self.assertIn("withheld", body)
+        self.assertNotIn("## Request", body)
+        self.assertNotIn("withheld", body)
         self.assertNotIn("multiplies two numbers", body)
         self.assertIn("AC-1", body)  # the acceptance criteria are still public
 
@@ -275,9 +277,13 @@ class PrivateRepoStillPostsFullText(CommentCase):
         self.assertIn(SUGGESTION, c)
         self.assertIn(SCOPE_NOTE, c)
         self.assertNotIn("summary only", c)
+        # the PR body drops the Request on a private repository too (feature/pr-body-no-request);
+        # the comments above are what stays full-text here
         body = self.read(os.path.join(".revali", "feature__mul", "logs", "pr-body.md"))
-        self.assertIn("multiplies two numbers", body)
+        self.assertNotIn("## Request", body)
+        self.assertNotIn("multiplies two numbers", body)
         self.assertNotIn("withheld", body)
+        self.assertIn("multiplies two integers", body)  # the Goal is on the PR
 
     def test_needs_info_comment_has_the_questions(self):
         self.claude(claude_entry(needs_info(), write_tests=False))
