@@ -181,6 +181,26 @@ class FirstRoundTests(ArchiveModeCase):
         # the remote got the branch as it was, nothing on top
         self.assertEqual(git(["rev-parse", "feature/mul"], self.info["remote"]).strip(), head)
 
+    def test_test_dir_without_tracked_files_survives_the_round(self):
+        # AC-2: the reviewer's files move out of test_dir; the directory the configuration
+        # names stays even when nothing tracked keeps it alive, so the next round finds it
+        text = self.read("revali.toml").replace('test_dir = "tests"', 'test_dir = "acceptance"')
+        self.assertNotEqual(text, self.read("revali.toml"))
+        self.write("revali.toml", text)
+        self.commit_all("tests live in acceptance/")
+        path = "acceptance/test_review_mul.py"
+        nested = "acceptance/data/mul.json"
+        self.claude(approving({path: TEST_REVIEW_MUL, nested: "{}\n"}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertTrue(os.path.isdir(os.path.join(self.repo, "acceptance")))
+        self.assertFalse(os.path.isdir(os.path.join(self.repo, "acceptance", "data")))
+        self.assertFalse(self.exists(path))
+        self.assertEqual(self.status(), "")
+        self.assertEqual(read(self.archived(path)), TEST_REVIEW_MUL)
+        self.assertEqual(read(self.archived(nested)), "{}\n")
+        self.assertEqual(sorted(self.state().test_files), [nested, path])
+
     def test_commit_mode_still_commits(self):
         # AC-1 (default behaviour unchanged), AC-8
         self.set_tests_key("commit")

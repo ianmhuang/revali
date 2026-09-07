@@ -95,6 +95,48 @@ class StoppedRoundTests(InterruptedRoundCase):
         self.assertFalse(os.path.exists(self.archived(SECOND)))
         self.assertEqual(sorted(self.state().test_files), [DATA, FILE])
 
+    def test_an_occupied_archived_path_stops_the_run_and_keeps_the_occupant(self):
+        # AC-5: a gitignored file (the only occupant preflight lets through) at an archived
+        # path ends the run before any copy is placed; the cleanup deletes nothing, least of
+        # all the occupant, and the archive keeps round 1
+        self.write(".gitignore", self.read(".gitignore") + "tests/review_data/\n")
+        self.commit_all("ignore the data directory")
+        self.write(DATA, "the author's data\n")
+        self.claude(approving({FILE: TEST_REVIEW_MUL}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn(DATA, out)
+        self.assertIn("already exists", out)
+        self.assertEqual(self.read(DATA), "the author's data\n")
+        self.assertFalse(self.exists(FILE))
+        self.assertNotIn("removed", out)
+        self.assert_archive_is_round_one()
+        state = self.state()
+        self.assertEqual(state.placed_test_files, [])
+        self.assertFalse(state.reviewer_running)
+        self.assertEqual(sorted(state.test_files), [DATA, FILE])
+        # the same run again: still refused, the occupant still there
+        self.claude(approving({FILE: TEST_REVIEW_MUL}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertEqual(self.read(DATA), "the author's data\n")
+
+    def test_a_killed_round_records_what_it_placed(self):
+        # AC-5: the state lists the placed copies before the reviewer starts, so a kill at any
+        # later point leaves exactly that list for the next run; a normal round clears it
+        entry = claude_entry(is_error=True)
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertEqual(self.state().placed_test_files, [])
+        self.assertIn("removed 2 working-tree copies", out)
+        self.claude(approving({FILE: TEST_REVIEW_MUL, DATA: "{}\n"}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("placed 2 archived test file(s) back", out)
+        self.assertEqual(self.state().placed_test_files, [])
+        self.assertEqual(self.status(), "")
+
     def test_reset_removes_the_copies_and_keeps_the_archive(self):
         # AC-5, AC-6
         self.leave_a_killed_round()
@@ -137,6 +179,28 @@ class OwnershipTests(ArchiveModeCase):
         prompt = self.fake_calls("claude")[-1]["prompt"]
         self.assertIn("not yours", prompt)
         self.assertEqual(self.runner_calls("validate-r2")[-1]["extra_files"], [SECOND])
+
+    def test_a_dry_run_reports_but_keeps_the_taken_over_path(self):
+        # AC-6: `run --dry-run` deletes nothing (docs/side-effects.md), the archive included;
+        # the next real run removes the author's path from the archive and the state
+        self.claude(requesting_changes({FILE: TEST_REVIEW_MUL, DATA: "{}\n"}))
+        self.assertEqual(run_cli(["run", "--foreground"])[0], EXIT_ACTION)
+        self.write(DATA, "the author's data\n")
+        self.fix_and_commit("author takes the data path")
+        code, out = run_cli(["run", "--foreground", "--dry-run"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("dry run", out)
+        self.assertIn(DATA, out)
+        self.assertEqual(read(self.archived(DATA)), "{}\n")
+        self.assertEqual(read(self.archived(FILE)), TEST_REVIEW_MUL)
+        self.assertEqual(self.read(DATA), "the author's data\n")
+        self.claude(approving({FILE: TEST_REVIEW_MUL}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(os.path.exists(self.archived(DATA)))
+        self.assertEqual(read(self.archived(FILE)), TEST_REVIEW_MUL)
+        self.assertEqual(self.state().test_files, [FILE])
+        self.assertEqual(self.read(DATA), "the author's data\n")
 
     def test_the_reviewer_may_not_touch_the_taken_over_file(self):
         # AC-6
