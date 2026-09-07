@@ -12,7 +12,7 @@ import traceback
 from typing import Optional
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION, gitops
-from revali.config import ConfigError, history_path, load_user_config, paths_for
+from revali.config import ConfigError, archive_root, history_path, load_user_config, paths_for
 from revali.preflight import Stop, check_tree_unmoved, locate, preflight
 from revali.procs import kill_tree, pid_alive, python_exe, spawn_detached
 from revali.state import (
@@ -930,9 +930,17 @@ def cmd_merge(args) -> int:
     print(merge.merge_summary(state, state.base))
     root = gitops.repo_root(cwd)
     if root:
-        state_dir = paths_for(root).state_dir
-        merge.remove_tree(review_dir(root, state.branch, state_dir))
-        print("  removed %s/%s/" % (state_dir, safe_branch(state.branch)))
+        paths = paths_for(root)
+        rdir = review_dir(root, state.branch, paths.state_dir)
+        root_dir = archive_root(paths)
+        if root_dir:
+            line = merge.archive_review_dir(
+                rdir, root_dir, state.repo or os.path.basename(root), state.pr_number, state.branch
+            )
+        else:
+            merge.remove_tree(rdir)
+            line = "removed %s/%s/" % (paths.state_dir, safe_branch(state.branch))
+        print("  " + line)
     return code
 
 

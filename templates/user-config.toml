@@ -12,6 +12,8 @@ history_path = ""
 # [paths]
 # history_file = "history.jsonl"   # user-level only; a project file may not set it
 # write_retry_s = 2.0              # how long a state-file write waits for a reader, or a read for a writer, to let go
+# archive_dir = "archive"          # where `revali merge` moves .revali/<branch>/; relative = under ~/.revali/,
+                                   # "" = delete it; a project file may set it too (a shared path, say)
 
 # Any [section] from revali.toml / defaults.toml may appear here, e.g.:
 # [review]

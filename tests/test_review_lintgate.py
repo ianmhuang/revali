@@ -206,8 +206,10 @@ class Prompt(LintRepo):
         # names the command as the one the reviewer's files must pass
         self.assertRegex(prompt, r"lint command `[^`\n]*fake_lint\.py` must pass")  # AC-7
 
-    def test_prompt_version_is_7(self):
-        self.assertEqual(PROMPT_VERSION, "7")  # AC-7
+    def test_prompt_version_is_at_least_7(self):
+        # AC-7 of PR #32 asked for a bump to 7; pinned to "7" this test failed on the next
+        # prompt change (PR archive-on-merge, version 8), so it checks the bump happened
+        self.assertGreaterEqual(int(PROMPT_VERSION), 7)
 
 
 class EmptyLine(RepoCase):

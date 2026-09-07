@@ -78,7 +78,10 @@ must be one that fails on the base branch and passes on this branch.
 Each file goes into `tests` with `covers` listing the AC ids it checks and
 `expected` stating input, expected output, and why that follows from the AC.
 Every AC must appear in some `covers` list or in `not_testable` with a
-reason. Do not run the tests; the script runs them in a sandbox.
+reason. An AC about the wording of documentation (a README sentence, a
+docstring, a comment) goes into `not_testable` with the reason
+`documentation`; do not write a test that pins strings of a document.
+Do not run the tests; the script runs them in a sandbox.
 $lint_section
 $test_guide_section
 $prior_tests_section

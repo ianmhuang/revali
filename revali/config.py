@@ -44,6 +44,7 @@ class PathsCfg:
     logs_dir: str = ""
     history_file: str = ""
     write_retry_s: float = 0.0
+    archive_dir: str = ""  # where `merge` moves the branch directory; "" = delete it
 
 
 @dataclass
@@ -160,6 +161,17 @@ class UserConfig:
 
 def user_home() -> str:
     return os.environ.get(USER_DIR_ENV) or os.path.join(os.path.expanduser("~"), ".revali")
+
+
+def archive_root(paths: PathsCfg) -> str:
+    """The directory `revali merge` archives branch directories under: [paths] archive_dir
+    with `~` expanded, relative to the user directory (`~/.revali/`, `REVALI_HOME`) unless
+    absolute; "" when the key is empty, which means delete instead of archive."""
+    value = paths.archive_dir.strip()
+    if not value:
+        return ""
+    value = os.path.expanduser(value)
+    return os.path.normpath(value if os.path.isabs(value) else os.path.join(user_home(), value))
 
 
 def tool_file(configured: str, repo_root: str, *default_parts: str) -> str:
@@ -515,9 +527,9 @@ def load_user_config() -> UserConfig:
 
 def paths_for(repo_root: str) -> PathsCfg:
     """The [paths] table for a repo: from its config when it loads; else the raw [paths]
-    table of revali.toml (so a broken config still points at the right state dir) over
-    the defaults. Used by commands that must find the state directory before a full
-    config is required."""
+    table of revali.toml (so a broken config still points at the right state dir, and
+    `merge` still archives where the user or project said) over the defaults. Used by
+    commands that must find the state directory before a full config is required."""
     try:
         return load_project_config(repo_root).paths
     except ConfigError:
@@ -525,10 +537,10 @@ def paths_for(repo_root: str) -> PathsCfg:
     paths = _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
     for file in (os.path.join(user_home(), "config.toml"), os.path.join(repo_root, PROJECT_FILE)):
         for key, value in _raw_paths(file).items():
-            if (
-                key in ("state_dir", "logs_dir")
-                and isinstance(value, str)
-                and _single_component(value)
+            if not isinstance(value, str):
+                continue
+            if key == "archive_dir" or (
+                key in ("state_dir", "logs_dir") and _single_component(value)
             ):
                 setattr(paths, key, value)
     return paths

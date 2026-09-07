@@ -57,6 +57,13 @@ line gates the reviewer's tests: after the reviewer writes them the line
 runs again, a failure sends the reviewer back once, a second failure ends
 the run. Leave it empty and nothing checks formatting or style, for your
 diff or for the reviewer's files; preflight prints a note when that is so.
+`[paths] archive_dir` (default `archive`) is where `revali merge` moves the
+branch's `.revali/<branch>/` once the PR is merged, as
+`<owner>__<repo>/<pr>-<branch>/` under it: the review record outlives the
+branch as a local or shared knowledge base. A relative value sits under
+`~/.revali/` (`REVALI_HOME`), `~` is expanded, an absolute path is used as
+written; the user file and the project file may both set it. Empty deletes
+the directory, as before the key existed.
 
 Models: `model = "auto"` (the default) picks the Reviewer one tier above
 the Developer's model (`author_model` in `change.md`) and the diagnosis
