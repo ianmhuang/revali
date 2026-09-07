@@ -159,6 +159,7 @@ python tests/run_parallel.py                        # the suite, one worker per 
 python tests/run_parallel.py tests.test_pipeline    # a module, a class or a test, as for unittest
 python -m unittest discover -s tests -t .           # the same tests, serially
 python tests/fixtures/make_sample_repo.py "<dir>"   # throwaway sample project
+python tools/backfill_archive.py owner/name         # rebuild the archive of PRs merged before archive_dir existed
 ```
 
 Tests use a fake `gh` (via `REVALI_GH_CMD`) and real `git` in temp repos; every
