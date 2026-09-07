@@ -75,8 +75,12 @@ stated.
 - on `revali merge` (human-started, refused unless the last run ended READY
   TO MERGE and HEAD has not moved): waits for CI checks if the PR has any,
   then `gh pr merge --<method> --delete-branch`, which also deletes the
-  local branch and checks out the base branch; then `git pull --prune` and
-  deletion of the branch's state directory. In a linked worktree whose base
+  local branch and checks out the base branch; then `git pull --prune`, and
+  the branch's state directory is moved to `[paths] archive_dir`
+  (`~/.revali/archive/<owner>__<repo>/<pr>-<branch>/` by default; a name
+  already taken gets a timestamp suffix; a move that fails leaves the
+  directory where it is and says so; an empty `archive_dir` deletes it
+  instead). In a linked worktree whose base
   branch is checked out elsewhere: `gh pr merge --<method>` without
   `--delete-branch`, then `git push origin --delete <branch>`,
   `git fetch --prune origin <base>`, `git checkout --detach FETCH_HEAD`,

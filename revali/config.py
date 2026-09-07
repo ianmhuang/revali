@@ -44,6 +44,7 @@ class PathsCfg:
     logs_dir: str = ""
     history_file: str = ""
     write_retry_s: float = 0.0
+    archive_dir: str = ""  # where `merge` moves the branch directory; "" = delete it
 
 
 @dataclass
@@ -160,6 +161,17 @@ class UserConfig:
 
 def user_home() -> str:
     return os.environ.get(USER_DIR_ENV) or os.path.join(os.path.expanduser("~"), ".revali")
+
+
+def archive_root(paths: PathsCfg) -> str:
+    """The directory `revali merge` archives branch directories under: [paths] archive_dir
+    with `~` expanded, relative to the user directory (`~/.revali/`, `REVALI_HOME`) unless
+    absolute; "" when the key is empty, which means delete instead of archive."""
+    value = paths.archive_dir.strip()
+    if not value:
+        return ""
+    value = os.path.expanduser(value)
+    return os.path.normpath(value if os.path.isabs(value) else os.path.join(user_home(), value))
 
 
 def tool_file(configured: str, repo_root: str, *default_parts: str) -> str:

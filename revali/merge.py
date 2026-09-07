@@ -11,7 +11,7 @@ from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops, issues
 from revali.config import ConfigError, load_project_config
 from revali.preflight import Stop
 from revali.procs import resolve, run, run_retry
-from revali.state import RunLog, State
+from revali.state import RunLog, State, safe_branch
 
 POLL_ENV = "REVALI_POLL_SECONDS"
 
@@ -51,6 +51,43 @@ def remove_tree(path: str) -> None:
             shutil.rmtree(path, onexc=_onexc)
         except TypeError:
             shutil.rmtree(path, onerror=lambda f, p, e: _onexc(f, p, e[1]))
+
+
+def archive_destination(root_dir: str, repo: str, pr_number: int, branch: str) -> str:
+    """`<root_dir>/<owner>__<name>/<pr>-<safe branch>/`, with a `-<YYYYMMDD-HHMMSS>` suffix
+    when that directory already exists (nothing archived is overwritten or merged into).
+    `repo` is the state's `owner/name`; the caller passes the checkout's directory name when
+    the state has none."""
+    dest = os.path.join(root_dir, safe_branch(repo), "%d-%s" % (pr_number, safe_branch(branch)))
+    if os.path.exists(dest):
+        dest += time.strftime("-%Y%m%d-%H%M%S")
+    return dest
+
+
+def archive_review_dir(rdir: str, root_dir: str, repo: str, pr_number: int, branch: str) -> str:
+    """After the merge: move `rdir` (the branch's `.revali/<branch>/`) under `root_dir`, by
+    rename on the same device, by copy and delete across devices. Returns the summary line.
+    A copy that fails leaves `rdir` where it is (the PR is merged; the record must not be
+    lost over a full disk or a permission) and says so, the half-copied destination removed;
+    a source that cannot be deleted after a complete copy is reported for the user to
+    remove."""
+    dest = archive_destination(root_dir, repo, pr_number, branch)
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        try:
+            os.rename(rdir, dest)
+        except OSError:
+            shutil.copytree(rdir, dest)
+    except OSError as exc:
+        remove_tree(dest)
+        return "could not archive %s (%s); left in place: %s" % (dest, exc, rdir)
+    remove_tree(rdir)  # tolerant: a file held open on Windows leaves the rest
+    if os.path.exists(rdir):
+        return "archived to %s; could not remove %s (a file still open?), delete it by hand" % (
+            dest,
+            rdir,
+        )
+    return "archived to %s" % dest
 
 
 def pr_checks(pr_number: int, cwd: str, log: Optional[RunLog]) -> List[dict]:
