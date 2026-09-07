@@ -6,12 +6,18 @@ restored and the reviewer sent back once, the state drops the path and the log n
 path and the commit that re-added it, once. An author edit keeps the owner; a file the
 reviewer re-creates after the author deleted it is the reviewer's again. After a rewrite,
 the recovery line names the trailer commits none of whose files survive, also when other
-trailer commits still have files. `docs/side-effects.md` states the rule."""
+trailer commits still have files. `docs/side-effects.md` states the rule.
 
+Round 2: replacing the content in a single commit is a modification to git and keeps the
+owner, as the docs now say; a state that kept its files but lost its commits gets the
+emptied commits on a line of their own; the newest add is looked up once per path."""
+
+import json
 import os
 import unittest
+from unittest import mock
 
-from revali import EXIT_OK
+from revali import EXIT_OK, gitops
 from revali.state import State
 from tests import test_rebase_ownership as ro
 from tests.helpers import TEST_REVIEW_MUL, approve_response, claude_entry, git, run_cli
@@ -128,6 +134,28 @@ class OwnershipFollowsTheNewestAdd(ro.RewriteCase):
         self.assertEqual(self.read(FILE), ro.UPDATED)
         self.assertEqual(State.load(self.rdir()).test_files, [FILE])
 
+    def test_replacing_the_content_in_one_commit_keeps_the_owner(self):  # AC-2, round 1 F1
+        """Delete and re-create inside one commit is a modification to git: the file stays
+        the reviewer's, which is what docs/side-effects.md now says."""
+        self.first_round()
+        os.remove(os.path.join(self.repo, FILE))
+        self.write(FILE, MINE)
+        self.commit_all("replace the reviewer's test in place")
+        replaced_by = head(self.repo)
+        self.assertEqual(gitops.commit_paths(replaced_by, self.repo, diff_filter="A"), [])
+        self.assertEqual(gitops.commit_paths(replaced_by, self.repo, diff_filter="M"), [FILE])
+        entry = claude_entry(approve_response())
+        entry["write_files"][FILE] = ro.UPDATED
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("re-created", out)
+        ps = ro.prompts(self)
+        self.assertEqual(len(ps), 1, "no bounce: a modification does not transfer the file")
+        self.assertIn(FILE, ro.section(ps[0], ro.EARLIER))
+        self.assertEqual(self.read(FILE), ro.UPDATED)
+        self.assertEqual(State.load(self.rdir()).test_files, [FILE])
+
     def test_a_file_the_reviewer_recreates_is_the_reviewers_again(self):  # AC-2
         self.first_round()
         git(["rm", "-q", FILE], self.repo)
@@ -209,6 +237,57 @@ class EmptiedTrailerCommitIsNamed(ro.RewriteCase):
         self.assertNotIn("recovered", out)
         self.assertEqual(State.load(self.rdir()).test_files, [FILE])
 
+    def test_a_state_that_lost_its_commits_names_the_emptied_one(self):  # AC-4, round 1 F4
+        """No file to recover (the state kept them), no rewrite, yet both trailer commits are
+        new to the state: the one with no file left is named once, on a line of its own."""
+        first, second = self.two_trailer_commits()
+        git(["rm", "-q", SECOND], self.repo)
+        git(["commit", "-q", "-m", "drop the second test"], self.repo)
+        path = State.path(self.rdir())
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            data = json.load(fh)
+        data["test_commits"] = []
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(data, fh)
+        self.claude(claude_entry(approve_response(), write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("starts over", out)
+        self.assertNotIn("recovered", out)
+        naming = [ln for ln in out.splitlines() if "none of" in ln]
+        self.assertEqual(len(naming), 1, out)
+        self.assertIn(second[:10], naming[0])
+        self.assertNotIn(first[:10], naming[0])
+        state = State.load(self.rdir())
+        self.assertEqual(state.test_commits[:2], [first, second])
+        self.assertEqual(state.test_files, [FILE, SECOND])  # kept: the state is not weakened
+        # the next run has nothing new and stays quiet
+        self.fix_and_commit("once more")
+        self.claude(claude_entry(approve_response(), write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("none of", out)
+        self.assertNotIn("recovered", out)
+
+
+class NewestAddLookedUpOncePerPath(ro.RewriteCase):
+    def test_a_path_in_two_trailer_commits_is_looked_up_once(self):  # round 1 F3
+        self.first_round()
+        self.fix_and_commit()
+        entry = claude_entry(approve_response(verdict="CHANGES_REQUESTED", findings=[ro.HIGH]))
+        entry["write_files"][FILE] = ro.UPDATED  # round 2 modifies the round-1 file
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(len(ro.trailer_commits(self.repo)), 2, out)
+        self.fix_and_commit("again")
+        self.claude(claude_entry(approve_response(), write_tests=False))
+        with mock.patch("revali.gitops.last_add_commit", wraps=gitops.last_add_commit) as spy:
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        looked_up = [c.args[2] for c in spy.call_args_list]
+        self.assertEqual(looked_up.count(FILE), 1, looked_up)
+        self.assertEqual(State.load(self.rdir()).test_files, [FILE])
+
 
 class SideEffectsStateTheRule(unittest.TestCase):
     def test_the_ownership_sentence_covers_delete_and_recreate(self):  # AC-7
@@ -221,6 +300,10 @@ class SideEffectsStateTheRule(unittest.TestCase):
         self.assertIn("added a path", bullet)
         self.assertIn("re-create", bullet)
         self.assertIn("delete", bullet)
+        # round 1 F1: the rule as git sees it, and how to hand a file back
+        self.assertIn("single commit", bullet)
+        self.assertIn("modification", bullet)
+        self.assertIn("hand a file back", bullet)
 
 
 if __name__ == "__main__":
