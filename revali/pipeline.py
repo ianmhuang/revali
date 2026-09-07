@@ -348,6 +348,16 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
         commits = []
     else:
         commits, _ = review.recover_test_ownership(ctx, state, log)
+        stale = testarchive.archived_files(rdir)
+        if stale:  # left by archive-mode rounds a reset or a restart dropped; never used again
+            where = os.path.relpath(testarchive.archive_dir(rdir), ctx.repo_root)
+            log.stage(
+                "run",
+                "%d archived test file(s) under %s from earlier archive-mode rounds; commit "
+                "mode does not use them, and they travel to [paths] archive_dir at merge "
+                "unless you delete that directory: %s"
+                % (len(stale), where.replace("\\", "/"), ", ".join(stale)),
+            )
     if rewritten and not commits:
         log.stage(
             "run",
@@ -721,6 +731,8 @@ def cmd_status(args) -> int:
         if state.message:
             print("message: %s" % state.message)
         print("round: %d, fixes: %d, cost: $%.2f" % (state.round, state.fixes, state.cost_usd))
+        if state.tests_mode:  # recorded by the first round; fixed for the branch after that
+            print("tests: %s" % state.tests_mode)
         if state.pr_url:
             print("pr: %s" % state.pr_url)
         print("updated: %s" % state.updated_at)

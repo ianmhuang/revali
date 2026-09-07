@@ -84,7 +84,12 @@ branch has review rounds (a run with the other value stops with exit 2
 before it pushes anything; start a new branch for the other mode). On
 every run the state's list of the reviewer's files is rebuilt from the
 archive directory, so `revali reset` loses none of them; an archived path
-that HEAD tracks is yours and is removed from the archive.
+that HEAD tracks is yours and is removed from the archive. `revali status`
+prints the recorded mode (`tests: archive`) once the branch has a round.
+A commit-mode run that finds that directory non-empty (rounds in archive
+mode, then a `reset` and the key switched) logs the files it will never
+use; delete the directory yourself, or they move to `archive_dir` with
+the rest at merge.
 
 Models: `model = "auto"` (the default) picks the Reviewer one tier above
 the Developer's model (`author_model` in `change.md`) and the diagnosis
