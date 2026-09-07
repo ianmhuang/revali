@@ -128,9 +128,13 @@ stated.
   the project does not load, or a file cannot be deleted, it prints the
   paths for you to delete by hand. With `[review] tests = "archive"` the
   same cleanups also delete the copies of the archived files the round had
-  placed in `test_dir` (by the state's list, whatever their names); the
-  archive under `.revali/<branch>/tests/` keeps the previous round's
-  content and is never touched by a cleanup.
+  placed in `test_dir` (by the state's list, whatever their names) and,
+  when the move into the archive failed, the files the reviewer left that
+  were not moved yet; the archive under `.revali/<branch>/tests/` keeps
+  the previous round's content and is never touched by a cleanup. A move
+  that fails part way (a file held open on Windows) is not rolled back:
+  the files moved before it hold the new content, the rest the previous
+  one, and the next round places that mix back for the reviewer.
   A finished
   `run --dry-run` is not an interrupted run, and neither `revali preflight`
   nor `run --dry-run` deletes.

@@ -88,8 +88,9 @@ class State:
     # the clean-tree check tolerates exactly these until the next round commits or removes them
     # (STATE_VERSION 3)
     placed_test_files: List[str] = field(default_factory=list)
-    # archive mode: the copies the round placed in test_dir, recorded before they are written;
-    # the cleanup of a round that stops early deletes exactly these (STATE_VERSION 6)
+    # archive mode: the copies the round placed in test_dir, recorded before they are written,
+    # plus the reviewer's files a failed take could not move; the cleanup of a round that
+    # stops early deletes exactly these (STATE_VERSION 6)
     last_exit: int = -1
     message: str = ""
     started_at: str = ""

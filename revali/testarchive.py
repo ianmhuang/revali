@@ -168,8 +168,10 @@ def take(
             shutil.move(src, dst)  # replaces dst; on failure dst keeps the previous content
     except OSError as exc:  # a locked file on Windows, a full disk
         # the files moved before it are archived, the others keep their previous content;
-        # the next run rebuilds the state's list from the archive, and the cleanup after
-        # this Stop removes the placed copies
+        # the next run rebuilds the state's list from the archive. Every file the reviewer
+        # left is listed for the cleanup after this Stop (a new file off the pattern too;
+        # the ones moved already are gone from the tree and skipped)
+        state.placed_test_files = sorted(set(state.placed_test_files) | set(kept))
         raise Stop(
             EXIT_ERROR, "could not archive the reviewer's test file %s: %s" % (rel, exc)
         ) from exc
@@ -205,7 +207,8 @@ def remove_placed(
     """Delete the copies a round placed in `test_dir` and did not take back (the round stopped
     early); the archive keeps the previous round's content. Only the paths place_back
     recorded go (untracked ones; a file that was already there when place_back refused to
-    copy is not among them): an archived path an author's file occupies is never deleted.
+    copy is not among them), plus the reviewer's files a failed take could not move: an
+    archived path an author's file occupies is never deleted.
     Returns (removed, stuck), like discard_unfinished_tests."""
     tracked = _tracked(ctx)
     removed = []

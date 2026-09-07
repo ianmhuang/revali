@@ -306,26 +306,32 @@ class Interrupted(ArchiveCase):
 
     def test_a_file_the_archive_cannot_take_stops_the_run(self):
         # AC-5: an OSError while archiving (a file held open on Windows) is a Stop naming the
-        # path, not a traceback; the copies are removed, the next run picks up from the archive
+        # path, not a traceback; every file the reviewer left goes, a new one off the pattern
+        # too, and the next run picks up from the archive
         real_move = shutil.move
 
         def move(src, dst, *args, **kwargs):
-            if dst.replace("\\", "/").endswith(HELPER):
+            if dst.replace("\\", "/").endswith(HELPER):  # sorted first: nothing moved yet
                 raise PermissionError(13, "held open by an editor", dst)
             return real_move(src, dst, *args, **kwargs)
 
-        self.claude(approving(**{FILE: TEST_REVIEW_MUL + "\n# round 2\n", HELPER: "{}\n"}))
+        new = "tests/review_data/zero.json"
+        self.claude(
+            approving(**{FILE: TEST_REVIEW_MUL + "\n# round 2\n", HELPER: "{}\n", new: "[]\n"})
+        )
         with mock.patch("revali.testarchive.shutil.move", side_effect=move):
             code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertIn("could not archive the reviewer's test file %s" % HELPER, out)
         self.assertIn("held open by an editor", out)
         self.assertNotIn("Traceback", out)
-        self.assertEqual(self.status(), "")  # the copy left in test_dir was removed
+        self.assertIn("removed 3 working-tree copies", out)
+        self.assertEqual(self.status(), "")
+        self.assertFalse(self.exists(new))
+        self.assert_archive_untouched()
         state = self.state()
         self.assertFalse(state.reviewer_running)
         self.assertEqual(state.placed_test_files, [])
-        self.assertEqual(read(self.archived(HELPER)), "{}\n")
         out = self.run_ok(approving(**{FILE: TEST_REVIEW_MUL + "\n# round 3\n", HELPER: "{}\n"}))
         self.assertIn("archived 2 test file(s)", out)
         self.assertEqual(read(self.archived(FILE)), TEST_REVIEW_MUL + "\n# round 3\n")
