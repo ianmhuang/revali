@@ -8,8 +8,13 @@ AC-2 the files of a rebuilt directory and their content, CRLF converted, nothing
 written when there is nothing to put in it;
 AC-3 an existing directory is left alone and reported, a rerun is a no-op with exit 0;
 AC-4 --dry-run prints the same per-PR lines and writes nothing;
-AC-5 an empty root and a failing gh exit 1 with one line on stderr, earlier repositories kept;
+AC-5 an empty root, a failing or missing gh and a listing that reaches --limit exit 1 with one
+line on stderr, nothing written for that repository, earlier repositories kept;
 AC-6 the import list (stdlib and revali only); the wording of README and docs is documentation.
+
+Round 2 adds the --limit refusal, the missing gh, a history line that does not parse, the
+user's history_path, a project file that must not move the root, the suffixed directory
+`merge` writes for a taken name, and two comments for one review round.
 
 Black-box: the script runs as a subprocess with a private gh stub behind REVALI_GH_CMD (the
 seam the AC names) and the isolated REVALI_HOME RepoCase provides."""
@@ -186,13 +191,14 @@ class BackfillCase(RepoCase):
         with open(os.path.join(self.home, "config.toml"), "w", encoding="utf-8") as fh:
             fh.write(text)
 
-    def run_tool(self, *args):
+    def run_tool(self, *args, env=None):
         res = subprocess.run(
             [sys.executable, SCRIPT] + list(args),
             capture_output=True,
             text=True,
             encoding="utf-8",
             cwd=self.tmp,
+            env=env,
         )
         return res.returncode, res.stdout, res.stderr
 
@@ -380,9 +386,11 @@ class Rerun(BackfillCase):
     def test_an_archive_written_by_merge_survives(self):
         d = self.dest()
         os.makedirs(os.path.join(d, "logs"))
-        with open(os.path.join(d, "state.json"), "w", encoding="utf-8") as fh:
+        # newline="": the fixture is read back with newline="" below; text mode would turn it
+        # into CRLF on Windows and the assertion would blame the tool for the test's own file
+        with open(os.path.join(d, "state.json"), "w", encoding="utf-8", newline="") as fh:
             fh.write('{"stage": "merged", "pr_number": 7}\n')
-        with open(os.path.join(d, "logs", "revali.log"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(d, "logs", "revali.log"), "w", encoding="utf-8", newline="") as fh:
             fh.write("real\n")
         code, out, err = self.run_tool("me/proj")
         self.assertEqual(code, 0, err)
@@ -471,6 +479,156 @@ class Failures(BackfillCase):
         self.assertEqual(code, 1, out + err)
         self.assertIn("HTTP 404", err)
         self.assertFalse(os.path.exists(self.archive()))
+
+    def test_a_gh_that_is_not_installed_exits_1_with_one_line(self):
+        # no REVALI_GH_CMD and a PATH with nothing on it: resolve("gh") finds no executable
+        empty = os.path.join(self.tmp, "empty path")
+        os.makedirs(empty)
+        env = dict(os.environ)
+        env.pop("REVALI_GH_CMD", None)
+        env["PATH"] = empty
+        code, out, err = self.run_tool("me/proj", env=env)
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(len(err.strip().splitlines()), 1, err)
+        self.assertNotIn("Traceback", err)
+        self.assertIn("gh", err)
+        self.assertFalse(os.path.exists(self.archive()))
+
+    def test_a_listing_that_reaches_the_limit_is_refused_before_anything_is_written(self):
+        # gh returns the newest PRs first and stops at --limit; a full page may hide the oldest
+        # PRs, the ones a backfill is for. Three PRs in the fixture: --limit 3 fills the page.
+        self.prs(
+            {
+                "me/first": [pr(1, "a/b", BODY_PLAIN)],
+                "me/proj": self.default_prs(),
+                "me/after": [pr(2, "c/d", BODY_PLAIN)],
+            }
+        )
+        code, out, err = self.run_tool("me/first", "me/proj", "me/after", "--limit", "3")
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(len(err.strip().splitlines()), 1, err)
+        self.assertNotIn("Traceback", err)
+        self.assertIn("me/proj", err)
+        self.assertIn("limit", err.lower())
+        # the repository before it kept what it got; the failing one and the one after got nothing
+        self.assertTrue(os.path.isdir(os.path.join(self.archive(), "me__first", "1-a__b")))
+        self.assertEqual(os.listdir(self.archive()), ["me__first"])
+        # one more than the page holds: the same listing is complete and accepted
+        code, out, err = self.run_tool("me/proj", "--limit", "4")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.isdir(self.dest()), out)
+        self.assertTrue(os.path.isdir(self.dest("9-fix__plain")), out)
+
+    def test_the_default_limit_is_not_reached_by_a_small_listing(self):
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("limit", err.lower())
+
+
+class History(BackfillCase):
+    """AC-2 and AC-5: the history file is read the way revali reads it, and found where
+    revali would look for it."""
+
+    def test_a_line_that_does_not_parse_is_dropped_without_a_traceback(self):
+        path = os.path.join(self.home, "history.jsonl")
+        with open(path, "a", encoding="utf-8", newline="") as fh:
+            fh.write('{"repo": "me/proj", "branch": "feature/mul", "stage": "merg\n')
+            fh.write(json.dumps({"repo": "me/proj", "branch": "feature/mul", "rounds": 3}) + "\n")
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("Traceback", err)
+        lines = read(os.path.join(self.dest(), "history.jsonl")).splitlines()
+        rows = [json.loads(ln) for ln in lines]
+        self.assertEqual([r["rounds"] for r in rows], [1, 2, 3])
+        # the other directories of the repository were written too
+        self.assertTrue(os.path.isdir(self.dest("9-fix__plain")))
+
+    def test_the_users_history_path_is_read(self):
+        moved = os.path.join(self.tmp, "runs elsewhere.jsonl")
+        os.replace(os.path.join(self.home, "history.jsonl"), moved)
+        self.user_config("history_path = %s\n" % json.dumps(moved.replace("\\", "/")))
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        lines = read(os.path.join(self.dest(), "history.jsonl")).splitlines()
+        self.assertEqual([json.loads(ln)["rounds"] for ln in lines], [1, 2])
+
+    def test_the_users_history_file_name_is_read(self):
+        os.replace(
+            os.path.join(self.home, "history.jsonl"), os.path.join(self.home, "renamed.jsonl")
+        )
+        self.user_config('[paths]\nhistory_file = "renamed.jsonl"\n')
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        self.assertIn("history.jsonl", files_under(self.dest()))
+        lines = read(os.path.join(self.dest(), "history.jsonl")).splitlines()
+        self.assertEqual([json.loads(ln)["rounds"] for ln in lines], [1, 2])
+
+
+class RootResolution(BackfillCase):
+    """AC-1: defaults, then the user file; a project file has no say."""
+
+    def test_a_revali_toml_in_the_working_directory_does_not_move_the_root(self):
+        with open(os.path.join(self.tmp, "revali.toml"), "w", encoding="utf-8", newline="") as fh:
+            fh.write('[paths]\narchive_dir = "from-project"\n')
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.isdir(self.dest()), out)
+        self.assertFalse(os.path.exists(os.path.join(self.home, "from-project")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "from-project")))
+
+    def test_a_tilde_in_the_user_value_is_expanded(self):
+        fake_home = os.path.join(self.tmp, "fake home")
+        os.makedirs(fake_home)
+        env = dict(os.environ)
+        env["HOME"] = fake_home
+        env["USERPROFILE"] = fake_home
+        self.user_config('[paths]\narchive_dir = "~/kept"\n')
+        code, out, err = self.run_tool("me/proj", env=env)
+        self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.isdir(self.dest(root=os.path.join(fake_home, "kept"))), out)
+        self.assertFalse(os.path.isdir(self.archive()))
+
+
+class Suffixed(BackfillCase):
+    """AC-3: the directory `merge` wrote for the same PR, under the `-<YYYYMMDD-HHMMSS>` suffix
+    it adds to a taken name, is the archive of that PR and is not rebuilt beside."""
+
+    def test_a_suffixed_archive_written_by_merge_counts_as_existing(self):
+        suffixed = self.dest() + "-20260907-120000"
+        os.makedirs(suffixed)
+        with open(os.path.join(suffixed, "state.json"), "w", encoding="utf-8", newline="") as fh:
+            fh.write("{}\n")
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        self.assertFalse(os.path.exists(self.dest()), out)
+        self.assertEqual(os.listdir(suffixed), ["state.json"])
+        lines = self.pr_lines(out, 7)
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("skipped", lines[0])
+        self.assertTrue(os.path.isdir(self.dest("9-fix__plain")))
+
+    def test_another_prs_directory_with_the_same_prefix_digits_is_not_confused(self):
+        # PR 70's directory starts with "7" but is not PR 7's
+        os.makedirs(self.dest("70-feature__mul"))
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.isdir(self.dest()), out)
+
+
+class DuplicateRound(BackfillCase):
+    """AC-2: two comments for one round (a retried post) still give one review-<n>.md."""
+
+    def test_the_later_comment_is_kept_and_the_run_says_so(self):
+        retry = REVIEW_1.replace("The product is off by one.", "Posted again after a timeout.")
+        self.prs({"me/proj": [pr(7, "feature/mul", BODY_CRLF, [REVIEW_1, CHATTER, retry])]})
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("Traceback", err)
+        d = self.dest()
+        expected = ["README.md", "change.md", "comment-1.md", "history.jsonl", "review-1.md"]
+        self.assertEqual(files_under(d), expected)
+        self.assertEqual(read(os.path.join(d, "review-1.md")), retry)
+        self.assertIn("review-1.md", "".join(self.pr_lines(out, 7)))
 
 
 class Dependencies(unittest.TestCase):
