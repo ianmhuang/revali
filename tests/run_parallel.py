@@ -4,7 +4,7 @@
 
 Collects the same tests `python -m unittest discover -s tests -t .` collects (or the
 `names`, resolved like `python -m unittest <names>`), distributes whole test classes over
-N worker processes (default: the CPU count) and prints one unittest-style summary:
+N worker processes and prints one unittest-style summary:
 
     Ran 1008 tests in 149.1s
     OK (skipped=1)
@@ -16,8 +16,11 @@ summary) reprinted. A worker that ends without writing its result (crash, kill) 
 reported as one error carrying its exit code, and its tests still count in `Ran N`.
 Exit 0 when everything passed, 1 otherwise. Standard library only.
 
-`--list` prints the collected test ids and exits; `-s DIR -t DIR` change the discovery
-start and top-level directories (the defaults are this repository's `tests/` and root).
+N is `-j`, else the environment variable RUN_PARALLEL_JOBS (a machine whose disk, not
+its CPUs, bounds the suite sets it once instead of editing the committed `test` line),
+else the CPU count. `--list` prints the collected test ids and exits; `-s DIR -t DIR`
+change the discovery start and top-level directories (the defaults are this repository's
+`tests/` and root).
 """
 
 import argparse
@@ -34,6 +37,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
+JOBS_ENV = "RUN_PARALLEL_JOBS"
 COUNT_KEYS = ("failures", "errors", "skipped", "expected failures", "unexpected successes")
 FAILING_KEYS = ("failures", "errors", "unexpected successes")
 
@@ -149,9 +153,28 @@ def _utf8_stdout():
     return stream
 
 
+def default_jobs(environ=os.environ) -> int:
+    """RUN_PARALLEL_JOBS when set, else the CPU count. Only plain decimal digits are read
+    (`int()` would also take `1_6` or `+8`); anything else, or 0, is refused: silently falling
+    back would hide a typo behind a full run."""
+    raw = environ.get(JOBS_ENV)
+    if raw is None or not raw.strip():
+        return os.cpu_count() or 1
+    digits = raw.strip()
+    if not (digits.isascii() and digits.isdigit()) or int(digits) < 1:
+        raise SystemExit("%s=%r: expected a whole number of 1 or more" % (JOBS_ENV, raw))
+    return int(digits)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
-    parser.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 1)
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=None,
+        help="worker processes (default: %s, else the CPU count)" % JOBS_ENV,
+    )
     parser.add_argument("-s", "--start-dir", default=HERE)
     parser.add_argument("-t", "--top-level-dir", default=ROOT)
     parser.add_argument("--list", action="store_true", help="print the test ids and exit")
@@ -161,6 +184,8 @@ def main(argv=None) -> int:
     top = os.path.abspath(args.top_level_dir)
     if args.worker:
         return run_worker_mode(args.worker, top)
+    if args.jobs is None:
+        args.jobs = default_jobs()
 
     started = time.monotonic()
     tests = collect(os.path.abspath(args.start_dir), top, args.names)

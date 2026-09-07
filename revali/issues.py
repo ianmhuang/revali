@@ -10,7 +10,7 @@ import os
 import re
 import string
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 from revali import VERSION, gitops
 from revali.preflight import Context
@@ -71,23 +71,34 @@ def title(tests: List[str], base: str) -> str:
 def already_open(state: State, tests: List[str]) -> List[dict]:
     """The issues of this branch that together name every one of `tests`, newest first: the
     newest single issue naming them all when there is one, else the newest issues whose union
-    does (each contributing at least one test not named by a newer one), else nothing. The
-    greedy pass can keep an issue an older one makes redundant (#42 names c, #41 a, #40 a and
-    b, failures a b c -> #41 stays); the note lists one issue too many then, nothing worse."""
+    does, else nothing. The union is built newest first (an issue joins when it names a test no
+    newer issue does) and then thinned oldest first: an issue whose contribution the older
+    issues kept already name is dropped (#42 names c, #41 a, #40 a and b, failures a b c ->
+    #42 and #40), so each listed issue contributes a test no other listed issue names (their
+    full test sets may still overlap)."""
     wanted = set(tests)
     for issue in reversed(state.issues):
         if wanted <= set(issue.get("tests", [])):
             return [issue]
-    out: List[dict] = []
+    picked: List[Tuple[dict, Set[str]]] = []  # newest first, with what each one added
     left = set(wanted)
     for issue in reversed(state.issues):
         named = left & set(issue.get("tests", []))
         if named:
-            out.append(issue)
+            picked.append((issue, named))
             left -= named
             if not left:
-                return out
-    return []
+                break
+    if left:
+        return []
+    kept: List[dict] = []
+    covered: Set[str] = set()
+    for issue, named in reversed(picked):
+        if not named <= covered:
+            kept.append(issue)
+            covered |= set(issue.get("tests", []))
+    kept.reverse()
+    return kept
 
 
 def _covers_for(test: str, test_files: List[str], reviewer_tests: List[dict]) -> List[str]:

@@ -172,7 +172,8 @@ class AlreadyOpenUnit(unittest.TestCase):
         self.assertEqual(self.numbers([self.b]), [40])
 
     def test_union_of_three(self):
-        self.assertEqual(self.numbers([self.a, self.b, self.c]), [42, 41, 40])
+        # #42 joins first for a, #41 for c, #40 for b; #40 also names a, so #42 is dropped
+        self.assertEqual(self.numbers([self.a, self.b, self.c]), [41, 40])
 
     def test_uncovered_test_means_nothing(self):
         self.assertEqual(self.numbers([self.a, self.d]), [])  # AC-4: open a new issue
