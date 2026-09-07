@@ -74,7 +74,8 @@ def already_open(state: State, tests: List[str]) -> List[dict]:
     does, else nothing. The union is built newest first (an issue joins when it names a test no
     newer issue does) and then thinned oldest first: an issue whose contribution the older
     issues kept already name is dropped (#42 names c, #41 a, #40 a and b, failures a b c ->
-    #42 and #40), so no issue in the result is named for tests the others name."""
+    #42 and #40), so each listed issue contributes a test no other listed issue names (their
+    full test sets may still overlap)."""
     wanted = set(tests)
     for issue in reversed(state.issues):
         if wanted <= set(issue.get("tests", [])):

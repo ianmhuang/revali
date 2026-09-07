@@ -207,7 +207,7 @@ class RunParallel(unittest.TestCase):
         self.assertIn("6 tests in 2 worker(s)", out)
         code, out = t.run(env={"RUN_PARALLEL_JOBS": " "})  # blank: as if unset
         self.assertIn("6 tests in %d worker(s)" % min(3, os.cpu_count() or 1), out)
-        for bad in ("0", "-2", "eight", "2.5"):
+        for bad in ("0", "-2", "eight", "2.5", "1_6", "+8", "\u0662"):  # not plain digits
             code, out = t.run(env={"RUN_PARALLEL_JOBS": bad})
             self.assertEqual(code, 1, bad)
             self.assertIn("RUN_PARALLEL_JOBS=", out)

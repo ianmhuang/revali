@@ -154,23 +154,27 @@ def _utf8_stdout():
 
 
 def default_jobs(environ=os.environ) -> int:
-    """RUN_PARALLEL_JOBS when set, else the CPU count. A value that is not a whole number
-    of 1 or more is refused: silently falling back would hide a typo behind a full run."""
+    """RUN_PARALLEL_JOBS when set, else the CPU count. Only plain decimal digits are read
+    (`int()` would also take `1_6` or `+8`); anything else, or 0, is refused: silently falling
+    back would hide a typo behind a full run."""
     raw = environ.get(JOBS_ENV)
     if raw is None or not raw.strip():
         return os.cpu_count() or 1
-    try:
-        jobs = int(raw)
-    except ValueError:
-        jobs = 0
-    if jobs < 1:
+    digits = raw.strip()
+    if not (digits.isascii() and digits.isdigit()) or int(digits) < 1:
         raise SystemExit("%s=%r: expected a whole number of 1 or more" % (JOBS_ENV, raw))
-    return jobs
+    return int(digits)
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
-    parser.add_argument("-j", "--jobs", type=int, default=None, help="workers (see JOBS_ENV)")
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=None,
+        help="worker processes (default: %s, else the CPU count)" % JOBS_ENV,
+    )
     parser.add_argument("-s", "--start-dir", default=HERE)
     parser.add_argument("-t", "--top-level-dir", default=ROOT)
     parser.add_argument("--list", action="store_true", help="print the test ids and exit")
