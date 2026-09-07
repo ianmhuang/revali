@@ -270,6 +270,82 @@ class Failures(BackfillCase):
         self.assertFalse(os.path.isdir(os.path.join(self.home, "archive", "me__gone")))
 
 
+class RoundOneFindings(BackfillCase):
+    def test_a_listing_that_reaches_the_limit_is_refused(self):
+        # AC-5 (round 1 F1): gh stops at --limit, newest first; the oldest PRs may be missing
+        code, out, err = self.run_tool("me/proj", "--limit", "3")
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(len(err.strip().splitlines()), 1, err)
+        self.assertIn("--limit", err)
+        self.assertFalse(os.path.exists(os.path.join(self.home, "archive")))
+        code, out, err = self.run_tool("me/proj", "--limit", "4")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.isdir(self.dest()))
+
+    def test_a_history_line_that_does_not_parse_is_dropped(self):
+        # AC-2, AC-5 (round 1 F2): read the way revali reads it, no traceback
+        path = os.path.join(self.home, "history.jsonl")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write('{"repo": "me/proj", "branch": "feature/mul", "stage": "merg')
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        history = read(os.path.join(self.dest(), "history.jsonl")).splitlines()
+        self.assertEqual([json.loads(h)["rounds"] for h in history], [1, 2])
+
+    def test_the_user_history_path_is_honoured(self):
+        # AC-2 (round 1 F4): history_path from the user file, as revali resolves it
+        moved = os.path.join(self.tmp, "runs.jsonl")
+        os.replace(os.path.join(self.home, "history.jsonl"), moved)
+        self.user_config("history_path = %s\n" % json.dumps(moved.replace("\\", "/")))
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.isfile(os.path.join(self.dest(), "history.jsonl")), out)
+
+    def test_the_root_ignores_the_revali_checkouts_project_file(self):
+        # AC-1 (round 1 F3): defaults and the user file only; module-level check, the
+        # checkout's revali.toml is not edited by a test
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        try:
+            import backfill_archive
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(backfill_archive.default_root(None), os.path.join(self.home, "archive"))
+        self.user_config('[paths]\narchive_dir = "kept"\n')
+        from revali.config import load_user_config
+
+        self.assertEqual(
+            backfill_archive.default_root(load_user_config()), os.path.join(self.home, "kept")
+        )
+
+    def test_a_suffixed_archive_counts_as_existing(self):
+        # follow-up: merge wrote <pr>-<branch>-<timestamp> for a taken name
+        suffixed = self.dest() + "-20260907-120000"
+        os.makedirs(suffixed)
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        self.assertFalse(os.path.exists(self.dest()))
+        self.assertIn("#1 exists, skipped: %s" % suffixed, out)
+
+    def test_two_comments_for_one_round_are_reported(self):
+        # follow-up: a retried post; the later comment wins and the output says so
+        self.prs(
+            {
+                "me/proj": [
+                    pr(
+                        1,
+                        "feature/mul",
+                        BODY,
+                        [FULL_REVIEW, SUMMARY_REVIEW.replace("round 2", "round 1")],
+                    )
+                ]
+            }
+        )
+        code, out, err = self.run_tool("me/proj")
+        self.assertEqual(code, 0, err)
+        self.assertIn("#1: two comments for review-1.md; the later one kept", out)
+        self.assertIn("# Review round 1: APPROVE", read(os.path.join(self.dest(), "review-1.md")))
+
+
 class DependenciesAndDocs(unittest.TestCase):
     def test_the_script_imports_only_the_standard_library_and_revali(self):
         # AC-6
