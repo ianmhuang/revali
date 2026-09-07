@@ -49,7 +49,8 @@ def archived_files(rdir: str) -> List[str]:
 
 def _prune(path: str, stop: str) -> None:
     """Remove the empty directories from `path` up to (not including) `stop`."""
-    while path != stop and path.startswith(stop):
+    path, stop = os.path.normpath(path), os.path.normpath(stop)
+    while path != stop and path.startswith(stop + os.sep):
         try:
             os.rmdir(path)
         except OSError:
@@ -75,15 +76,17 @@ def rebuild(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> Lis
     """The state's list of the reviewer's files, from the archive: every archived file under
     `test_dir` that HEAD does not track is the reviewer's, whatever the state remembered
     (so `revali reset` loses none of them); a path HEAD tracks is the author's and leaves
-    the archive and the state. Runs on every run; logs only what changed."""
+    the archive and the state (a dry run only says so: it deletes nothing). Runs on every
+    run; logs only what changed."""
     from revali.review import under_test_dir
 
     test_dir = ctx.cfg.project.test_dir
     tracked = _tracked(ctx)
     found = [p for p in archived_files(rdir) if under_test_dir(p, test_dir)]
     authors = [p for p in found if p in tracked]
-    for rel in authors:
-        _remove_archived(rdir, rel)
+    if not ctx.dry_run:
+        for rel in authors:
+            _remove_archived(rdir, rel)
     mine = [p for p in found if p not in tracked]
     added = [p for p in mine if p not in state.test_files]
     dropped = [p for p in state.test_files if p not in mine]
@@ -93,8 +96,13 @@ def rebuild(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> Lis
         log.stage(
             "run",
             "%d archived test file(s) are tracked in HEAD now, so they are the author's: "
-            "removed from %s and forgotten, existing files the reviewer must not modify: %s"
-            % (len(authors), where, ", ".join(authors)),
+            "%s %s and forgotten, existing files the reviewer must not modify: %s"
+            % (
+                len(authors),
+                "dry run: would be removed from" if ctx.dry_run else "removed from",
+                where,
+                ", ".join(authors),
+            ),
         )
     if log and (added or dropped):
         parts = []
@@ -113,13 +121,13 @@ def rebuild(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> Lis
 def place_back(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> List[str]:
     """Copy the archived files into `test_dir` for the round that starts. A file that is
     already there is a copy the previous cleanup could not delete (it is in the tolerated
-    list) and is overwritten; any other occupant ends the run."""
-    placed = []
+    list) and is overwritten; any other occupant (a gitignored file, since preflight refused
+    an untracked one) ends the run before anything is copied, so the cleanup that follows
+    has nothing to delete. The paths go into the state (saved) before the copies are
+    written: a round killed at any later point leaves exactly these for remove_placed."""
     root = archive_dir(rdir)
-    for rel in state.test_files:
-        src = os.path.join(root, rel)
-        if not os.path.isfile(src):
-            continue
+    placed = [rel for rel in state.test_files if os.path.isfile(os.path.join(root, rel))]
+    for rel in placed:
         dst = os.path.join(ctx.repo_root, rel)
         if os.path.exists(dst) and rel not in state.pending_test_files:
             raise Stop(
@@ -127,9 +135,13 @@ def place_back(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
                 "cannot place the archived test file back: %s already exists in the working "
                 "tree" % rel,
             )
+    if placed:
+        state.placed_test_files = list(placed)
+        state.save(rdir)
+    for rel in placed:
+        dst = os.path.join(ctx.repo_root, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        shutil.copyfile(src, dst)
-        placed.append(rel)
+        shutil.copyfile(os.path.join(root, rel), dst)
     if placed and log:
         log.stage(
             "review",
@@ -157,9 +169,11 @@ def take(
     gone = [p for p in archived_files(rdir) if p not in kept]
     for rel in gone:
         _remove_archived(rdir, rel)
-    for rel in kept:  # the directories the reviewer made are empty now
-        _prune(os.path.dirname(os.path.join(ctx.repo_root, rel)), ctx.repo_root)
+    stop = os.path.join(ctx.repo_root, ctx.cfg.project.test_dir)  # test_dir itself stays
+    for rel in kept:  # the directories the reviewer made under test_dir are empty now
+        _prune(os.path.dirname(os.path.join(ctx.repo_root, rel)), stop)
     state.test_files = sorted(kept)
+    state.placed_test_files = []
     if log:
         where = os.path.relpath(root, ctx.repo_root).replace("\\", "/")
         log.stage(
@@ -182,13 +196,15 @@ def remove_placed(
     ctx: Context, state: State, log: Optional[RunLog], stage: str
 ) -> Tuple[List[str], List[str]]:
     """Delete the copies a round placed in `test_dir` and did not take back (the round stopped
-    early); the archive keeps the previous round's content. Only untracked files on the
-    state's list go. Returns (removed, stuck), like discard_unfinished_tests."""
+    early); the archive keeps the previous round's content. Only the paths place_back
+    recorded go (untracked ones; a file that was already there when place_back refused to
+    copy is not among them): an archived path an author's file occupies is never deleted.
+    Returns (removed, stuck), like discard_unfinished_tests."""
     tracked = _tracked(ctx)
     removed = []
     stuck = []
     reasons = []
-    for rel in state.test_files:
+    for rel in state.placed_test_files:
         if rel in tracked:
             continue
         full = os.path.join(ctx.repo_root, rel)
@@ -200,6 +216,7 @@ def remove_placed(
         except OSError as exc:
             stuck.append(rel)
             reasons.append("%s (%s)" % (rel, exc))
+    state.placed_test_files = []
     if removed and log:
         log.stage(
             stage,

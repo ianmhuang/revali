@@ -43,6 +43,7 @@ class InterruptedRoundCase(ArchiveModeCase):
         self.write(SECOND, SECOND_TEXT)
         state = self.state()
         state.reviewer_running = True
+        state.placed_test_files = [DATA, FILE]  # what place_back records before it copies
         state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
 
 

@@ -525,9 +525,11 @@ def discard_unfinished_tests(
 ) -> Tuple[List[str], List[str]]:
     """Delete untracked files matching test_file_pattern under test_dir after a review round
     stopped before its tests were committed: they are half-written and would make the next
-    run refuse a dirty tree. This is the only deletion inside test_dir revali ever performs.
-    `left_by` names the culprit in the log line ("the reviewer", "the interrupted run");
-    `stage` is the log label, `run` when the cleanup happens before preflight's tree check.
+    run refuse a dirty tree. This and testarchive.remove_placed (the copies of the archived
+    files a round placed there, in archive mode) are the only deletions inside test_dir
+    revali ever performs. `left_by` names the culprit in the log line ("the reviewer", "the
+    interrupted run"); `stage` is the log label, `run` when the cleanup happens before
+    preflight's tree check.
     `only` restricts the sweep to those paths (the pending list, when no session was
     interrupted and the reviewer's files are known exactly); None sweeps the whole pattern.
     Returns (removed, stuck): the paths deleted, and those the OS refused to delete (an open

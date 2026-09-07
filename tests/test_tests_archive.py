@@ -187,6 +187,19 @@ class FirstRound(ArchiveCase):
         self.assertNotIn("tests landing", out)
         self.assertEqual(self.remote_tip(), head)  # the branch was pushed, nothing on top
 
+    def test_a_test_dir_with_no_tracked_files_survives_the_round(self):
+        # AC-2: the reviewer's files move out, the directory the config names stays
+        text = self.read("revali.toml").replace('test_dir = "tests"', 'test_dir = "acceptance"')
+        self.write("revali.toml", text)
+        self.commit_all("tests in acceptance/")
+        path = "acceptance/test_review_mul.py"
+        self.run_ok(approving(**{path: TEST_REVIEW_MUL}))
+        self.assertTrue(os.path.isdir(os.path.join(self.repo, "acceptance")))
+        self.assertFalse(self.exists(path))
+        self.assertEqual(self.status(), "")
+        self.assertEqual(archived_files(self.rdir()), [path])
+        self.assertEqual(read(self.archived(path)), TEST_REVIEW_MUL)
+
     def test_commit_mode_is_unchanged(self):
         # AC-1 (default behaviour), AC-8
         self.switch_mode("commit")
@@ -295,6 +308,7 @@ class Interrupted(ArchiveCase):
         self.write(HELPER, "{}\n")
         state = self.state()
         state.reviewer_running = True  # what a session killed mid-round leaves behind
+        state.placed_test_files = BOTH  # place_back records them before it copies
         state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
         out = self.run_ok(approving(**{FILE: TEST_REVIEW_MUL + "\n# round 2\n"}))
         self.assertIn("removed 2 working-tree copies", out)
@@ -308,6 +322,7 @@ class Interrupted(ArchiveCase):
         self.write(HELPER, "{}\n")
         state = self.state()
         state.reviewer_running = True
+        state.placed_test_files = BOTH
         state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
         code, out = run_cli(["reset"])
         self.assertEqual(code, EXIT_OK, out)
@@ -320,6 +335,24 @@ class Interrupted(ArchiveCase):
         self.assertIn("recovered 2: %s" % ", ".join(BOTH), out)
         self.assertIn("placed 2 archived test file(s) back", out)
         self.assertEqual(self.state().test_files, BOTH)
+
+    def test_an_occupied_archived_path_stops_the_run_and_keeps_the_occupant(self):
+        # AC-5: the only occupant preflight lets through is a gitignored file; place_back
+        # refuses before copying anything, and the cleanup that follows deletes nothing
+        self.write(".gitignore", "tests/review_data/\n")
+        self.commit_all("ignore the data directory")
+        self.write(HELPER, "the author's data\n")
+        self.claude(approving(**{FILE: TEST_REVIEW_MUL}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("%s already exists in the working tree" % HELPER, out)
+        self.assertNotIn("removed", out)
+        self.assertEqual(self.read(HELPER), "the author's data\n")
+        self.assertFalse(self.exists(FILE))  # nothing was placed
+        self.assert_archive_untouched()
+        state = self.state()
+        self.assertEqual(state.placed_test_files, [])
+        self.assertFalse(state.reviewer_running)
 
 
 class Ownership(ArchiveCase):
@@ -339,6 +372,24 @@ class Ownership(ArchiveCase):
         prompt = self.fake_calls("claude")[-1]["prompt"]
         self.assertIn("not yours", prompt)  # listed as an existing file
         self.assertEqual(self.read(FILE), "# the author's own file under the reviewer's name\n")
+
+    def test_a_dry_run_removes_nothing_from_the_archive(self):
+        # AC-6 on `run --dry-run`: the taken-over path is reported, the archive is not touched
+        self.claude(requesting_changes(**{FILE: TEST_REVIEW_MUL, HELPER: "{}\n"}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.write(HELPER, "the author's data\n")
+        self.write("src/calc.py", self.read("src/calc.py") + "\n# negatives handled\n")
+        self.commit_all("author takes the path")
+        code, out = run_cli(["run", "--foreground", "--dry-run"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("dry run: would be removed from", out)
+        self.assertIn(HELPER, out)
+        self.assertEqual(archived_files(self.rdir()), BOTH)
+        out = self.run_ok(approving(**{FILE: TEST_REVIEW_MUL}))
+        self.assertIn("removed from", out)
+        self.assertEqual(archived_files(self.rdir()), [FILE])
+        self.assertEqual(self.state().test_files, [FILE])
 
     def test_the_reviewer_may_not_modify_the_authors_file(self):
         # AC-6: the protected-file rule applies to the taken-over path
