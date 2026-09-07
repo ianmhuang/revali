@@ -10,7 +10,11 @@ trailer commits still have files. `docs/side-effects.md` states the rule.
 
 Round 2: replacing the content in a single commit is a modification to git and keeps the
 owner, as the docs now say; a state that kept its files but lost its commits gets the
-emptied commits on a line of their own; the newest add is looked up once per path."""
+emptied commits on a line of their own; the newest add is looked up once per path.
+
+Round 3: the "found ... but none of their test files" line lists only the trailer commits
+new to the state, whether or not the state kept its files; a dropped path that no commit in
+base..HEAD added gets a line of its own that does not speak of a re-creation."""
 
 import json
 import os
@@ -48,6 +52,16 @@ def second_file_entry():
 
 def head(repo):
     return git(["rev-parse", "HEAD"], repo).strip()
+
+
+def edit_state(rdir, **fields):
+    """Rewrite fields of state.json in place, as a hand edit or an older revali would."""
+    path = State.path(rdir)
+    with open(path, "r", encoding="utf-8", newline="") as fh:
+        data = json.load(fh)
+    data.update(fields)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(data, fh)
 
 
 def log_lines(case):
@@ -267,6 +281,92 @@ class EmptiedTrailerCommitIsNamed(ro.RewriteCase):
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertNotIn("none of", out)
+        self.assertNotIn("recovered", out)
+
+    def test_with_every_file_gone_the_line_lists_only_the_new_commits(self):  # round 3
+        """Both files deleted by the author, no rewrite, the state lost one of its two commits:
+        nothing recovered, and the "none of" line names the commit new to the state, not the
+        one the state already knew."""
+        first, second = self.two_trailer_commits()
+        git(["rm", "-q", FILE, SECOND], self.repo)
+        git(["commit", "-q", "-m", "drop both tests"], self.repo)
+        edit_state(self.rdir(), test_commits=[first])
+        self.claude(claude_entry(approve_response()))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("recovered", out)
+        self.assertNotIn("starts over", out)
+        naming = [ln for ln in out.splitlines() if "none of their test files" in ln]
+        self.assertEqual(len(naming), 1, out)
+        self.assertIn("found 1 earlier", naming[0])
+        self.assertIn(second[:10], naming[0])
+        self.assertNotIn(first[:10], naming[0])
+        state = State.load(self.rdir())
+        self.assertEqual(state.test_commits[:2], [first, second])
+
+    def test_after_a_rewrite_with_every_file_gone_all_commits_are_new(self):  # round 3
+        """The cleared state knows no commit, so the line names both: the count and the list
+        agree with each other."""
+        self.two_trailer_commits()
+        git(["rm", "-q", FILE, SECOND], self.repo)
+        git(["commit", "-q", "-m", "drop both tests"], self.repo)
+        self.move_main()
+        git(["rebase", "-q", "main"], self.repo)
+        rebased = ro.trailer_commits(self.repo)
+        self.assertEqual(len(rebased), 2)
+        self.claude(claude_entry(approve_response()))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("starts over", out)
+        self.assertNotIn("recovered", out)
+        naming = [ln for ln in out.splitlines() if "none of their test files" in ln]
+        self.assertEqual(len(naming), 1, out)
+        self.assertIn("found 2 earlier", naming[0])
+        for sha in rebased:
+            self.assertIn(sha[:10], naming[0])
+        self.assertEqual(State.load(self.rdir()).test_commits[:2], rebased)
+
+
+class PathNeverAddedOnTheBranch(ro.RewriteCase):
+    def test_a_state_entry_older_than_the_base_gets_its_own_line(self):  # round 3
+        """A trailer commit modified tests/test_calc.py, which the base already had, and the
+        state lists it as the reviewer's (a hand edit): no commit in base..HEAD added it, so it
+        is dropped with a line that names the base and does not speak of a re-creation."""
+        self.first_round()
+        old = "tests/test_calc.py"
+        self.write(old, self.read(old) + "\n# touched under a trailer\n")
+        git(["add", "-A"], self.repo)
+        git(["commit", "-q", "-m", "touch an old test", "-m", "Revali-Round: 7"], self.repo)
+        self.assertEqual(gitops.last_add_commit("origin/main", "HEAD", old, self.repo), "")
+        edit_state(self.rdir(), test_files=State.load(self.rdir()).test_files + [old])
+        original = self.read(old)
+        entry = claude_entry(approve_response())
+        entry["write_files"][old] = original + "# reviewer edit\n"
+        self.claude(entry, claude_entry(approve_response()))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("re-created", out)
+        self.assertNotIn("re-added", out)
+        own = [ln for ln in out.splitlines() if "not added by any commit" in ln]
+        self.assertEqual(len(own), 1, out)
+        self.assertIn(old, own[0])
+        self.assertIn("between origin/main and HEAD", own[0])  # the fixture has a remote
+        self.assertNotIn(FILE, own[0])
+        # dropped from the state, so no longer listed as the reviewer's own in the prompt;
+        # the edit restored from HEAD and the reviewer sent back once
+        self.assertEqual(State.load(self.rdir()).test_files, [FILE])
+        ps = ro.prompts(self)
+        self.assertEqual(len(ps), 2, "the reviewer edited a file that is not its own")
+        self.assertNotIn(old, ro.section(ps[0], ro.EARLIER))
+        self.assertIn(FILE, ro.section(ps[0], ro.EARLIER))
+        self.assertIn(old, ps[1].split("Corrections required", 1)[1])
+        self.assertEqual(self.read(old), original)
+        # the next run has nothing to drop and stays quiet
+        self.fix_and_commit("once more")
+        self.claude(claude_entry(approve_response(), write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("not added by any commit", out)
         self.assertNotIn("recovered", out)
 
 
