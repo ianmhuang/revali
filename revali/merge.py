@@ -308,7 +308,7 @@ def _worktree_follow_up(root: str, branch: str, base: str, elsewhere: str, log: 
 def merge_summary(state: State, base: str) -> str:
     return (
         "MERGED: PR #%d into %s\n  rounds: %d, fix cycles: %d, validations: %d, cost: $%.2f\n"
-        "  tests landed: %s"
+        "  %s: %s"
         % (
             state.pr_number,
             base,
@@ -316,6 +316,7 @@ def merge_summary(state: State, base: str) -> str:
             state.fixes,
             len(state.validations),
             state.cost_usd,
+            "tests archived" if state.tests_mode == "archive" else "tests landed",
             ", ".join(state.test_files) or "none",
         )
     )

@@ -21,6 +21,7 @@ from revali.runners import (
     tail,
 )
 from revali.state import RunLog, State, now_iso, read_text, safe_branch, write_text
+from revali.testarchive import archive_mode, read_archived, sandbox_files
 from revali.timing import fmt_duration
 
 PASS, FAIL = "PASS", "FAIL"
@@ -223,7 +224,7 @@ def run_validation(
                 ctx.repo_root,
                 "HEAD",
                 steps,
-                {},
+                sandbox_files(ctx, state, rdir),  # archive mode: the files are not in HEAD
                 ctx.logs,
                 label,
                 log.detail if log else None,
@@ -294,9 +295,10 @@ def rerun_on_base(
     ctx: Context, state: State, failed, round_no: int, log: Optional[RunLog]
 ) -> BaseRerun:
     """After the reviewer's tests failed on the branch, run the same files (taken from the
-    working tree, so they exist on base too) with `setup`, `build`, `new_test` on the base
-    tip preflight resolved, under the label `base-r<round>`. Evidence for the diagnosis:
-    whatever goes wrong here is a reason on the result, never a Stop."""
+    working tree, or from the archive in archive mode, so they exist on base too) with
+    `setup`, `build`, `new_test` on the base tip preflight resolved, under the label
+    `base-r<round>`. Evidence for the diagnosis: whatever goes wrong here is a reason on the
+    result, never a Stop."""
     out = BaseRerun(sha=ctx.base_sha)
     if failed.name != "new_test":
         out.reason = SUITE_FAILED_REASON
@@ -305,11 +307,14 @@ def rerun_on_base(
     extra = {}
     if not out.reason:
         try:
-            extra = {
-                rel: read_text(os.path.join(ctx.repo_root, rel))
-                for rel in state.test_files
-                if os.path.isfile(os.path.join(ctx.repo_root, rel))
-            }
+            if archive_mode(ctx, state):
+                extra = read_archived(ctx.rdir, state.test_files)
+            else:
+                extra = {
+                    rel: read_text(os.path.join(ctx.repo_root, rel))
+                    for rel in state.test_files
+                    if os.path.isfile(os.path.join(ctx.repo_root, rel))
+                }
         except (OSError, UnicodeDecodeError) as exc:
             out.reason = "could not read a reviewer test file: %s" % exc
         if not extra and not out.reason:

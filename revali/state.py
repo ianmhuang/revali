@@ -64,6 +64,8 @@ class State:
     )  # per validation run: result, failed_step, cause
     test_commits: List[str] = field(default_factory=list)
     test_files: List[str] = field(default_factory=list)
+    tests_mode: str = ""  # [review] tests the rounds ran with: "commit" | "archive"; "" (a state
+    # from before the key) counts as commit (STATE_VERSION 6)
     baseline_sha: str = ""  # the commit the baseline suite passed on (STATE_VERSION 4)
     issues: List[dict] = field(
         default_factory=list
@@ -85,6 +87,10 @@ class State:
     )  # left uncommitted by a NEEDS_INFO round;
     # the clean-tree check tolerates exactly these until the next round commits or removes them
     # (STATE_VERSION 3)
+    placed_test_files: List[str] = field(default_factory=list)
+    # archive mode: the copies the round placed in test_dir, recorded before they are written,
+    # plus the reviewer's files a failed take could not move; the cleanup of a round that
+    # stops early deletes exactly these (STATE_VERSION 6)
     last_exit: int = -1
     message: str = ""
     started_at: str = ""

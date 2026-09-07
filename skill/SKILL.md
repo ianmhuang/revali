@@ -71,7 +71,7 @@ Acting on the result:
   `.revali/<branch>/response-<n>.md` (`- F1: wontfix: <reason>`).
 - `1` (ERROR): report the message to the user and stop; do not retry blindly.
 - `3` (NEEDS A HUMAN): summarise both sides' reasons to the user and stop.
-- `0`: report "ready to merge" with the summary (tests landing, rounds, cost).
+- `0`: report "ready to merge" with the summary (tests landing or archived, rounds, cost).
   Do not merge. The user runs `python "<revali dir>/revali.py" merge` when they
   decide to; if they ask you to run it, run it in the foreground and relay the
   result (it waits for CI checks, so allow up to the configured timeout).

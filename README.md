@@ -82,7 +82,7 @@ not a FAIL verdict.
 | Role | Started by | Reads | Writes | Model |
 |---|---|---|---|---|
 | Developer | the user | the request, the repo | `change.md`, code, its own tests | whatever the user's session runs; recorded as `author_model` |
-| Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir` (committed once they pass the project's `lint` line and a smoke run), and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment; does not run the tests | `auto`: one tier above the Developer |
+| Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir` (committed once they pass the project's `lint` line and a smoke run; with `[review] tests = "archive"` kept under `.revali/<branch>/tests/` instead and never committed), and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment; does not run the tests | `auto`: one tier above the Developer |
 | Validator | revali, after APPROVE | a sandbox clone of the branch; on FAIL, one of the base tip with the Reviewer's tests copied in | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers (with `introduced_by`: branch or base) and revali writes `diagnose-n.json`, and opens a GitHub issue for a bug the base already had | the runner needs none; diagnosis `auto`: one tier below the Developer |
 
 Three user actions (approve the AC, `/revali`, `revali merge`) are the gates;
@@ -126,7 +126,7 @@ python <path-to>/revali.py --version        # same line as `version`
 What a run does, in order: preflight (including the existing suite in the
 sandbox as a baseline), push + draft PR, reviewer round (`claude -p` with the
 diff, change.md, and the checklist; writes tests into `test_dir`; the script
-checks AC coverage, runs `lint` over them, smoke-runs them, commits them), validation
+checks AC coverage, runs `lint` over them, smoke-runs them, commits or archives them), validation
 (the new tests in the sandbox, plus the existing suite unless nothing but
 the reviewer's test commits changed since the baseline ran it; on failure
 the new tests run once more on the base tip, a diagnoser session says whether

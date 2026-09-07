@@ -293,10 +293,11 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
     the reviewer's test commits on the branch (the `Revali-Round` trailer) and their files are
     read back into the state, so the reviewer may update its own files whatever SHAs they now
     sit under: after a rewrite, after `revali reset`, or with a state that forgot them."""
-    from revali import review
+    from revali import review, testarchive
 
     cfg = ctx.cfg.review
     rewritten = False
+    archive = cfg.tests == testarchive.ARCHIVE_MODE
     if state.rounds:
         missing = [
             c for c in state.test_commits if c and not gitops.head_contains(c, ctx.repo_root)
@@ -309,10 +310,30 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
             )
             state.rounds, state.test_commits, state.test_files = [], [], []
             state.fixes, state.needs_info_used, state.last_verdict = 0, False, ""
+            state.tests_mode = ""  # the rounds that fixed the mode are gone with them
             state.baseline_sha = ""  # the tree it passed on is gone; validation runs the suite
             state.force_push = True  # the remote still has the dropped commits
             rewritten = True
-        elif state.stage == "needs_action":
+    if state.rounds:  # still: a restart above dropped them, mode and all
+        recorded = state.tests_mode or "commit"
+        if recorded != cfg.tests:
+            raise Stop(
+                EXIT_ACTION,
+                '[review] tests is "%s" but the %d review round(s) of this branch ran with '
+                '"%s"; the mode is fixed for the life of a branch: set it back to "%s", or '
+                "start a new branch for the other mode"
+                % (cfg.tests, len(state.rounds), recorded, recorded),
+            )
+        if archive and testarchive.history_rewritten(ctx, state):
+            # no reviewer commit to lose: the review goes on, the remote needs a forced push
+            log.stage(
+                "run",
+                "the branch's history was rewritten since round %d (%s is no longer in HEAD); "
+                "archive mode: the review continues, the push will use --force-with-lease"
+                % (len(state.rounds), state.head_sha[:10]),
+            )
+            state.force_push = True
+        if state.stage == "needs_action":
             if state.last_verdict in (review.CHANGES_REQUESTED, "FAIL"):
                 if ctx.head_sha == state.head_sha:
                     raise Stop(
@@ -322,7 +343,11 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
                     )
                 state.fixes += 1
                 log.stage("run", "fix cycle %d of %d" % (state.fixes, cfg.max_fixes))
-    commits, _ = review.recover_test_ownership(ctx, state, log)
+    if archive:
+        testarchive.rebuild(ctx, state, rdir, log)
+        commits = []
+    else:
+        commits, _ = review.recover_test_ownership(ctx, state, log)
     if rewritten and not commits:
         log.stage(
             "run",
@@ -573,7 +598,7 @@ def _validate_and_finish(
         flags.append("no runnable tests were written")
     print(
         "READY TO MERGE: %s (PR %s)\n  review rounds: %d, fix cycles: %d, validation: %s%s\n"
-        "  tests landing: %s\n  cost: $%.2f, models: %s\n  merge with: revali merge; "
+        "  %s: %s\n  cost: $%.2f, models: %s\n  merge with: revali merge; "
         "the PR is no longer a draft%s"
         % (
             ctx.doc.title,
@@ -582,6 +607,7 @@ def _validate_and_finish(
             state.fixes,
             vout.result,
             " (%s)" % vout.skipped_reason if vout.skipped_reason else "",
+            "tests archived" if state.tests_mode == "archive" else "tests landing",
             ", ".join(state.test_files) or "none",
             state.cost_usd,
             ", ".join(state.models_used) or "-",

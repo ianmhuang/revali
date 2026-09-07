@@ -64,6 +64,27 @@ branch as a local or shared knowledge base. A relative value sits under
 `~/.revali/` (`REVALI_HOME`), `~` is expanded, an absolute path is used as
 written; the user file and the project file may both set it. Empty deletes
 the directory, as before the key existed.
+`[review] tests` (default `commit`) says where the reviewer's acceptance
+tests go. `commit` is the behaviour described everywhere else in these
+docs: each round's files are committed on the branch with the
+`Revali-Round` trailer and merge with it. `tests = "archive"` keeps them out
+of the repository: the reviewer still writes into `test_dir`, the `lint` line and
+the smoke run still see the files there, but at the end of the round they
+move to `.revali/<branch>/tests/<their repository path>` and nothing is
+committed or pushed; the working tree is clean between rounds. Before
+each later round they are copied back into `test_dir` (untracked) for the
+reviewer to update or delete, validation and the base rerun send them into
+the sandbox as extra files at the same paths, and at `revali merge` they
+move to `archive_dir` with the rest of `.revali/<branch>/` (so `archive`
+needs a non-empty `archive_dir`; the pair is refused otherwise). What
+archive mode does not do: it never commits a test file; a rebase or amend
+does not restart the review, since there is no reviewer commit to lose
+(the next push is forced with lease); the mode cannot change while a
+branch has review rounds (a run with the other value stops with exit 2
+before it pushes anything; start a new branch for the other mode). On
+every run the state's list of the reviewer's files is rebuilt from the
+archive directory, so `revali reset` loses none of them; an archived path
+that HEAD tracks is yours and is removed from the archive.
 
 Models: `model = "auto"` (the default) picks the Reviewer one tier above
 the Developer's model (`author_model` in `change.md`) and the diagnosis

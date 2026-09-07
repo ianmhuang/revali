@@ -47,6 +47,10 @@ schema = ""                      # empty = schemas/review.schema.json shipped wi
 timeout_min = 20
 exclude = []
 security_paths = []
+tests = "commit"                 # where the reviewer's tests go: "commit" = into the branch (a test
+                                 # commit per round); "archive" = under <state_dir>/<branch>/tests/,
+                                 # never committed, sent into the sandbox as extra files, moved to
+                                 # archive_dir with the branch directory at merge (needs archive_dir)
 
 [validate]
 engine = "claude"
