@@ -12,10 +12,15 @@ path; a rename that is refused (another drive) falls back to copy and delete;
 AC-6 a merge that stops before the PR is merged archives nothing;
 AC-8 PROMPT_VERSION moved past 7.
 
+Round 2: a destination taken between the look and the move is reported and never removed
+(round 1 F1); a half-copied destination is removed on failure; a user or project `archive_dir`
+still counts when the config on the base branch fails to load (round 1 F2).
+
 Black-box through the CLI: a state written straight into `ready_to_merge`, real git, the fake gh
 (which merges nothing locally, so the project-layer key has to be on main too: `merge` reads the
 config after the checkout moved there). The only patched calls are `os.rename` (refused for the
-branch directory alone, as a second drive would) and `shutil.copytree` (the disk-full case)."""
+branch directory alone, as a second drive would), `shutil.copytree` (the disk-full case) and,
+for the race of round 1 F1 alone, `archive_destination` (pinned to a name that is taken)."""
 
 import json
 import os
@@ -95,6 +100,14 @@ class ArchiveCase(RepoCase):
             git(["checkout", "-q", branch], self.repo)
             self.write("revali.toml", self.read("revali.toml") + addition)
             self.commit_all("archive_dir = %s" % value)
+
+    def project_config_on_main(self, addition):
+        """Append `addition` to revali.toml on main only, then return to the branch: what
+        `merge` reads once the checkout has moved to the base branch."""
+        git(["checkout", "-q", "main"], self.repo)
+        self.write("revali.toml", self.read("revali.toml") + addition)
+        self.commit_all("revali.toml on main")
+        git(["checkout", "-q", "feature/mul"], self.repo)
 
     def archive(self, *parts):
         return os.path.join(self.home, "archive", *parts)
@@ -335,6 +348,107 @@ class MoveFailure(ArchiveCase):
         line = self.line_with(out, "archived to")
         self.assertTrue(same_path_in(line, dest), line)
         self.assertNotIn("could not", line)
+
+
+class TakenSinceTheLook(ArchiveCase):
+    """AC-4, AC-5 (round 1 F1): the name `archive_destination` chose is taken by the time the
+    move runs (a second merge inside the same second, or another process). The copy route
+    must report it and leave the earlier archive as it was; only a destination this merge
+    created may be removed on failure."""
+
+    def taken_destination(self):
+        taken = self.default_dest()
+        os.makedirs(taken)
+        with open(os.path.join(taken, "older.txt"), "w", encoding="utf-8") as fh:
+            fh.write("first merge")
+        with open(os.path.join(taken, "state.json"), "w", encoding="utf-8") as fh:
+            fh.write('{"stage": "merged", "pr_number": 6}\n')
+        return taken
+
+    def test_a_taken_name_is_reported_and_the_earlier_archive_is_left_alone(self):
+        rdir = self.ready()
+        before = files_under(rdir)
+        taken = self.taken_destination()
+        with mock.patch("revali.merge.archive_destination", return_value=taken):
+            with mock.patch("os.rename", side_effect=refuse_rename_of(rdir)):
+                code, out = run_cli(["merge"])
+        self.assert_merged(code, out)
+        # the earlier archive: same two files, same content
+        self.assertEqual(sorted(os.listdir(taken)), ["older.txt", "state.json"])
+        with open(os.path.join(taken, "older.txt"), "r", encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "first merge")
+        with open(os.path.join(taken, "state.json"), "r", encoding="utf-8") as fh:
+            self.assertIn('"pr_number": 6', fh.read())
+        # the branch directory stays, whole
+        self.assertEqual(files_under(rdir), before)
+        self.assertEqual(State.load(rdir).stage, "merged")
+        line = self.line_with(out, "could not archive")
+        self.assertTrue(same_path_in(line, rdir), line)
+        self.assertNotIn("archived to", out)
+
+    def test_a_half_copied_destination_this_merge_created_is_removed(self):
+        rdir = self.ready()
+        before = files_under(rdir)
+
+        def copy_some_then_fail(src, dst, *args, **kwargs):
+            # the first file lands, then the disk is full
+            os.makedirs(dst, exist_ok=True)
+            with open(os.path.join(dst, "partial.txt"), "w", encoding="utf-8") as fh:
+                fh.write("half")
+            raise OSError(28, "No space left on device")
+
+        with mock.patch("os.rename", side_effect=refuse_rename_of(rdir)):
+            with mock.patch("shutil.copytree", side_effect=copy_some_then_fail):
+                code, out = run_cli(["merge"])
+        self.assert_merged(code, out)
+        left = os.listdir(self.archive("me__sample"))
+        self.assertFalse(os.path.exists(self.default_dest()), left)
+        self.assertEqual(files_under(rdir), before)
+        line = self.line_with(out, "No space left on device")
+        self.assertTrue(same_path_in(line, rdir), line)
+
+
+class BrokenConfigOnBase(ArchiveCase):
+    """AC-1, AC-3 (round 1 F2): `merge` reads [paths] after the checkout moved to the base
+    branch. When the config there does not load, the user's or project's archive_dir must
+    still be honoured, not replaced by the default."""
+
+    BROKEN = "\n[nonsense]\nkey = 1\n"  # an unknown section: a ConfigError, still valid TOML
+
+    def test_a_user_empty_value_still_deletes(self):
+        self.user_config('[paths]\narchive_dir = ""\n')
+        self.project_config_on_main(self.BROKEN)
+        rdir = self.ready()
+        code, out = run_cli(["merge"])
+        self.assert_merged(code, out)
+        self.assertFalse(os.path.exists(rdir))
+        self.assertFalse(os.path.isdir(self.archive()))
+        made = [n for n in os.listdir(self.home) if os.path.isdir(os.path.join(self.home, n))]
+        self.assertEqual(made, [], made)
+        self.line_with(out, "removed .revali/feature__mul/")
+
+    def test_a_project_value_in_the_broken_file_is_still_used(self):
+        self.project_config_on_main(self.BROKEN + '\n[paths]\narchive_dir = "raw-project"\n')
+        rdir = self.ready()
+        code, out = run_cli(["merge"])
+        self.assert_merged(code, out)
+        dest = os.path.join(self.home, "raw-project", "me__sample", "7-feature__mul")
+        self.assertTrue(os.path.isfile(os.path.join(dest, "state.json")), out)
+        self.assertFalse(os.path.isdir(self.archive()))
+        self.assertFalse(os.path.exists(rdir))
+        self.assertTrue(same_path_in(self.line_with(out, "archived to"), dest))
+
+    def test_a_project_value_wins_over_the_user_file_in_the_fallback_too(self):
+        self.user_config('[paths]\narchive_dir = "from-user"\n')
+        self.project_config_on_main(self.BROKEN + '\n[paths]\narchive_dir = "from-project"\n')
+        self.ready()
+        code, out = run_cli(["merge"])
+        self.assert_merged(code, out)
+        self.assertTrue(
+            os.path.isdir(os.path.join(self.home, "from-project", "me__sample", "7-feature__mul")),
+            out,
+        )
+        self.assertFalse(os.path.isdir(os.path.join(self.home, "from-user")))
 
 
 class MergeStopsEarly(ArchiveCase):
