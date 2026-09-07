@@ -166,6 +166,39 @@ class ArchiveOnMerge(ArchiveCase):
         self.assertIn(self.rdir(), out)
         self.assertFalse(os.path.isdir(self.default_dest()))
 
+    def test_a_name_taken_since_the_look_is_reported_not_deleted(self):
+        # AC-4, AC-5 (round 1 F1): the destination appears between archive_destination's check
+        # and the move; the copy route must not remove that earlier archive
+        self.ready()
+        taken = self.default_dest()
+        os.makedirs(taken)
+        with open(os.path.join(taken, "older.txt"), "w", encoding="utf-8") as fh:
+            fh.write("first merge")
+        with mock.patch("revali.merge.archive_destination", return_value=taken):
+            with mock.patch("os.rename", side_effect=OSError(18, "Invalid cross-device link")):
+                code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(os.listdir(taken), ["older.txt"])
+        self.assertEqual(read(os.path.join(taken, "older.txt")), "first merge")
+        self.assertTrue(os.path.isfile(os.path.join(self.rdir(), "state.json")))
+        self.assertIn("could not archive", out)
+
+    def test_the_value_survives_a_config_that_fails_to_load_on_the_base_branch(self):
+        # AC-1, AC-3 (round 1 F2): merge reads [paths] after the checkout moved to main; a
+        # config that does not load there falls back to the raw table, archive_dir included
+        with open(os.path.join(self.home, "config.toml"), "w", encoding="utf-8") as fh:
+            fh.write('[paths]\narchive_dir = ""\n')
+        git(["checkout", "-q", "main"], self.repo)
+        self.write("revali.toml", self.read("revali.toml") + "\n[nonsense]\nkey = 1\n")
+        self.commit_all("broken config on main")
+        git(["checkout", "-q", "feature/mul"], self.repo)
+        self.ready()
+        code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(os.path.exists(self.rdir()))
+        self.assertFalse(os.path.isdir(os.path.join(self.home, "archive")))
+        self.assertIn("removed .revali/feature__mul/", out)
+
     def test_a_move_across_devices_copies_and_deletes(self):
         # AC-5: os.rename refuses (as across drives); shutil.move falls back to copy + delete
         self.ready()

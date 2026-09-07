@@ -84,8 +84,9 @@ stated.
   branch is checked out elsewhere: `gh pr merge --<method>` without
   `--delete-branch`, then `git push origin --delete <branch>`,
   `git fetch --prune origin <base>`, `git checkout --detach FETCH_HEAD`,
-  `git branch -D <branch>`, each reported if it fails; the worktree is left
-  for you to remove. When `gh pr merge` exits non-zero but `gh pr view`
+  `git branch -D <branch>`, each reported if it fails, and the state
+  directory is archived as above; the worktree is left for you to remove.
+  When `gh pr merge` exits non-zero but `gh pr view`
   reports the PR as MERGED, the merge counts as done and the local
   follow-up still runs
 - after a review round that stops before its tests are committed (a failed

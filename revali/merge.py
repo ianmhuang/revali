@@ -72,14 +72,18 @@ def archive_review_dir(rdir: str, root_dir: str, repo: str, pr_number: int, bran
     a source that cannot be deleted after a complete copy is reported for the user to
     remove."""
     dest = archive_destination(root_dir, repo, pr_number, branch)
+    created = False  # only what this call made is removed on failure, never an earlier archive
     try:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         try:
             os.rename(rdir, dest)
         except OSError:
-            shutil.copytree(rdir, dest)
+            os.mkdir(dest)  # exclusive: a name taken since archive_destination looked fails here
+            created = True
+            shutil.copytree(rdir, dest, dirs_exist_ok=True)
     except OSError as exc:
-        remove_tree(dest)
+        if created:
+            remove_tree(dest)
         return "could not archive %s (%s); left in place: %s" % (dest, exc, rdir)
     remove_tree(rdir)  # tolerant: a file held open on Windows leaves the rest
     if os.path.exists(rdir):

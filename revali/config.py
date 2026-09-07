@@ -527,9 +527,9 @@ def load_user_config() -> UserConfig:
 
 def paths_for(repo_root: str) -> PathsCfg:
     """The [paths] table for a repo: from its config when it loads; else the raw [paths]
-    table of revali.toml (so a broken config still points at the right state dir) over
-    the defaults. Used by commands that must find the state directory before a full
-    config is required."""
+    table of revali.toml (so a broken config still points at the right state dir, and
+    `merge` still archives where the user or project said) over the defaults. Used by
+    commands that must find the state directory before a full config is required."""
     try:
         return load_project_config(repo_root).paths
     except ConfigError:
@@ -537,10 +537,10 @@ def paths_for(repo_root: str) -> PathsCfg:
     paths = _fill(PathsCfg, load_defaults().get("paths", {}), "paths", [])
     for file in (os.path.join(user_home(), "config.toml"), os.path.join(repo_root, PROJECT_FILE)):
         for key, value in _raw_paths(file).items():
-            if (
-                key in ("state_dir", "logs_dir")
-                and isinstance(value, str)
-                and _single_component(value)
+            if not isinstance(value, str):
+                continue
+            if key == "archive_dir" or (
+                key in ("state_dir", "logs_dir") and _single_component(value)
             ):
                 setattr(paths, key, value)
     return paths
