@@ -72,13 +72,16 @@ class Tree:
         with open(os.path.join(self.tests, name), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
 
-    def run(self, *extra):
+    def run(self, *extra, env=None):
+        environ = {k: v for k, v in os.environ.items() if k != "RUN_PARALLEL_JOBS"}
+        environ.update(env or {})
         res = subprocess.run(
             [sys.executable, RUNNER, "-s", self.tests, "-t", self.root] + list(extra),
             capture_output=True,
             encoding="utf-8",
             errors="replace",
             cwd=self.root,
+            env=environ,
         )
         return res.returncode, res.stdout + res.stderr
 
@@ -194,6 +197,21 @@ class RunParallel(unittest.TestCase):
             re.search(r"^Ran (\d+) tests", last_lines(out1)[0]).group(1),
             re.search(r"^Ran (\d+) tests", last_lines(out99)[0]).group(1),
         )
+
+    def test_jobs_env_var_is_the_default_and_j_beats_it(self):
+        t = self.tree(test_pass=PASSING, test_fail=FAILING)
+        code, out = t.run(env={"RUN_PARALLEL_JOBS": "1"})
+        self.assertEqual(code, 1)
+        self.assertIn("6 tests in 1 worker(s)", out)
+        code, out = t.run("-j", "2", env={"RUN_PARALLEL_JOBS": "1"})
+        self.assertIn("6 tests in 2 worker(s)", out)
+        code, out = t.run(env={"RUN_PARALLEL_JOBS": " "})  # blank: as if unset
+        self.assertIn("6 tests in %d worker(s)" % min(3, os.cpu_count() or 1), out)
+        for bad in ("0", "-2", "eight", "2.5"):
+            code, out = t.run(env={"RUN_PARALLEL_JOBS": bad})
+            self.assertEqual(code, 1, bad)
+            self.assertIn("RUN_PARALLEL_JOBS=", out)
+            self.assertNotIn("worker(s)", out)  # refused before anything ran
 
     def test_positional_names_restrict_the_run(self):
         t = self.tree(test_pass=PASSING, test_fail=FAILING)

@@ -155,7 +155,7 @@ and the history row. Every result lands in `.revali/<branch>/`
 ## Development
 
 ```
-python tests/run_parallel.py                        # the suite, one worker per CPU (-j N)
+python tests/run_parallel.py                        # the suite, one worker per CPU (-j N, or RUN_PARALLEL_JOBS=N)
 python tests/run_parallel.py tests.test_pipeline    # a module, a class or a test, as for unittest
 python -m unittest discover -s tests -t .           # the same tests, serially
 python tests/fixtures/make_sample_repo.py "<dir>"   # throwaway sample project
