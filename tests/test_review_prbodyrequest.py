@@ -52,11 +52,20 @@ class BodyCase(RepoCase):
 
     def assert_no_request(self, body):
         # a heading line, not the substring: `## Requests handled` is another section and stays
-        # (test_a_longer_heading_is_not_the_request asserts that); edited by the author, see
-        # response-1.md
+        # (test_a_longer_heading_is_not_the_request asserts that). Any spelling the parser
+        # takes for the heading counts: case, extra spaces, a CRLF line ending.
         self.assertIsNone(re.search(r"^##\s+Request\s*$", body, re.M | re.I), body)
         self.assertNotIn(REQUEST_LINE, body)
         self.assertNotIn("withheld", body)
+
+    def body_for(self, change_md):
+        """The body `gh pr create` received for this change.md (line endings normalised by
+        the gh stub, which reads the file in text mode)."""
+        self.write(".revali/feature__mul/change.md", change_md)
+        self.run_ok()
+        created = self.bodies("create")
+        self.assertEqual(len(created), 1, self.fake_calls("gh"))
+        return created[0]
 
     def assert_other_sections_verbatim(self, body):
         """Everything but the Request section is on the PR, unchanged."""
@@ -148,13 +157,6 @@ class PrivateRepoBody(BodyCase):
 
 
 class RequestPlacement(BodyCase):
-    def body_for(self, change_md):
-        self.write(".revali/feature__mul/change.md", change_md)
-        self.run_ok()
-        created = self.bodies("create")
-        self.assertEqual(len(created), 1, self.fake_calls("gh"))
-        return created[0]
-
     def test_request_in_the_middle_goes(self):  # AC-2
         text = WITHOUT_REQUEST.replace("## Goal\n", REQUEST_BLOCK + "## Goal\n", 1)
         self.assertIn(REQUEST_LINE, text)
@@ -207,6 +209,42 @@ class RequestPlacement(BodyCase):
         self.assertIn(extra, body)
         expected = WITHOUT_REQUEST.replace("## Out of scope\n", extra + "## Out of scope\n", 1)
         self.assertEqual(body, expected)
+
+
+# ---- AC-1, AC-2: every spelling of the heading that validates is the one dropped ---
+# (round 1, F1: a change.md that passes validation with its Request section must not
+# reach GitHub with the request in it, whatever the heading looks like)
+
+
+class HeadingRule(BodyCase):
+    def test_a_crlf_change_md_loses_the_request_and_keeps_its_line_endings(self):  # AC-1
+        crlf = CHANGE_MD.replace("\n", "\r\n")
+        body = self.body_for(crlf)  # normalised by the stub; the content is what matters here
+        self.assert_no_request(body)
+        self.assertEqual(body, WITHOUT_REQUEST)
+        # the file on disk, read without newline translation: CRLF kept, no Request heading
+        on_disk = self.read(".revali/feature__mul/logs/pr-body.md")
+        self.assert_no_request(on_disk)
+        self.assertIn("## Goal\r\n`mul` multiplies two integers.\r\n", on_disk)
+        self.assertNotIn("\n## Request", on_disk)
+        expected_head = WITHOUT_REQUEST.replace("\n", "\r\n").rstrip("\r\n") + "\n"
+        self.assertTrue(on_disk.startswith(expected_head + STATUS_HEADING), on_disk)
+        # the local change.md is still the CRLF file the author wrote (AC-3)
+        self.assertEqual(self.read(".revali/feature__mul/change.md"), crlf)
+
+    def test_a_lowercase_heading_is_the_request(self):  # AC-2
+        text = CHANGE_MD.replace("## Request\n", "## request\n", 1)
+        self.assertIn("## request\n" + REQUEST_LINE, text)
+        body = self.body_for(text)
+        self.assert_no_request(body)
+        self.assertEqual(body, WITHOUT_REQUEST)
+
+    def test_extra_spaces_after_the_hashes_are_the_request(self):  # AC-2
+        text = CHANGE_MD.replace("## Request\n", "##  Request\n", 1)
+        self.assertIn("##  Request\n" + REQUEST_LINE, text)
+        body = self.body_for(text)
+        self.assert_no_request(body)
+        self.assertEqual(body, WITHOUT_REQUEST)
 
 
 # ---- AC-3: the local change.md is untouched and still validated -----------------
