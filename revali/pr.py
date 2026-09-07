@@ -119,16 +119,20 @@ def is_public(ctx: Context) -> bool:
     return bool(ctx.repo) and ctx.repo.visibility != "PRIVATE"
 
 
+_REQUEST_SECTION = re.compile(r"^## Request[ \t]*\n.*?(?=^## |\Z)", re.M | re.S)
+
+
+def strip_request(text: str) -> str:
+    """change.md without its `## Request` section: the heading line and everything up to the
+    next `## ` heading (or the end). Only a heading line counts; the words inside another
+    section stay."""
+    return _REQUEST_SECTION.sub("", text)
+
+
 def pr_body(ctx: Context, state: Optional[State]) -> str:
-    """change.md minus the verbatim request when the repo is public, plus a status table."""
-    body = ctx.doc.raw.strip()
-    if is_public(ctx):
-        body = re.sub(
-            r"## Request\n.*?(?=\n## )",
-            "## Request\n(withheld: public repository)\n",
-            body,
-            flags=re.S,
-        )
+    """change.md minus the request (the user's verbatim words stay local, on every repository),
+    plus a status table once there are rounds."""
+    body = strip_request(ctx.doc.raw).strip()
     if state and state.rounds:
         rows = [
             "",

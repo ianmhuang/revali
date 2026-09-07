@@ -68,8 +68,11 @@ stated.
 - posts review and validation results as PR comments; on a repository that
   is not private the comments are summaries (verdict, model, cost, finding
   ids with severity and location, test files, AC coverage, validation exit
-  codes, diagnosis cause) and the PR body withholds the `Request` section;
-  the full text stays in the state directory
+  codes, diagnosis cause); the full text stays in the state directory. The
+  PR body is change.md without its `Request` section on every repository,
+  private or not (the user's verbatim words stay local; Goal, acceptance
+  criteria, Out of scope, Dependencies, What, Why and the status table are
+  on the PR)
 - after a failed validation whose diagnosis marks a failure `cause: code`
   and `introduced_by: base` (with `[validate] issue_on`, the default): one
   `gh issue create` as the author, title `Pre-existing: <test> fails on
