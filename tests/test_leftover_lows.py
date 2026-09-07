@@ -282,6 +282,57 @@ class CloseStoppedRestoresEverything(unittest.TestCase):
         self.assertNotEqual(saved.updated_at, "2026-01-01T00:05:00+0000")
 
 
+def _edit_state(rdir, **fields):
+    path = State.path(rdir)
+    with open(path, "r", encoding="utf-8", newline="") as fh:
+        data = json.load(fh)
+    data.update(fields)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(data, fh)
+
+
+class RecoveryLinesNameOnlyWhatIsNew(ro.RewriteCase):
+    def test_the_none_left_line_lists_the_commits_new_to_the_state(self):  # round 2 follow-up
+        self.first_round()
+        self.fix_and_commit()
+        self.claude(_mul2_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        first, second = ro.trailer_commits(self.repo)
+        git(["rm", "-q", "tests/test_review_mul.py", "tests/test_review_mul2.py"], self.repo)
+        git(["commit", "-q", "-m", "drop both tests"], self.repo)
+        _edit_state(self.rdir(), test_commits=[first])  # the state lost the second commit
+        self.claude(claude_entry(approve_response()))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        lines = [ln for ln in out.splitlines() if "none of their test files" in ln]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("found 1 earlier", lines[0])
+        self.assertIn(second[:10], lines[0])
+        self.assertNotIn(first[:10], lines[0])
+        self.assertNotIn("recovered", out)
+
+    def test_a_file_never_added_on_the_branch_gets_its_own_line(self):  # round 2 follow-up
+        """A trailer commit that modified a file older than the base (a state edited by hand
+        lists it as the reviewer's): dropped, and the line does not speak of a re-creation."""
+        self.first_round()
+        self.write("tests/test_calc.py", self.read("tests/test_calc.py") + "\n# touched\n")
+        git(["add", "-A"], self.repo)
+        git(["commit", "-q", "-m", "touch an old test", "-m", "Revali-Round: 9"], self.repo)
+        state = State.load(self.rdir())
+        _edit_state(self.rdir(), test_files=state.test_files + ["tests/test_calc.py"])
+        self.claude(claude_entry(approve_response()))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn(RECREATED, out)
+        lines = [ln for ln in out.splitlines() if "not added by any commit" in ln]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn("tests/test_calc.py", lines[0])
+        self.assertIn("main and HEAD", lines[0])
+        self.assertEqual(State.load(self.rdir()).test_files, ["tests/test_review_mul.py"])
+        self.assertEqual(len(ro.prompts(self)), 1)
+
+
 HOLDER = (
     "import sys, time\n"
     "f = open(sys.argv[1], 'r')\n"

@@ -302,35 +302,32 @@ def recover_test_ownership(
                 ", ".join(c[:10] for c in emptied),
             )
         log.stage("run", message)
-    elif log and new_commits and not files:
+    elif log and emptied:
+        # nothing recovered (no file left, or the state kept its files but lost its commits):
+        # the commits new to the state whose files are all gone still get a line, once
         log.stage(
             "run",
             "found %d earlier reviewer test commit(s) on the branch (%s trailer) but none of "
             "their test files is still the reviewer's in HEAD: %s"
-            % (len(commits), TRAILER, ", ".join(c[:10] for c in commits)),
-        )
-    elif log and emptied:
-        # the state kept its files but not its commits: nothing recovered, still worth a line
-        log.stage(
-            "run",
-            "found %d earlier reviewer test commit(s) on the branch (%s trailer) with none of "
-            "their test files still the reviewer's in HEAD: %s"
             % (len(emptied), TRAILER, ", ".join(c[:10] for c in emptied)),
         )
-    if log and dropped:
+    re_added = [f for f in dropped if taken[f]]
+    never_added = [f for f in dropped if not taken[f]]
+    if log and re_added:
         log.stage(
             "run",
             "the reviewer's test file(s) were deleted and re-created by a commit without the "
             "%s trailer; they are the author's now, existing files the reviewer must not "
             "modify (to hand one back, delete it in a commit of its own and let the reviewer "
             "re-create it): %s"
-            % (
-                TRAILER,
-                ", ".join(
-                    "%s (re-added by %s)" % (f, taken[f][:10] or "a commit before the base")
-                    for f in dropped
-                ),
-            ),
+            % (TRAILER, ", ".join("%s (re-added by %s)" % (f, taken[f][:10]) for f in re_added)),
+        )
+    if log and never_added:
+        log.stage(
+            "run",
+            "the reviewer's test file(s) were not added by any commit between %s and HEAD, so "
+            "they are existing files the reviewer must not modify: %s"
+            % (ctx.base_ref, ", ".join(never_added)),
         )
     return commits, files
 
