@@ -2,7 +2,7 @@
 
 How a change moves from a request to a merged PR, what the three sessions
 see, and how several agent sessions share one repository. The command
-reference is in the README; configuration keys are in [configuration.md](configuration.md).
+reference is in the README; configuration keys are in [docs/configuration.md](configuration.md).
 
 ## Why separate sessions
 

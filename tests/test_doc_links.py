@@ -45,7 +45,8 @@ def prose_lines(text):
 
 
 def repo_file(page, ref):
-    """The repository path a backticked reference names, or None when it is not one."""
+    """The repository path a backticked reference names, or None when it is not one (a
+    per-project file, or nothing in the repository); such a file must be written as a link."""
     if ref in PER_PROJECT and "/" not in ref:
         return None
     candidates = [ref]
@@ -102,7 +103,9 @@ class ReadmeSections(unittest.TestCase):
 
 
 class LinksToRepositoryFiles(unittest.TestCase):
-    def test_every_named_repository_file_is_linked(self):
+    def test_no_backticked_reference_to_a_repository_file(self):
+        # a repository file is named as a plain link, `[docs/x.md](docs/x.md)`; a backticked
+        # `docs/x.md` is either a missed link or, when a link, the form AC-1 forbids
         missing = []
         for page in PAGES:
             for no, line in prose_lines(read(page)):
@@ -110,12 +113,7 @@ class LinksToRepositoryFiles(unittest.TestCase):
                     ref = m.group(1)
                     if (page, ref) in PINNED or repo_file(page, ref) is None:
                         continue
-                    linked = (
-                        line[m.start() - 1 : m.start()] == "["
-                        and line[m.end() : m.end() + 2] == "]("
-                    )
-                    if not linked:
-                        missing.append("%s:%d %s" % (page, no, ref))
+                    missing.append("%s:%d %s" % (page, no, ref))
         self.assertEqual(missing, [])  # AC-5
 
     def test_every_link_target_exists_and_is_relative(self):
