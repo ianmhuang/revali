@@ -9,6 +9,7 @@ rules (summaries on a non-private repository, full text on a private one) stay a
 were. Black-box through the CLI and the fake gh / claude / runner.
 """
 
+import re
 import unittest
 
 from revali import EXIT_ERROR, EXIT_OK
@@ -50,7 +51,10 @@ class BodyCase(RepoCase):
         ]
 
     def assert_no_request(self, body):
-        self.assertNotIn("## Request", body)
+        # a heading line, not the substring: `## Requests handled` is another section and stays
+        # (test_a_longer_heading_is_not_the_request asserts that); edited by the author, see
+        # response-1.md
+        self.assertIsNone(re.search(r"^##\s+Request\s*$", body, re.M | re.I), body)
         self.assertNotIn(REQUEST_LINE, body)
         self.assertNotIn("withheld", body)
 

@@ -4,7 +4,7 @@ import os
 import re
 from typing import Optional
 
-from revali import EXIT_ERROR, gitops
+from revali import EXIT_ERROR, changedoc, gitops
 from revali.preflight import Context, Stop, check_tree_unmoved
 from revali.procs import resolve, run, run_retry
 from revali.secretscan import scan_text
@@ -119,14 +119,20 @@ def is_public(ctx: Context) -> bool:
     return bool(ctx.repo) and ctx.repo.visibility != "PRIVATE"
 
 
-_REQUEST_SECTION = re.compile(r"^## Request[ \t]*\n.*?(?=^## |\Z)", re.M | re.S)
-
-
 def strip_request(text: str) -> str:
-    """change.md without its `## Request` section: the heading line and everything up to the
-    next `## ` heading (or the end). Only a heading line counts; the words inside another
-    section stay."""
-    return _REQUEST_SECTION.sub("", text)
+    """change.md without its Request section: the heading line and everything up to the next
+    heading (or the end). A heading is what changedoc.parse takes for one (`## request`,
+    `##  Request`, a CRLF line), so whatever validated as the Request is what goes; the words
+    inside another section stay. Line endings are kept as they are."""
+    kept = []
+    skipping = False
+    for line in text.splitlines(keepends=True):
+        key = changedoc.section_key(line)
+        if key:
+            skipping = key == "request"
+        if not skipping:
+            kept.append(line)
+    return "".join(kept)
 
 
 def pr_body(ctx: Context, state: Optional[State]) -> str:

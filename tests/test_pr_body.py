@@ -40,6 +40,21 @@ class StripRequest(unittest.TestCase):
     def test_a_document_without_the_section_is_unchanged(self):  # AC-2
         self.assertEqual(strip_request(FRONT + GOAL + ACS), FRONT + GOAL + ACS)
 
+    # the heading rule is changedoc's: whatever validated as the Request section goes (F1, round 1)
+
+    def test_a_crlf_document_loses_the_section_and_keeps_its_line_endings(self):  # AC-1
+        text = (FRONT + REQUEST + GOAL + ACS + DEPS).replace("\n", "\r\n")
+        self.assertEqual(strip_request(text), (FRONT + GOAL + ACS + DEPS).replace("\n", "\r\n"))
+
+    def test_a_lowercase_heading_is_the_request(self):  # AC-2
+        text = FRONT + "## request\nadd mul\n\n" + GOAL
+        self.assertEqual(strip_request(text), FRONT + GOAL)
+
+    def test_extra_spaces_or_a_tab_after_the_hashes_are_the_request(self):  # AC-2
+        for heading in ("##  Request", "##\tRequest", "## Request  "):
+            text = FRONT + heading + "\nadd mul\n\n" + GOAL
+            self.assertEqual(strip_request(text), FRONT + GOAL, heading)
+
     def test_a_multi_paragraph_request_goes_whole(self):  # AC-1
         request = "## Request\nfirst line\n\nsecond paragraph, still the request\n\n"
         self.assertEqual(strip_request(FRONT + request + GOAL), FRONT + GOAL)
