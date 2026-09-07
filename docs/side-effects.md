@@ -29,7 +29,14 @@ stated.
   run the commits between the base and HEAD that carry it, and the files
   under `test_dir` they added or modified, are read back into the state, so
   a rebase or amend that gives those commits new SHAs (the review then
-  starts over from round 1) keeps them the reviewer's. A rewrite that
+  starts over from round 1) keeps them the reviewer's. The newest commit
+  in that range that added a path decides whose it is: a file you delete
+  in one commit and re-create under the reviewer's file name in a later
+  commit without the trailer is yours from then on (the state drops it
+  and `run.log` says so). An edit changes nothing, and so does replacing
+  the content in a single commit, which git records as a modification;
+  to hand a file back, delete it in a commit of its own and let the
+  reviewer re-create it. A rewrite that
   drops the trailer, such as squashing the reviewer's commit into your
   own, turns those files into existing files the reviewer must not
   modify. Any other

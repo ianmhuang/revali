@@ -209,7 +209,9 @@ def commit_messages(base: str, head: str, cwd: str) -> List[Tuple[str, str]]:
 
 def commit_paths(sha: str, cwd: str, diff_filter: str = "AM") -> List[str]:
     """Paths one commit touches, filtered like `git diff --diff-filter` (default: added or
-    modified), forward slashes, NUL-separated so a path with spaces arrives unquoted."""
+    modified), forward slashes, NUL-separated so a path with spaces arrives unquoted. The
+    callers pass commits from `base..HEAD`, which have a parent, so a root commit (`--root`)
+    is not catered for."""
     res = git_ok(
         [
             "diff-tree",
@@ -217,13 +219,22 @@ def commit_paths(sha: str, cwd: str, diff_filter: str = "AM") -> List[str]:
             "--name-only",
             "-r",
             "-z",
-            "--root",
             "--diff-filter=" + diff_filter,
             sha,
         ],
         cwd,
     )
     return [p.replace("\\", "/") for p in res.stdout.split("\0") if p]
+
+
+def last_add_commit(base: str, head: str, path: str, cwd: str) -> str:
+    """The newest commit in base..head that added `path` (a file deleted and re-created is
+    added twice; the later add wins), "" when no commit in the range added it."""
+    res = git_ok(
+        ["log", "-1", "--diff-filter=A", "--format=%H", "%s..%s" % (base, head), "--", path],
+        cwd,
+    )
+    return res.stdout.strip()
 
 
 def worktree_holding(branch: str, cwd: str) -> str:

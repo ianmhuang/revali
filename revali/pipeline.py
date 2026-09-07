@@ -3,6 +3,7 @@ status, reset, clean, stop. Review / validate / merge stages plug in here in
 later milestones; until then `run` stops after preflight with a clear message.
 """
 
+import copy
 import os
 import shutil
 import sys
@@ -864,13 +865,14 @@ def _close_stopped(state: State, rdir: str, message: str) -> bool:
     """Record a run closed by `stop`: stage `stopped`, exit 1, a history row so `stats` sees
     the episode. A state file that cannot be written (a reader holding it on Windows past the
     retry window) is reported on one line, not as a traceback, and `state` is put back the
-    way it was; the run then still reads as dead, which is what it is."""
-    before = (state.stage, state.message, state.last_exit, state.started_at, state.updated_at)
+    way it was from a snapshot of the whole object; the run then still reads as dead, which
+    is what it is."""
+    before = copy.copy(state)  # set_stage and save assign scalars only; a shallow copy holds
     try:
         state.set_stage(rdir, "stopped", message, EXIT_ERROR)
     except OSError as exc:
         # set_stage assigns the outcome, and save stamps the timestamps, before the write
-        state.stage, state.message, state.last_exit, state.started_at, state.updated_at = before
+        state.__dict__.update(before.__dict__)
         print(
             "ERROR: the state file could not be updated (%s); `wait` and `status` will report "
             "the run as dead; run `revali stop` again once the file is free" % exc

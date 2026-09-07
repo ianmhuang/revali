@@ -7,7 +7,7 @@ import os
 import string
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
@@ -230,43 +230,62 @@ def existing_test_names(ctx: Context, state: State) -> List[str]:
     )
 
 
-def branch_test_commits(ctx: Context) -> List[Tuple[str, List[str]]]:
+def branch_test_commits(ctx: Context) -> Tuple[List[Tuple[str, List[str]]], Dict[str, str]]:
     """The reviewer's test commits between the base and HEAD, oldest first: the commits whose
     message carries the `Revali-Round` trailer (commit_tests writes it), each with the files
-    under test_dir it added or modified that HEAD still tracks. This is how ownership survives
-    a history rewrite, which gives those commits new SHAs; a rewrite that drops the trailer
-    (the author folds the reviewer's commit into their own) drops the ownership with it."""
+    under test_dir it added or modified that HEAD still tracks and that are still the
+    reviewer's. This is how ownership survives a history rewrite, which gives those commits
+    new SHAs; a rewrite that drops the trailer (the author folds the reviewer's commit into
+    their own) drops the ownership with it.
+
+    The newest commit in the range that added a path decides whose the path is, as git sees
+    it: the author takes a file over by deleting it in one commit and re-creating the name in
+    a later commit without the trailer. A commit that replaces the content in place is a
+    modification to git, like any edit, and changes nothing. The taken-over paths are
+    returned separately, as {path: sha of the commit that re-added it}, "" when no commit in
+    the range added the path at all."""
     tracked = set(tracked_test_files(ctx))
     test_dir = ctx.cfg.project.test_dir
+    found = gitops.trailer_commits(ctx.base_ref, "HEAD", TRAILER, ctx.repo_root)
+    reviewer = {sha for sha, _ in found}
+    added_by: Dict[str, str] = {}  # one git call per path, whichever side owns it
     out = []
-    for sha, _ in gitops.trailer_commits(ctx.base_ref, "HEAD", TRAILER, ctx.repo_root):
-        paths = [
-            p
-            for p in gitops.commit_paths(sha, ctx.repo_root)
-            if under_test_dir(p, test_dir) and p in tracked
-        ]
+    taken: Dict[str, str] = {}
+    for sha, _ in found:
+        paths = []
+        for p in gitops.commit_paths(sha, ctx.repo_root):
+            if not under_test_dir(p, test_dir) or p not in tracked:
+                continue
+            if p not in added_by:
+                added_by[p] = gitops.last_add_commit(ctx.base_ref, "HEAD", p, ctx.repo_root)
+            if added_by[p] in reviewer:
+                paths.append(p)
+            else:
+                taken[p] = added_by[p]
         out.append((sha, sorted(paths)))
-    return out
+    return out, taken
 
 
 def recover_test_ownership(
     ctx: Context, state: State, log: Optional[RunLog]
 ) -> Tuple[List[str], List[str]]:
     """Add the branch's trailer commits and their surviving test files to the state (front of
-    the lists, no duplicates). Runs on every run, so the state heals whatever forgot the files:
-    a rewrite, `revali reset`, a state written before this rule existed. Idempotent; returns
-    (commits, files) found on the branch and logs only what was missing from the state, so a
-    run where nothing changed stays quiet."""
-    found = branch_test_commits(ctx)
+    the lists, no duplicates), and drop the files the author took over by deleting and
+    re-creating them. Runs on every run, so the state heals whatever forgot the files: a
+    rewrite, `revali reset`, a state written before this rule existed. Idempotent; returns
+    (commits, files) found on the branch and logs only what changed in the state, so a run
+    where nothing changed stays quiet."""
+    found, taken = branch_test_commits(ctx)
     commits = [sha for sha, _ in found]
     files = sorted({p for _, paths in found for p in paths})
     new_commits = [c for c in commits if c not in state.test_commits]
     new_files = [f for f in files if f not in state.test_files]
+    dropped = [f for f in state.test_files if f in taken]
+    emptied = [sha for sha, paths in found if not paths and sha in new_commits]
     state.test_commits = commits + [c for c in state.test_commits if c not in commits]
-    state.test_files = files + [f for f in state.test_files if f not in files]
+    state.test_files = files + [f for f in state.test_files if f not in files and f not in taken]
     if log and new_files:
-        log.stage(
-            "run",
+        message = (
             "recovered the reviewer's %d test file(s) from %d earlier test commit(s) on the "
             "branch (%s trailer): %s; commits %s"
             % (
@@ -275,14 +294,40 @@ def recover_test_ownership(
                 TRAILER,
                 ", ".join(new_files),
                 ", ".join(c[:10] for c in commits),
-            ),
+            )
         )
-    elif log and new_commits and not files:
+        if emptied:
+            message += "; none of the files of %d of them is still the reviewer's in HEAD: %s" % (
+                len(emptied),
+                ", ".join(c[:10] for c in emptied),
+            )
+        log.stage("run", message)
+    elif log and emptied:
+        # nothing recovered (no file left, or the state kept its files but lost its commits):
+        # the commits new to the state whose files are all gone still get a line, once
         log.stage(
             "run",
             "found %d earlier reviewer test commit(s) on the branch (%s trailer) but none of "
-            "their test files is still in HEAD: %s"
-            % (len(commits), TRAILER, ", ".join(c[:10] for c in commits)),
+            "their test files is still the reviewer's in HEAD: %s"
+            % (len(emptied), TRAILER, ", ".join(c[:10] for c in emptied)),
+        )
+    re_added = [f for f in dropped if taken[f]]
+    never_added = [f for f in dropped if not taken[f]]
+    if log and re_added:
+        log.stage(
+            "run",
+            "the reviewer's test file(s) were deleted and re-created by a commit without the "
+            "%s trailer; they are the author's now, existing files the reviewer must not "
+            "modify (to hand one back, delete it in a commit of its own and let the reviewer "
+            "re-create it): %s"
+            % (TRAILER, ", ".join("%s (re-added by %s)" % (f, taken[f][:10]) for f in re_added)),
+        )
+    if log and never_added:
+        log.stage(
+            "run",
+            "the reviewer's test file(s) were not added by any commit between %s and HEAD, so "
+            "they are existing files the reviewer must not modify: %s"
+            % (ctx.base_ref, ", ".join(never_added)),
         )
     return commits, files
 
