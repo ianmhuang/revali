@@ -1,5 +1,6 @@
 """Acceptance tests for archive mode's failure paths and its rules: a round that stops early
-leaves no copies behind and does not touch the archive (AC-5), the state's list is rebuilt
+leaves no copies behind, a failed move into the archive leaves nothing of the reviewer's in
+the tree, and neither touches the archive (AC-5), the state's list is rebuilt
 from the archive and a tracked path is the author's (AC-6), and the mode is fixed for the
 life of a branch (AC-7)."""
 
@@ -206,6 +207,44 @@ class ArchiveFailureTests(InterruptedRoundCase):
         self.assertEqual(read(self.archived(SECOND)), SECOND_TEXT)
         self.assertEqual(sorted(self.state().test_files), [DATA, FILE, SECOND])
         self.assertEqual(self.runner_calls("validate-r2")[-1]["extra_files"], [DATA, FILE, SECOND])
+
+    def test_a_new_file_off_the_pattern_left_by_a_failed_take_is_removed_too(self):
+        # AC-5 (round 4, F6): a data file the reviewer added this round, off
+        # test_file_pattern and sorted after the file whose move failed, was neither placed
+        # back nor moved; the cleanup after the Stop deletes it too, so the next run's
+        # preflight sees a clean tree and the review goes on without a hand deletion
+        late = "tests/z_data/extra.json"  # sorts after FILE: still in the tree when it fails
+        real_move = shutil.move
+
+        def move(src, dst, *args, **kwargs):
+            if dst.replace("\\", "/").endswith(FILE):
+                raise PermissionError(13, "held open by an editor", dst)
+            return real_move(src, dst, *args, **kwargs)
+
+        self.claude(
+            approving({FILE: TEST_REVIEW_MUL + "\n# round 2\n", DATA: "{}\n", late: "[]\n"})
+        )
+        with mock.patch("revali.testarchive.shutil.move", side_effect=move):
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn(FILE, out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.status(), "")
+        self.assertFalse(self.exists(late))
+        self.assertFalse(self.exists(FILE))
+        self.assertFalse(os.path.exists(self.archived(late)))
+        self.assert_archive_is_round_one()
+        state = self.state()
+        self.assertEqual(state.placed_test_files, [])
+        self.assertEqual(sorted(state.test_files), [DATA, FILE])
+        # the next run needs no hand deletion: preflight passes and the round archives
+        self.claude(approving({FILE: TEST_REVIEW_MUL + "\n# round 3\n", DATA: "{}\n"}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("working tree is not clean", out)
+        self.assertEqual(self.status(), "")
+        self.assertEqual(read(self.archived(FILE)), TEST_REVIEW_MUL + "\n# round 3\n")
+        self.assertEqual(sorted(self.state().test_files), [DATA, FILE])
 
 
 class OwnershipTests(ArchiveModeCase):
