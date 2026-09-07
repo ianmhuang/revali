@@ -2,7 +2,9 @@
 tests under `.revali/<branch>/tests/` instead of committing them."""
 
 import os
+import shutil
 import unittest
+from unittest import mock
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, STATE_VERSION
 from revali.config import ConfigError, parse_project_config
@@ -301,6 +303,33 @@ class Interrupted(ArchiveCase):
         self.assertEqual(self.status(), "")
         self.assert_archive_untouched()
         self.assertFalse(os.path.exists(self.archived(SECOND)))
+
+    def test_a_file_the_archive_cannot_take_stops_the_run(self):
+        # AC-5: an OSError while archiving (a file held open on Windows) is a Stop naming the
+        # path, not a traceback; the copies are removed, the next run picks up from the archive
+        real_move = shutil.move
+
+        def move(src, dst, *args, **kwargs):
+            if dst.replace("\\", "/").endswith(HELPER):
+                raise PermissionError(13, "held open by an editor", dst)
+            return real_move(src, dst, *args, **kwargs)
+
+        self.claude(approving(**{FILE: TEST_REVIEW_MUL + "\n# round 2\n", HELPER: "{}\n"}))
+        with mock.patch("revali.testarchive.shutil.move", side_effect=move):
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("could not archive the reviewer's test file %s" % HELPER, out)
+        self.assertIn("held open by an editor", out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.status(), "")  # the copy left in test_dir was removed
+        state = self.state()
+        self.assertFalse(state.reviewer_running)
+        self.assertEqual(state.placed_test_files, [])
+        self.assertEqual(read(self.archived(HELPER)), "{}\n")
+        out = self.run_ok(approving(**{FILE: TEST_REVIEW_MUL + "\n# round 3\n", HELPER: "{}\n"}))
+        self.assertIn("archived 2 test file(s)", out)
+        self.assertEqual(read(self.archived(FILE)), TEST_REVIEW_MUL + "\n# round 3\n")
+        self.assertEqual(self.state().test_files, BOTH)
 
     def test_a_killed_session_is_cleaned_by_the_next_run(self):
         # AC-5, AC-6

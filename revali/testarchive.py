@@ -159,13 +159,20 @@ def take(
     deleted, and make `files` the state's list."""
     root = archive_dir(rdir)
     kept = [p.replace("\\", "/") for p in files]
-    for rel in kept:
-        src = os.path.join(ctx.repo_root, rel)
-        dst = os.path.join(root, rel)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        if os.path.exists(dst):
-            os.remove(dst)
-        shutil.move(src, dst)
+    rel = ""
+    try:
+        for rel in kept:
+            src = os.path.join(ctx.repo_root, rel)
+            dst = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(src, dst)  # replaces dst; on failure dst keeps the previous content
+    except OSError as exc:  # a locked file on Windows, a full disk
+        # the files moved before it are archived, the others keep their previous content;
+        # the next run rebuilds the state's list from the archive, and the cleanup after
+        # this Stop removes the placed copies
+        raise Stop(
+            EXIT_ERROR, "could not archive the reviewer's test file %s: %s" % (rel, exc)
+        ) from exc
     gone = [p for p in archived_files(rdir) if p not in kept]
     for rel in gone:
         _remove_archived(rdir, rel)
