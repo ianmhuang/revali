@@ -1,7 +1,7 @@
 """revali - headless review / validate / merge pipeline for feature branches."""
 
 NAME = "revali"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 CONFIG_VERSION = 1
 STATE_VERSION = 6
 PROMPT_VERSION = "8"  # bumped when prompts/, schemas/ or checklists/ change

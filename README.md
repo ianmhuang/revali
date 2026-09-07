@@ -90,14 +90,14 @@ everything between them is automatic. Exit codes: `0` done / ready to merge,
 `1` pipeline error (not a verdict), `2` the Developer must act (fix, rebase,
 answer a question), `3` a human must decide, `4` (`wait` only) still running.
 
-Status: package version 0.2.0, the v1.0 feature set plus the multi-session
-work of PR #21 to #24 (no console windows, identity lines, one run per
-working tree, sandbox directories per branch, merge from a worktree) and
-the validation work of PR #28 to #33: stage and sandbox timings in the log
-and history, the baseline reused when only the reviewer's test commits
-changed, the reviewer's tests rerun on the base tip before a failure is
-diagnosed, the project's `lint` line gating those tests, and a GitHub issue
-for a bug the base already had. Verified end to end on a private GitHub
+Status: package version 0.3.0, the v1.0 feature set plus multi-session work
+(PR #21 to #24: no console windows, identity lines, one run per working tree,
+sandbox directories per branch, merge from a worktree), validation work
+(PR #28 to #33: stage and sandbox timings, the baseline reused when only the
+reviewer's test commits changed, those tests rerun on the base tip before a
+diagnosis, the project's `lint` line gating them, an issue for a bug the base
+already had) and archive work (PR #38 to #43: a merged branch's review files
+kept under `[paths] archive_dir`, `[review] tests = "archive"`, no request on the PR). Verified end to end on a private GitHub
 repository with real Reviewer sessions and real WSL and ssh sandboxes
 ([docs/sandbox.md](docs/sandbox.md) has the record); revali reviews its own changes on this
 public one.
