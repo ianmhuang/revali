@@ -4,6 +4,7 @@ trailer commits none of whose files survive, `commit_paths` runs without `--root
 `_close_stopped` restores the whole state, and the state-write retry meets a real reader on
 Windows."""
 
+import json
 import os
 import subprocess
 import sys
@@ -168,11 +169,43 @@ class EmptiedCommitIsNamed(ro.RewriteCase):
         self.assertIn("recovered", out)
         line = out.split("recovered", 1)[1].split("\n", 1)[0]
         self.assertIn("tests/test_review_mul.py", line)
-        self.assertIn("none of the files of 1 of them", line)
+        self.assertIn("none of the files of 1 of them is still the reviewer's", line)
         self.assertIn(rebased[1][:10], line.split("none of the files", 1)[1])
         state = State.load(self.rdir())
         self.assertEqual(state.test_files, ["tests/test_review_mul.py"])
         self.assertEqual(state.test_commits[:2], rebased)
+
+    def test_a_state_that_kept_its_files_but_lost_its_commits(self):  # AC-4: no recovered line
+        """Nothing to recover (the files are in the state), yet the emptied commit is new to
+        the state: it gets a line of its own."""
+        self.first_round()
+        self.fix_and_commit()
+        self.claude(_mul2_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        first, second = ro.trailer_commits(self.repo)
+        git(["rm", "-q", "tests/test_review_mul2.py"], self.repo)
+        git(["commit", "-q", "-m", "drop the second test"], self.repo)
+        path = State.path(self.rdir())
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            data = json.load(fh)
+        data["test_commits"] = []
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(data, fh)
+        self.claude(claude_entry(approve_response(), write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("recovered", out)
+        self.assertNotIn("starts over", out)
+        lines = [ln for ln in out.splitlines() if "none of their test files" in ln]
+        self.assertEqual(len(lines), 1, out)
+        self.assertIn(second[:10], lines[0])
+        self.assertNotIn(first[:10], lines[0])
+        state = State.load(self.rdir())
+        self.assertEqual(state.test_commits[:2], [first, second])
+        self.assertEqual(
+            state.test_files, ["tests/test_review_mul.py", "tests/test_review_mul2.py"]
+        )
 
     def test_nothing_new_logs_nothing(self):  # AC-4: once
         self.first_round()

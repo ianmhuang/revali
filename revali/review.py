@@ -238,14 +238,17 @@ def branch_test_commits(ctx: Context) -> Tuple[List[Tuple[str, List[str]]], Dict
     new SHAs; a rewrite that drops the trailer (the author folds the reviewer's commit into
     their own) drops the ownership with it.
 
-    The newest commit in the range that added a path decides whose the path is: a file the
-    author deleted and re-created under the reviewer's file name, in a commit without the
-    trailer, is the author's. Those are returned separately, as {path: sha of the commit that
-    re-added it}, "" when no commit in the range added the path at all."""
+    The newest commit in the range that added a path decides whose the path is, as git sees
+    it: the author takes a file over by deleting it in one commit and re-creating the name in
+    a later commit without the trailer. A commit that replaces the content in place is a
+    modification to git, like any edit, and changes nothing. The taken-over paths are
+    returned separately, as {path: sha of the commit that re-added it}, "" when no commit in
+    the range added the path at all."""
     tracked = set(tracked_test_files(ctx))
     test_dir = ctx.cfg.project.test_dir
     found = gitops.trailer_commits(ctx.base_ref, "HEAD", TRAILER, ctx.repo_root)
     reviewer = {sha for sha, _ in found}
+    added_by: Dict[str, str] = {}  # one git call per path, whichever side owns it
     out = []
     taken: Dict[str, str] = {}
     for sha, _ in found:
@@ -253,13 +256,12 @@ def branch_test_commits(ctx: Context) -> Tuple[List[Tuple[str, List[str]]], Dict
         for p in gitops.commit_paths(sha, ctx.repo_root):
             if not under_test_dir(p, test_dir) or p not in tracked:
                 continue
-            if p in taken:
-                continue
-            added_by = gitops.last_add_commit(ctx.base_ref, "HEAD", p, ctx.repo_root)
-            if added_by in reviewer:
+            if p not in added_by:
+                added_by[p] = gitops.last_add_commit(ctx.base_ref, "HEAD", p, ctx.repo_root)
+            if added_by[p] in reviewer:
                 paths.append(p)
             else:
-                taken[p] = added_by
+                taken[p] = added_by[p]
         out.append((sha, sorted(paths)))
     return out, taken
 
@@ -295,7 +297,7 @@ def recover_test_ownership(
             )
         )
         if emptied:
-            message += "; none of the files of %d of them is still in HEAD: %s" % (
+            message += "; none of the files of %d of them is still the reviewer's in HEAD: %s" % (
                 len(emptied),
                 ", ".join(c[:10] for c in emptied),
             )
@@ -304,15 +306,24 @@ def recover_test_ownership(
         log.stage(
             "run",
             "found %d earlier reviewer test commit(s) on the branch (%s trailer) but none of "
-            "their test files is still in HEAD: %s"
+            "their test files is still the reviewer's in HEAD: %s"
             % (len(commits), TRAILER, ", ".join(c[:10] for c in commits)),
+        )
+    elif log and emptied:
+        # the state kept its files but not its commits: nothing recovered, still worth a line
+        log.stage(
+            "run",
+            "found %d earlier reviewer test commit(s) on the branch (%s trailer) with none of "
+            "their test files still the reviewer's in HEAD: %s"
+            % (len(emptied), TRAILER, ", ".join(c[:10] for c in emptied)),
         )
     if log and dropped:
         log.stage(
             "run",
             "the reviewer's test file(s) were deleted and re-created by a commit without the "
             "%s trailer; they are the author's now, existing files the reviewer must not "
-            "modify: %s"
+            "modify (to hand one back, delete it in a commit of its own and let the reviewer "
+            "re-create it): %s"
             % (
                 TRAILER,
                 ", ".join(
