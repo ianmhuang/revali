@@ -57,7 +57,7 @@ stated.
 - after a failed validation whose diagnosis marks a failure `cause: code`
   and `introduced_by: base` (with `[validate] issue_on`, the default): one
   `gh issue create` as the author, title `Pre-existing: <test> fails on
-  <base>`, body from [`templates/issue.md`](../templates/issue.md), `--label bug` only when
+  <base>`, body from [templates/issue.md](../templates/issue.md), `--label bug` only when
   `gh label list` shows that label, `--assignee <author>` unless
   `issue_assignee = ""`; on a repository that is not private the output,
   the diagnosis text and the suggested fix are withheld from the body. The

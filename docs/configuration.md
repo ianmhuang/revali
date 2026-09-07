@@ -10,7 +10,7 @@ them:
    `history_path`, and any `[section]` from the project file (a WSL distro
    name, a budget, a pinned model). `REVALI_HOME` moves the directory.
 3. `revali.toml` in the project root: the commands to build and test, the
-   platforms, anything project-specific. [`templates/revali.toml`](../templates/revali.toml) is a
+   platforms, anything project-specific. [templates/revali.toml](../templates/revali.toml) is a
    starting point; a key left out inherits from the layers above.
 
 Unknown keys are errors in every layer. `[review] engine` and
@@ -30,7 +30,7 @@ false to run the suite every time.
 in the reviewer's tests (`new_test`) run the same test files once more on
 the base tip, so the diagnosis session can tell whether the branch
 introduced the failure or inherited it (`introduced_by` in its answer);
-see [`docs/sandbox.md`](sandbox.md). False skips that rerun.
+see [docs/sandbox.md](sandbox.md). False skips that rerun.
 `[validate] issue_on` (default true) opens one GitHub issue when the
 diagnosis of a failed validation marks a failure `cause: code` and
 `introduced_by: base`: the reviewer's test fails on the base tip for the
@@ -39,7 +39,7 @@ issue is created with `gh issue create` as the author, titled
 `Pre-existing: <test id> fails on <base>`, labelled `bug` when the
 repository has that label (revali creates no label), and assigned to the
 author's gh login when `issue_assignee = "author"` (the default; `""`
-leaves it unassigned). Its body is [`templates/issue.md`](../templates/issue.md) in revali, a
+leaves it unassigned). Its body is [templates/issue.md](../templates/issue.md) in revali, a
 `$placeholder` template (`$pr`, `$pr_url`, `$round`, `$validation`,
 `$version`, `$branch`, `$base`, `$base_sha`, `$tests`, `$evidence`,
 `$diagnosis`, `$acceptance`, `$fix`); `issue_template` names a project file
@@ -50,7 +50,7 @@ failing tests an earlier issue of the branch already names links that issue
 instead. The issue numbers are in `state.json` (`issues`), `tests.md`, the
 PR comment and the `ACTION NEEDED` summary; `revali merge` comments on
 every one a branch commit references with `Fixes #n` (see
-[`docs/side-effects.md`](side-effects.md)). False opens nothing.
+[docs/side-effects.md](side-effects.md)). False opens nothing.
 `[project] lint` is one shell line (`ruff check . && black --check .`, say)
 that preflight runs on the working tree and stops on with exit 2; the same
 line gates the reviewer's tests: after the reviewer writes them the line

@@ -367,7 +367,7 @@ class DependenciesAndDocs(unittest.TestCase):
         files = read(os.path.join(ROOT, "docs", "files.md"))
         archive_row = [ln for ln in files.splitlines() if "archive of a merged branch" in ln]
         self.assertEqual(len(archive_row), 1, archive_row)
-        self.assertIn("[`tools/backfill_archive.py`](../tools/backfill_archive.py)", archive_row[0])
+        self.assertIn("[tools/backfill_archive.py](../tools/backfill_archive.py)", archive_row[0])
 
 
 if __name__ == "__main__":

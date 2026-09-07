@@ -70,7 +70,7 @@ class ReadmeFrontPage(unittest.TestCase):
     def test_documentation_index_links_every_docs_file(self):
         index = h2_section(self.text, "Documentation")
         for name in sorted(os.listdir(os.path.join(ROOT, "docs"))):
-            self.assertIn("`docs/%s`" % name, index, name)
+            self.assertIn("[docs/%s](docs/%s)" % (name, name), index, name)
         self.assertEqual(set(os.listdir(os.path.join(ROOT, "docs"))), set(DOCS))
 
     def test_moved_sections_are_gone_from_the_readme(self):
@@ -152,7 +152,7 @@ class CrossReferences(unittest.TestCase):
 
     def test_conventions_point_at_docs(self):
         text = read("CONVENTIONS.md")
-        self.assertIn("`docs/side-effects.md`", text)
+        self.assertIn("[docs/side-effects.md](docs/side-effects.md)", text)
         self.assertNotIn('"What revali does to your repository"', text)
         self.assertIn("`docs/`", text)
 
@@ -475,7 +475,7 @@ class VerificationRecord(unittest.TestCase):
         status = next(line for line in read("README.md").splitlines() if line.startswith("Status:"))
         text = read("README.md")
         para = text[text.index(status) :].split("\n\n", 1)[0]
-        self.assertIn("`docs/sandbox.md`", para)
+        self.assertIn("[docs/sandbox.md](docs/sandbox.md)", para)
 
 
 if __name__ == "__main__":

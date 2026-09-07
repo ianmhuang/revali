@@ -23,7 +23,9 @@ PINNED = {
     ("docs/configuration.md", "defaults.toml"),
 }
 REF = re.compile(r"`((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:md|toml|json|py)|LICENSE)`")
-LINK = re.compile(r"\[`[^`]+`\]\(([^)]+)\)")
+LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+# docs/plain-links: the link text is the plain path, `[docs/x.md](docs/x.md)`, no backticks
+BACKTICKED_LINK = re.compile(r"\[`[^\]]*`\]\(")
 
 
 def read(rel):
@@ -89,11 +91,11 @@ class ReadmeSections(unittest.TestCase):
 
     def test_documentation_lists_the_skill_and_the_snippet(self):
         index = self.section("Documentation")
-        self.assertIn("[`skill/SKILL.md`](skill/SKILL.md)", index)  # AC-4
+        self.assertIn("[skill/SKILL.md](skill/SKILL.md)", index)  # AC-4
         self.assertIn("`/revali`", index)
-        self.assertIn("[`templates/CLAUDE-snippet.md`](templates/CLAUDE-snippet.md)", index)  # AC-4
+        self.assertIn("[templates/CLAUDE-snippet.md](templates/CLAUDE-snippet.md)", index)  # AC-4
         for name in sorted(os.listdir(os.path.join(ROOT, "docs"))):
-            self.assertIn("[`docs/%s`](docs/%s)" % (name, name), index, name)
+            self.assertIn("[docs/%s](docs/%s)" % (name, name), index, name)
 
     def test_readme_is_still_a_front_page(self):
         self.assertLessEqual(len(self.text.splitlines()), 170)
@@ -129,21 +131,20 @@ class LinksToRepositoryFiles(unittest.TestCase):
                         broken.append("%s:%d missing: %s" % (page, no, href))
         self.assertEqual(broken, [])  # AC-5
 
-    def test_link_text_keeps_the_backticks(self):
-        # the earlier README tests look for `docs/x.md` as text; the link must carry it
-        plain = re.compile(r"\[(?!`)[^\]]*\]\((?:\.\./)?(?:docs|templates|skill)/")
+    def test_link_text_is_the_plain_path(self):
+        # docs/plain-links AC-1: no backticks inside the link text, as in bmc-toolkit's README
         for page in PAGES:
             for no, line in prose_lines(read(page)):
-                self.assertIsNone(plain.search(line), "%s:%d %s" % (page, no, line))
+                self.assertIsNone(BACKTICKED_LINK.search(line), "%s:%d %s" % (page, no, line))
 
     def test_pinned_phrases_and_per_project_names_stay_plain(self):
         workflow = " ".join(read("docs/workflow.md").split())  # the sentence wraps
         self.assertIn("(see `templates/user-config.toml`)", workflow)  # AC-5 exception
-        self.assertNotIn("[`templates/user-config.toml`]", workflow)
+        self.assertNotIn("[templates/user-config.toml]", workflow)
         configuration = read("docs/configuration.md")
         self.assertIn("1. `defaults.toml`", configuration)  # AC-5 exception
         for page in PAGES:
-            self.assertNotIn("[`revali.toml`]", read(page), page)
+            self.assertNotIn("[revali.toml]", read(page), page)
 
 
 class CopiedAndSessionFilesHaveNoLinks(unittest.TestCase):

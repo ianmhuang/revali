@@ -69,14 +69,14 @@ class ReadmeIsAFrontPage(unittest.TestCase):
         body = unwrap(m.group(1))
         sentences = [s for s in re.split(r"(?<=[.!?])\s+(?=[A-Z])", body) if s.strip()]
         self.assertLessEqual(len(sentences), 4, sentences)
-        self.assertIn("`docs/workflow.md`", body)
+        self.assertIn("[docs/workflow.md](docs/workflow.md)", body)
 
     def test_documentation_index_links_every_file_under_docs(self):
         index = h2(self.text, "Documentation")
         names = sorted(os.listdir(os.path.join(ROOT, "docs")))
         self.assertEqual(names, sorted(DOCS), "docs/ holds files the index does not know")
         for name in names:
-            self.assertIn("`docs/%s`" % name, index, name)
+            self.assertIn("[docs/%s](docs/%s)" % (name, name), index, name)
 
     def test_the_moved_sections_are_no_longer_readme_headings(self):
         for heading in (
@@ -126,7 +126,9 @@ class DocsHoldTheFormerSections(unittest.TestCase):
         self.assertIn("After exit code 2 the author fixes or answers", whole)  # exit 2
         self.assertIn("A run that stops without a result", whole)  # a dead run
         self.assertIn("status: draft", h2(text, "Workflow"))
-        self.assertIn("`templates/revali.toml`", h2(text, "Project setup"))
+        self.assertIn(
+            "[templates/revali.toml](../templates/revali.toml)", h2(text, "Project setup")
+        )
 
     def test_sandbox_doc(self):
         text = read("docs", "sandbox.md")
@@ -265,7 +267,7 @@ class CrossReferencesFollowTheMove(unittest.TestCase):
 
     def test_conventions_name_the_docs(self):
         text = read("CONVENTIONS.md")
-        self.assertIn("`docs/side-effects.md`", text)
+        self.assertIn("[docs/side-effects.md](docs/side-effects.md)", text)
         self.assertIn("`docs/`", text)
         self.assertNotIn('"What revali does to your repository"', text)
 
@@ -338,7 +340,7 @@ class SshVerificationRecord(unittest.TestCase):
         text = read("README.md")
         status = next(line for line in text.splitlines() if line.startswith("Status:"))
         para = unwrap(text[text.index(status) :].split("\n\n", 1)[0])
-        self.assertIn("`docs/sandbox.md`", para)
+        self.assertIn("[docs/sandbox.md](docs/sandbox.md)", para)
 
 
 if __name__ == "__main__":
