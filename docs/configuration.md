@@ -88,8 +88,8 @@ that HEAD tracks is yours and is removed from the archive. `revali status`
 prints the recorded mode (`tests: archive`) once the branch has a round.
 A commit-mode run that finds that directory non-empty (rounds in archive
 mode, then a `reset` and the key switched) logs the files it will never
-use; delete the directory yourself, or they move to `archive_dir` with
-the rest at merge.
+use, on `run --dry-run` too; delete the directory yourself, or they move
+to `archive_dir` with the rest at merge.
 
 Models: `model = "auto"` (the default) picks the Reviewer one tier above
 the Developer's model (`author_model` in `change.md`) and the diagnosis

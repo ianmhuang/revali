@@ -90,6 +90,9 @@ class ArchiveCase(RepoCase):
     def status(self):
         return git(["status", "--porcelain"], self.repo).strip()
 
+    def isdir(self, rel):
+        return os.path.isdir(os.path.join(self.repo, rel))
+
     def head(self):
         return git(["rev-parse", "HEAD"], self.repo).strip()
 
@@ -429,9 +432,6 @@ class Pruning(ArchiveCase):
         self.assertEqual(self.status(), "")
         self.assertEqual(archived_files(self.rdir()), placed)
 
-    def isdir(self, rel):
-        return os.path.isdir(os.path.join(self.repo, rel))
-
 
 class Status(ArchiveCase):
     def test_status_prints_the_recorded_mode(self):
@@ -444,6 +444,18 @@ class Status(ArchiveCase):
         code, out = run_cli(["status"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("\ntests: archive\n", out)
+        self.assertIn("\nround: 1, fixes: 0,", out)  # the rounds recorded, not a dead field
+
+    def test_status_prints_commit_for_a_state_from_before_the_key(self):
+        # round 1 F1: a state with rounds and no recorded mode runs as commit, status says so
+        self.claude(requesting_changes(**{FILE: TEST_REVIEW_MUL}))
+        self.assertEqual(run_cli(["run", "--foreground"])[0], EXIT_ACTION)
+        state = self.state()
+        state.tests_mode = ""
+        state.save(self.rdir())
+        code, out = run_cli(["status"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("\ntests: commit\n", out)
 
     def test_status_prints_commit_for_the_default_mode(self):
         # fix/archive-followups AC-2

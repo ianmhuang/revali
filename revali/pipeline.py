@@ -730,9 +730,11 @@ def cmd_status(args) -> int:
             )
         if state.message:
             print("message: %s" % state.message)
-        print("round: %d, fixes: %d, cost: $%.2f" % (state.round, state.fixes, state.cost_usd))
-        if state.tests_mode:  # recorded by the first round; fixed for the branch after that
-            print("tests: %s" % state.tests_mode)
+        print(
+            "round: %d, fixes: %d, cost: $%.2f" % (len(state.rounds), state.fixes, state.cost_usd)
+        )
+        if state.rounds:  # the mode the first round fixed; a state from before the key: commit
+            print("tests: %s" % (state.tests_mode or "commit"))
         if state.pr_url:
             print("pr: %s" % state.pr_url)
         print("updated: %s" % state.updated_at)
