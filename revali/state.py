@@ -64,6 +64,8 @@ class State:
     )  # per validation run: result, failed_step, cause
     test_commits: List[str] = field(default_factory=list)
     test_files: List[str] = field(default_factory=list)
+    tests_mode: str = ""  # [review] tests the rounds ran with: "commit" | "archive"; "" (a state
+    # from before the key) counts as commit (STATE_VERSION 6)
     baseline_sha: str = ""  # the commit the baseline suite passed on (STATE_VERSION 4)
     issues: List[dict] = field(
         default_factory=list

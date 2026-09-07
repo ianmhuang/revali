@@ -85,6 +85,11 @@ class ReviewCfg:
     timeout_min: int = 0
     exclude: List[str] = field(default_factory=list)
     security_paths: List[str] = field(default_factory=list)
+    tests: str = ""  # where the reviewer's tests go: "commit" (into the branch) | "archive"
+    # (kept under <state_dir>/<branch>/tests/, never committed)
+
+
+TESTS_MODES = ("commit", "archive")
 
 
 @dataclass
@@ -429,6 +434,16 @@ def parse_project_config(
         )
     if review.max_fixes < 0:
         problems.append("review.max_fixes must be >= 0")
+    if review.tests not in TESTS_MODES:
+        problems.append(
+            "review.tests must be %s (got %r)"
+            % (" or ".join('"%s"' % m for m in TESTS_MODES), review.tests)
+        )
+    elif review.tests == "archive" and not paths.archive_dir.strip():
+        problems.append(
+            'review.tests = "archive" needs a non-empty paths.archive_dir: the archived tests '
+            "would be deleted with the branch directory at merge"
+        )
     if merge.method not in ("squash", "merge", "rebase"):
         problems.append("merge.method must be squash, merge or rebase")
     if validate.issue_assignee not in ("author", ""):

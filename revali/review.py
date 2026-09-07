@@ -266,6 +266,11 @@ def branch_test_commits(ctx: Context) -> Tuple[List[Tuple[str, List[str]]], Dict
     return out, taken
 
 
+def short_shas(shas: Sequence[str]) -> str:
+    """`a1b2c3d4e5, f6a7b8c9d0`: the log's spelling of a list of commits."""
+    return ", ".join(sha[:10] for sha in shas)
+
+
 def recover_test_ownership(
     ctx: Context, state: State, log: Optional[RunLog]
 ) -> Tuple[List[str], List[str]]:
@@ -293,13 +298,13 @@ def recover_test_ownership(
                 len(commits),
                 TRAILER,
                 ", ".join(new_files),
-                ", ".join(c[:10] for c in commits),
+                short_shas(commits),
             )
         )
         if emptied:
             message += "; none of the files of %d of them is still the reviewer's in HEAD: %s" % (
                 len(emptied),
-                ", ".join(c[:10] for c in emptied),
+                short_shas(emptied),
             )
         log.stage("run", message)
     elif log and emptied:
@@ -309,7 +314,7 @@ def recover_test_ownership(
             "run",
             "found %d earlier reviewer test commit(s) on the branch (%s trailer) but none of "
             "their test files is still the reviewer's in HEAD: %s"
-            % (len(emptied), TRAILER, ", ".join(c[:10] for c in emptied)),
+            % (len(emptied), TRAILER, short_shas(emptied)),
         )
     re_added = [f for f in dropped if taken[f]]
     never_added = [f for f in dropped if not taken[f]]
@@ -320,7 +325,10 @@ def recover_test_ownership(
             "%s trailer; they are the author's now, existing files the reviewer must not "
             "modify (to hand one back, delete it in a commit of its own and let the reviewer "
             "re-create it): %s"
-            % (TRAILER, ", ".join("%s (re-added by %s)" % (f, taken[f][:10]) for f in re_added)),
+            % (
+                TRAILER,
+                ", ".join("%s (re-added by %s)" % (f, short_shas([taken[f]])) for f in re_added),
+            ),
         )
     if log and never_added:
         log.stage(
@@ -613,8 +621,16 @@ def discard_round_leftovers(
     `revali reset`. `only` limits the deletion to the paths named (see
     discard_unfinished_tests); an interrupted session's files are not known, so those callers
     leave it None. `tolerated_next_run` False skips the "next run will tolerate" line: `reset`
-    drops the state that would carry the list and gives its own advice."""
-    _, stuck = discard_unfinished_tests(ctx, log, left_by, stage=stage, only=only)
+    drops the state that would carry the list and gives its own advice. In archive mode the
+    copies of the archived files the round placed in test_dir go first (by the state's list,
+    whatever their names), the archive itself is never touched."""
+    from revali import testarchive  # lazily: testarchive uses this module's helpers
+
+    stuck: List[str] = []
+    if testarchive.archive_mode(ctx, state):
+        _, stuck = testarchive.remove_placed(ctx, state, log, stage)
+    _, more = discard_unfinished_tests(ctx, log, left_by, stage=stage, only=only)
+    stuck += more
     drop_pending_tests(
         ctx, state, log, stage=stage, keep=stuck, tolerated_next_run=tolerated_next_run
     )
@@ -1216,12 +1232,20 @@ def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> R
 
 
 def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> RoundOutcome:
+    from revali import testarchive
+
     round_no = len(state.rounds) + 1
     needs_info_allowed = not state.needs_info_used
     bounce_notes = ""
     bounces = 0
     attempt = 0
     total_cost = 0.0
+    archive = testarchive.archive_mode(ctx, state)
+    if archive:
+        # the copies placed below are leftovers from here on, should the round not take them back
+        state.reviewer_running = True
+        state.save(rdir)
+        testarchive.place_back(ctx, state, rdir, log)
     while True:
         attempt += 1
         prompt = build_prompt(ctx, state, rdir, round_no, bounce_notes)
@@ -1304,7 +1328,10 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
         ctx.head_sha
     )  # what the reviewer saw; ctx.head_sha moves on with the run's commits
     commit_sha = ""
-    if files and verdict != NEEDS_INFO:
+    if archive:
+        # every verdict, NEEDS_INFO included: the archive is where the next round finds them
+        testarchive.take(ctx, state, rdir, files, log)
+    elif files and verdict != NEEDS_INFO:
         check_tree_unmoved(ctx)
         state.pending_effect = "commit-tests"
         state.save(rdir)
@@ -1317,7 +1344,8 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
                 state.test_files.append(f)
     # NEEDS_INFO keeps its files uncommitted for the next round to update; the state remembers
     # them so preflight tolerates exactly those. Any other verdict has committed or lost them.
-    state.pending_test_files = list(files) if verdict == NEEDS_INFO else []
+    state.pending_test_files = list(files) if verdict == NEEDS_INFO and not archive else []
+    state.tests_mode = testarchive.ARCHIVE_MODE if archive else "commit"
 
     meta = {
         "tool": "revali",

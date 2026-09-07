@@ -48,7 +48,23 @@ stated.
   uncommitted in `test_dir`: the state file lists them, the clean-tree check
   tolerates exactly those paths, and the next round commits or removes
   them. Do not commit them by hand; a file you commit becomes one the
-  reviewer did not write and is protected like any other
+  reviewer did not write and is protected like any other.
+  With `[review] tests = "archive"` none of this commits anything: the
+  reviewer writes into `test_dir` as before and the `lint` line and the
+  smoke run see the files there, but at the end of every round (a
+  NEEDS_INFO round too) they are moved to `.revali/<branch>/tests/<their
+  repository path>`, the tree is clean again, HEAD is unchanged and no
+  push follows. The next round starts by copying them back into `test_dir`
+  (untracked) for the reviewer to update or delete; a file the reviewer
+  deletes leaves the archive and the state. Validation and the base rerun
+  copy the archived files into the sandbox clone at the same paths. The
+  state's list of the reviewer's files is rebuilt from that directory on
+  every run (`revali reset` loses none of them); an archived path that HEAD
+  tracks is yours and is removed from the archive, the log says which. A
+  rebase or amend does not restart the review in this mode (there is no
+  reviewer commit to lose); the next push is forced with lease. The mode
+  is fixed once a branch has review rounds: a run with the other value
+  stops with exit 2 before it pushes anything
 - posts review and validation results as PR comments; on a repository that
   is not private the comments are summaries (verdict, model, cost, finding
   ids with severity and location, test files, AC coverage, validation exit
@@ -110,7 +126,11 @@ stated.
   untracked draft on the pattern survives); with no pending files
   and no interrupted round it touches nothing under `test_dir`, and when
   the project does not load, or a file cannot be deleted, it prints the
-  paths for you to delete by hand.
+  paths for you to delete by hand. With `[review] tests = "archive"` the
+  same cleanups also delete the copies of the archived files the round had
+  placed in `test_dir` (by the state's list, whatever their names); the
+  archive under `.revali/<branch>/tests/` keeps the previous round's
+  content and is never touched by a cleanup.
   A finished
   `run --dry-run` is not an interrupted run, and neither `revali preflight`
   nor `run --dry-run` deletes.

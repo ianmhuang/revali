@@ -30,6 +30,9 @@ checklist = "CONVENTIONS.md"      # project layer; built-in and user layers are 
 # schema = "docs/review.schema.json"     # replace the built-in answer schema
 timeout_min = 20
 exclude = ["*.lock", "dist/**", "vendor/**"]
+tests = "commit"                  # the reviewer's tests are committed on the branch;
+                                  # tests = "archive" keeps them under .revali/<branch>/tests/ instead, never
+                                  # committed, archived with the branch directory at merge (needs [paths] archive_dir)
 
 [validate]
 engine = "claude"                 # which CLI runs the diagnosis session on FAIL
