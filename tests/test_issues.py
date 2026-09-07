@@ -485,6 +485,35 @@ class Units(unittest.TestCase):
         state.issues = [{"number": 40, "tests": [a, b]}, {"number": 41, "tests": [a, b]}]
         self.assertEqual(numbers([a, b]), [41])  # a single newest cover, not both
 
+    def test_already_open_drops_an_issue_the_older_ones_make_redundant(self):
+        a, b, c, d = "t::a", "t::b", "t::c", "t::d"
+        numbers = lambda issues, tests: [  # noqa: E731
+            i["number"] for i in already_open(State(issues=issues), tests)
+        ]
+        # #42 joins for c, #41 for a, #40 for b; #40 names a too, so #41 goes
+        issues = [
+            {"number": 40, "tests": [a, b]},
+            {"number": 41, "tests": [a]},
+            {"number": 42, "tests": [c]},
+        ]
+        self.assertEqual(numbers(issues, [a, b, c]), [42, 40])
+        # the oldest issue kept always stays; a newer one goes only against older kept ones
+        issues = [
+            {"number": 40, "tests": [a, b]},
+            {"number": 41, "tests": [c]},
+            {"number": 42, "tests": [a]},
+        ]
+        self.assertEqual(numbers(issues, [a, b, c]), [41, 40])
+        # an issue that names two tests newer ones split between them stays: it is what covers b
+        issues = [
+            {"number": 40, "tests": [a, b, d]},
+            {"number": 41, "tests": [b]},
+            {"number": 42, "tests": [c]},
+            {"number": 43, "tests": [a]},
+        ]
+        self.assertEqual(numbers(issues, [a, b, c]), [43, 42, 41])  # #40 never joins
+        self.assertEqual(numbers(issues, [a, b, d]), [40])  # a single cover, no union
+
     def test_issue_ref_line(self):
         self.assertEqual(IssueRef(7, "u").line(), "issue: #7 u")
         self.assertEqual(IssueRef(7, "u", existing=True).line(), "issue: #7 (already open) u")
