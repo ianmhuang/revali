@@ -94,14 +94,27 @@ class JobsEnv(unittest.TestCase):
         self.assertIn(self.workers_line(NOT_THE_DEFAULT), out)
 
     def test_a_bad_value_exits_1_before_any_worker_starts(self):
-        for bad in ("0", "-1", "-8", "eight", "2.5", "1e1", "0x8", "8 workers"):
+        # the last three are what int() alone would have read as 16, 8 and 2 (round 1, F2):
+        # an underscore, a sign, and a digit outside ASCII
+        arabic_two = chr(0x662)  # a digit int() reads as 2, outside ASCII
+        bads = ("0", "-1", "-8", "eight", "2.5", "1e1", "0x8", "8 workers", "1_6", "+8")
+        for bad in bads + (arabic_two,):
             code, out = self.run_runner(jobs_env=bad)
             self.assertEqual(code, 1, (bad, out))  # AC-7
             self.assertIn(VAR, out, bad)  # names the variable
-            self.assertIn(bad, out, bad)  # and the value
+            if bad.isascii():  # a non-ASCII value may be backslash-escaped on the child's stderr
+                self.assertIn(bad, out, bad)  # and the value
             self.assertNotIn("worker(s)", out, bad)  # AC-7: refused before the workers start
             self.assertNotIn("Ran ", out, bad)
             self.assertNotIn("OK", out, bad)
+
+    def test_a_refused_value_stops_list_too(self):
+        # one rule for the variable: `--list` does not get to ignore a typo (AC-7: before any
+        # worker starts, and here before collection is printed)
+        code, out = self.run_runner("--list", jobs_env="1_6")
+        self.assertEqual(code, 1, out)
+        self.assertIn(VAR, out)
+        self.assertNotIn("test_three", out)
 
 
 if __name__ == "__main__":
