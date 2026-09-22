@@ -4,7 +4,8 @@ host over that attempt's new test files and then lint, so a file that only neede
 passes without a model turn, with one log line per attempt naming the command and its exit
 (AC-1); preflight refuses a format line without `{files}` with exit 2, and a format line that
 exits non-zero or times out is logged while lint decides (AC-2); the prompt names the format
-command only when one is set (AC-3); PROMPT_VERSION moved (AC-6, the code half)."""
+command only when one is set, also with `lint` empty (AC-3); PROMPT_VERSION moved (AC-6, the
+code half). Round 2 adds the no-lint case and the timeout line's shape (round-1 F1 and F2)."""
 
 import json
 import os
@@ -78,6 +79,7 @@ class FormatRepo(RepoCase):
     """The fixture repo with the lint stub and, when `format_line` is set, the format stub."""
 
     format_line = "%s fmt_stub.py {files}" % PY
+    lint_line = "%s lint_stub.py" % PY  # "" leaves the fixture's empty lint line in place
 
     def setUp(self):
         super().setUp()
@@ -86,7 +88,9 @@ class FormatRepo(RepoCase):
         os.environ.pop("REVALI_FMTGATE_EXIT", None)
         os.environ.pop("REVALI_FMTGATE_NOOP", None)
         self.write("lint_stub.py", LINT_STUB)
-        toml = self.read("revali.toml").replace('lint = ""', 'lint = "%s lint_stub.py"' % PY)
+        toml = self.read("revali.toml")
+        if self.lint_line:
+            toml = toml.replace('lint = ""', 'lint = "%s"' % self.lint_line)
         if self.format_line:
             # the stub is only in the tree (and so in the diff the prompt carries) when used
             self.write("fmt_stub.py", FORMAT_STUB)
@@ -189,7 +193,13 @@ class FormatFails(FormatRepo):
         self.assertIn("READY TO MERGE", out)
         self.assertEqual(len(self.fake_calls("claude")), 2, out)  # lint red once, then green
         log = self.run_log()
-        self.assertEqual(len(review_lines(log, "timed out")), 2, log)  # AC-2: logged
+        timed = review_lines(log, "timed out")
+        self.assertEqual(len(timed), 2, log)  # AC-2: logged, once per attempt
+        for line in timed:
+            # AC-1: the same shape as the exit line, so one pattern finds every format run:
+            # the file count, then the command in backquotes, then what happened
+            self.assertIn("format of 1 new test file(s) with `", line)
+            self.assertIn("fmt_stub.py " + FILE + "`: timed out", line)
         self.assertEqual(len(lint_lines(log)), 2, log)  # lint still ran each time
 
 
@@ -227,6 +237,35 @@ class Prompt(FormatRepo):
 
     def test_prompt_version_moved_past_8(self):
         self.assertGreaterEqual(int(PROMPT_VERSION), 9)  # AC-6
+
+
+class FormatWithoutLint(FormatRepo):
+    """`format` set, `lint` empty (round 1, F1): the formatter still rewrites the reviewer's
+    files, so the prompt still names it (AC-3) and preflight's empty-lint note says so."""
+
+    lint_line = ""
+
+    def test_prompt_still_names_the_format_command(self):
+        self.claude(writes(UNFORMATTED))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        prompt = self.fake_calls("claude")[0]["prompt"]
+        named = [line for line in prompt.splitlines() if "`%s`" % self.format_line in line]
+        self.assertEqual(len(named), 1, prompt)  # AC-3: format is set, so the prompt speaks
+        self.assertRegex(named[0], r"(?i)format")
+        self.assertNotIn("lint command", prompt)  # and claims no lint gate that does not run
+        # the file was formatted and committed although nothing checked it
+        self.assertEqual(self.fmt_calls(), [[FILE]])
+        self.assertNotIn(MARKER, git(["show", "HEAD:" + FILE], self.repo))
+        self.assertEqual(lint_lines(self.run_log()), [])
+
+    def test_preflight_note_says_the_format_line_still_runs(self):
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_OK, out)
+        notes = [line for line in out.splitlines() if "preflight: note: lint is empty" in line]
+        self.assertEqual(len(notes), 1, out)
+        self.assertRegex(notes[0], r"(?i)format line")
+        self.assertIn("format: %s" % self.format_line, out)
 
 
 class NoFormatLine(FormatRepo):
