@@ -102,7 +102,20 @@ def _cmd_stats(args) -> int:
     return cmd_stats(args)
 
 
+def _tolerant_output() -> None:
+    """A stage message can hold anything a tool printed (black's emoji); on a console or pipe
+    whose encoding cannot represent it, print a replacement character rather than die."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
 def main(argv=None) -> int:
+    _tolerant_output()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

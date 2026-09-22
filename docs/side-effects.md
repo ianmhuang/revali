@@ -15,6 +15,10 @@ stated.
   pushing nothing from that point; `merge` holds the same lock while it
   checks out the base branch and pulls
 - `git push -u origin <branch>` and `gh pr create --draft`
+- runs `[project] format` on the host over the test files the reviewer
+  wrote in each attempt, just before the `lint` line below, and only over
+  those files (`{files}`); the formatter rewrites them in place, uncommitted.
+  An empty `format` line skips this
 - runs `[project] lint` a second time after the reviewer has written its test
   files, over the working tree with those files in it (preflight ran the same
   line before the reviewer started, so a failure now is the reviewer's files);

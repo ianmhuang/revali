@@ -20,6 +20,7 @@ from revali.config import (
     tool_file,
 )
 from revali.procs import ProcTimeout, run_shell
+from revali.runners import wants_files
 from revali.secretscan import format_hits, scan_diff
 from revali.state import RunLog, review_dir
 
@@ -29,9 +30,10 @@ DISABLE_ENV = "REVALI_DISABLE"
 class Stop(Exception):
     """Abort the pipeline with an exit code and a message for the author."""
 
-    def __init__(self, exit_code: int, message: str):
+    def __init__(self, exit_code: int, message: str, cost: float = 0.0):
         self.exit_code = exit_code
         self.message = message
+        self.cost = cost  # what a model session spent before it failed; 0.0 when none ran
         super().__init__(message)
 
 
@@ -261,11 +263,21 @@ def check_secrets(ctx: Context) -> None:
 
 
 def check_lint(ctx: Context) -> None:
+    fmt = ctx.cfg.project.format.strip()
+    if fmt and not wants_files(fmt):
+        raise Stop(
+            EXIT_ACTION,
+            "[project] format must name the reviewer's files through {files} (e.g. "
+            '"black {files}"); revali formats only those: %s' % fmt,
+        )
+    if fmt:
+        ctx.say("format: %s (the reviewer's new test files)" % fmt)
     cmd = ctx.cfg.project.lint.strip()
     if not cmd:
         ctx.notes.append(
             "lint is empty; formatting and style are not checked, neither on this diff "
             "nor on the reviewer's tests before they are committed ([project] lint)"
+            + ("; the format line still rewrites the reviewer's files" if fmt else "")
         )
         return
     ctx.say("lint: %s" % cmd)

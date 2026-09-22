@@ -4,6 +4,7 @@
 config_version = 1
 base_branch = "main"
 lint = "ruff check . && black --check ."   # settings in pyproject.toml; preflight stops with exit 2 on a failure
+format = "black {files}"                     # the reviewer's new test files, before the lint line
 platforms = ["linux"]
 test_dir = "tests"
 test_file_pattern = "test_review_{topic}.py"

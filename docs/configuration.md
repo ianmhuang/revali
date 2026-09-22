@@ -57,6 +57,15 @@ line gates the reviewer's tests: after the reviewer writes them the line
 runs again, a failure sends the reviewer back once, a second failure ends
 the run. Leave it empty and nothing checks formatting or style, for your
 diff or for the reviewer's files; preflight prints a note when that is so.
+`[project] format` (default empty) is the formatter for the reviewer's
+tests, one shell line with `{files}` (`black {files}`, say). The reviewer
+has no shell to run a formatter, so after each reviewer attempt revali runs
+this line on the host over that attempt's new test files, then the `lint`
+line: a file that only needed formatting passes without sending the
+reviewer back. `{files}` is required, so the line touches nothing else;
+preflight stops with exit 2 without it. The line's exit code is logged,
+not judged; lint decides. With `lint` empty the format line still runs and
+nothing checks its result; preflight's empty-lint note says so.
 `[paths] archive_dir` (default `archive`) is where `revali merge` moves the
 branch's `.revali/<branch>/` once the PR is merged, as
 `<owner>__<repo>/<pr>-<branch>/` under it: the review record outlives the
