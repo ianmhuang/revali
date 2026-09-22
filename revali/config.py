@@ -59,6 +59,7 @@ class ProjectCfg:
     base_branch: str = ""
     platforms: List[str] = field(default_factory=list)
     lint: str = ""
+    format: str = ""
     test_dir: str = ""
     test_file_pattern: str = ""
     test_guide: str = ""

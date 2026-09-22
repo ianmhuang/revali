@@ -13,7 +13,13 @@ from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
 from revali.preflight import Context, Stop, check_tree_unmoved
 from revali.procs import ProcTimeout, resolve, run, run_shell
-from revali.runners import RunnerError, get_runner, steps_with_files
+from revali.runners import (
+    FILES_PLACEHOLDER,
+    RunnerError,
+    files_argument,
+    get_runner,
+    steps_with_files,
+)
 from revali.state import (
     RunLog,
     State,
@@ -357,10 +363,17 @@ def _lint_section(ctx: Context) -> str:
     cmd = ctx.cfg.project.lint.strip()
     if not cmd:
         return ""
-    return (
+    text = (
         "The project's lint command `%s` must pass on your files: the script runs it over "
         "the tree before the smoke run and sends you back once when it fails.\n" % cmd
     )
+    fmt = ctx.cfg.project.format.strip()
+    if fmt:
+        text += (
+            "Before lint the script formats your test files with `%s`, so you need not "
+            "format them yourself.\n" % fmt
+        )
+    return text
 
 
 def _bounce_section(notes: str) -> str:
@@ -502,6 +515,7 @@ def spawn_reviewer(
             EXIT_ERROR,
             "reviewer output does not match the schema: %s; raw saved to %s"
             % ("; ".join(problems[:5]), raw_path),
+            cost=result.cost,
         )
     return ReviewerRun(
         data=result.data,
@@ -840,6 +854,33 @@ def compute_verdict(data: dict, gaps: List[str], needs_info_allowed: bool) -> Tu
     if data.get("verdict") == CHANGES_REQUESTED:
         return CHANGES_REQUESTED, ["reviewer requested changes: " + data.get("summary", "")]
     return APPROVE, []
+
+
+def format_files(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> None:
+    """Run `[project] format` on the reviewer's files of this attempt, so a file that only
+    needs formatting costs no bounce (the reviewer has no shell to run a formatter). Its exit
+    code is logged, not judged: lint runs next and decides."""
+    cmd = ctx.cfg.project.format.strip()
+    if not cmd or not test_files:
+        return
+    cmd = cmd.replace(FILES_PLACEHOLDER, files_argument(test_files))
+    try:
+        res = run_shell(
+            cmd,
+            cwd=ctx.repo_root,
+            timeout=ctx.cfg.review.timeout_min * 60,
+            log=log.detail if log else None,
+        )
+    except ProcTimeout as exc:
+        if log:
+            log.stage("review", "format of the new test file(s) timed out: %s" % exc)
+        return
+    if log:
+        log.stage(
+            "review",
+            "format of %d new test file(s) with `%s`: exit %d"
+            % (len(test_files), cmd, res.returncode),
+        )
 
 
 def lint_check(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> Optional[str]:
@@ -1233,6 +1274,12 @@ def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> R
         raise
 
 
+def _spent(state: State, rdir: str, cost: float) -> None:
+    if cost:
+        state.cost_usd += cost
+        state.save(rdir)
+
+
 def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> RoundOutcome:
     from revali import testarchive
 
@@ -1257,7 +1304,13 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
             True  # cleared when this round ends; a later run cleans up otherwise
         )
         state.save(rdir)
-        rr = spawn_reviewer(ctx, prompt, rdir, round_no, attempt, log)
+        try:
+            rr = spawn_reviewer(ctx, prompt, rdir, round_no, attempt, log)
+        except Stop as stop:
+            _spent(state, rdir, stop.cost)
+            raise
+        # counted now: whatever stops this round from here on, the session was paid for
+        _spent(state, rdir, rr.cost)
         total_cost += rr.cost
         if rr.denials and log:
             log.stage(
@@ -1273,8 +1326,9 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
         restored = restore_protected_tests(ctx, state, log)
         files = new_test_files(ctx)
         gaps = ac_gaps(rr.data, ctx.doc.ac_ids)
-        # lint first (cheap, local, also for a NEEDS_INFO round whose files stay uncommitted
-        # and would otherwise fail the next run's preflight), then the sandbox smoke run
+        # format and lint first (cheap, local, also for a NEEDS_INFO round whose files stay
+        # uncommitted and would otherwise fail the next run's preflight), then the smoke run
+        format_files(ctx, files, log)
         lint_problem = lint_check(ctx, files, log)
         smoke_problem = None
         if files and ctx.doc.kind in ("feature", "fix") and rr.data.get("verdict") != NEEDS_INFO:
@@ -1390,8 +1444,7 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
         "data": rr.data,
         "at": now_iso(),
     }
-    state.rounds.append(record)
-    state.cost_usd += total_cost
+    state.rounds.append(record)  # its cost is in state.cost_usd already, attempt by attempt
     if rr.model_actual and rr.model_actual not in state.models_used:
         state.models_used.append(rr.model_actual)
     state.fallback = state.fallback or rr.fallback

@@ -42,6 +42,13 @@ def failure_message(
     )
 
 
+def _cost(payload: dict) -> float:
+    try:
+        return float(payload.get("total_cost_usd") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def permission_args(request: EngineRequest) -> List[str]:
     """Abstract permissions -> claude flags."""
     args: List[str] = []
@@ -123,6 +130,7 @@ class ClaudeEngine(Engine):
                 failure_message(
                     role, payload, res.returncode, request.budget_usd, request.raw_path
                 ),
+                cost=_cost(payload),
             )
         data = payload.get("structured_output")
         if data is None:
@@ -138,7 +146,7 @@ class ClaudeEngine(Engine):
             model_requested=request.model,
             model_actual=actual or request.model,
             fallback=fallback,
-            cost=float(payload.get("total_cost_usd") or 0.0),
+            cost=_cost(payload),
             denials=list(payload.get("permission_denials") or []),
             duration_ms=int(payload.get("duration_ms") or 0),
         )

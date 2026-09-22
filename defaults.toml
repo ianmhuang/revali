@@ -24,6 +24,7 @@ helper_prefix = "claude-haiku"   # usage rows starting with this are helpers, no
 base_branch = ""                 # empty = the repository's default branch (via gh)
 platforms = ["linux"]
 lint = ""
+format = ""
 test_dir = "tests"
 test_file_pattern = "test_review_{topic}.py"
 test_guide = ""
