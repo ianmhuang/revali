@@ -270,11 +270,14 @@ def check_lint(ctx: Context) -> None:
             "[project] format must name the reviewer's files through {files} (e.g. "
             '"black {files}"); revali formats only those: %s' % fmt,
         )
+    if fmt:
+        ctx.say("format: %s (the reviewer's new test files)" % fmt)
     cmd = ctx.cfg.project.lint.strip()
     if not cmd:
         ctx.notes.append(
             "lint is empty; formatting and style are not checked, neither on this diff "
             "nor on the reviewer's tests before they are committed ([project] lint)"
+            + ("; the format line still rewrites the reviewer's files" if fmt else "")
         )
         return
     ctx.say("lint: %s" % cmd)

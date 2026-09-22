@@ -361,13 +361,13 @@ def _existing_tests_section(ctx: Context, state: State) -> str:
 
 def _lint_section(ctx: Context) -> str:
     cmd = ctx.cfg.project.lint.strip()
-    if not cmd:
-        return ""
-    text = (
-        "The project's lint command `%s` must pass on your files: the script runs it over "
-        "the tree before the smoke run and sends you back once when it fails.\n" % cmd
-    )
-    fmt = ctx.cfg.project.format.strip()
+    text = ""
+    if cmd:
+        text = (
+            "The project's lint command `%s` must pass on your files: the script runs it over "
+            "the tree before the smoke run and sends you back once when it fails.\n" % cmd
+        )
+    fmt = ctx.cfg.project.format.strip()  # it runs with or without a lint line
     if fmt:
         text += (
             "Before lint the script formats your test files with `%s`, so you need not "
@@ -873,7 +873,10 @@ def format_files(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> 
         )
     except ProcTimeout as exc:
         if log:
-            log.stage("review", "format of the new test file(s) timed out: %s" % exc)
+            log.stage(
+                "review",
+                "format of %d new test file(s) with `%s`: %s" % (len(test_files), cmd, exc),
+            )
         return
     if log:
         log.stage(

@@ -140,8 +140,19 @@ class Format(FormatCase):
 
     def test_a_format_timeout_is_logged_not_raised(self):
         ctx = preflight(self.repo)
+        log = mock.Mock()
         with mock.patch("revali.review.run_shell", side_effect=ProcTimeout("timed out")):
-            format_files(ctx, [FILE], None)  # AC-2: no Stop
+            format_files(ctx, [FILE], log)  # AC-2: no Stop
+        line = log.stage.call_args[0][1]
+        # PR #44 F2: the same shape as the exit line, file count and command included
+        self.assertIn("format of 1 new test file(s) with `", line)
+        self.assertIn("fmt.py", line)
+        self.assertIn("timed out", line)
+
+    def test_preflight_names_the_format_line(self):
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("format: %s" % self.format_line, out)
 
     def test_no_files_runs_no_format(self):
         ctx = preflight(self.repo)
@@ -182,6 +193,38 @@ class NoFormat(FormatCase):
         ctx = preflight(self.repo)
         prompt = build_prompt(ctx, State(), self.rdir(), 1)
         self.assertNotIn("formats your test files", prompt)  # AC-3
+
+
+class FormatWithoutLint(FormatCase):
+    """PR #44 F1: the format line runs with lint empty, so the prompt and preflight say so."""
+
+    def setUp(self):
+        super().setUp()
+        self.write(
+            "revali.toml",
+            self.read("revali.toml").replace('lint = "%s lintcheck.py"' % PY, 'lint = ""'),
+        )
+        self.commit_all("no lint")
+
+    def test_the_prompt_still_says_revali_formats(self):
+        ctx = preflight(self.repo)
+        prompt = build_prompt(ctx, State(), self.rdir(), 1)
+        self.assertIn("formats your test files", prompt)  # AC-3
+        self.assertNotIn("lint command", prompt)
+
+    def test_the_empty_lint_note_mentions_the_format_line(self):
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_OK, out)
+        note = [line for line in out.splitlines() if "note: lint is empty" in line]
+        self.assertEqual(len(note), 1, out)
+        self.assertIn("format line still rewrites", note[0])
+
+    def test_the_file_is_formatted_and_committed(self):
+        self.claude(entry(BAD_TEST))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(self.fmt_calls(), [[FILE]])
+        self.assertNotIn("# BAD", git(["show", "HEAD:" + FILE], self.repo))
 
 
 class FormatWithoutFiles(FormatCase):

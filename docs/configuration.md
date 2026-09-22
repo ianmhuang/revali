@@ -64,7 +64,8 @@ this line on the host over that attempt's new test files, then the `lint`
 line: a file that only needed formatting passes without sending the
 reviewer back. `{files}` is required, so the line touches nothing else;
 preflight stops with exit 2 without it. The line's exit code is logged,
-not judged; lint decides.
+not judged; lint decides. With `lint` empty the format line still runs and
+nothing checks its result; preflight's empty-lint note says so.
 `[paths] archive_dir` (default `archive`) is where `revali merge` moves the
 branch's `.revali/<branch>/` once the PR is merged, as
 `<owner>__<repo>/<pr>-<branch>/` under it: the review record outlives the
