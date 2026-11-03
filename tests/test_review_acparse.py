@@ -229,6 +229,47 @@ class LinesThatOnlyLookLikeAnAc(unittest.TestCase):
                 self.assertEqual(doc.ac_ids, ["AC-1"])
                 self.assertEqual(validate(doc), [problem_for(text, line)])
 
+    def test_bare_definition_inside_an_open_ac_is_reported(self):
+        # AC-4 (narrowed in round 2): a colon after the id is a forgotten bullet, not a
+        # wrapped sentence, so it is reported even while AC-1's text is open
+        for bare in (
+            "AC-2: mul with zero returns zero",
+            "  AC-2: mul with zero returns zero",
+            "AC-2：mul with zero returns zero",
+            "**AC-2**: mul with zero returns zero",
+            "*AC-2*: mul with zero returns zero",
+            "`AC-2`: mul with zero returns zero",
+            "AC-2 (PR #3 F1): mul with zero returns zero",
+            "AC-2 (probe, as for (m)): mul with zero returns zero",
+            "AC-2:",
+        ):
+            with self.subTest(bare=bare):
+                text = doc_with("- AC-1: mul returns the product\n" + bare + "\n")
+                doc = parse(text)
+                self.assertEqual(doc.acs, [("AC-1", "mul returns the product")])
+                self.assertEqual(validate(doc), [problem_for(text, bare)])
+
+    def test_bare_reference_with_a_note_but_no_colon_still_joins(self):
+        # the exception keeps a wrapped sentence whose id carries a parenthesis
+        doc = parse(
+            doc_with(
+                "- AC-1: mul returns the product as\n"
+                "AC-2 (twenty documents) does, and\n"
+                "AC-3 (as for (m)) too\n"
+            )
+        )
+        self.assertEqual(
+            doc.acs,
+            [
+                (
+                    "AC-1",
+                    "mul returns the product as AC-2 (twenty documents) does, and "
+                    "AC-3 (as for (m)) too",
+                )
+            ],
+        )
+        self.assertEqual(validate(doc), [])
+
     def test_marked_ac_like_line_inside_an_open_ac_is_reported(self):
         lines = ("  - AC-2 depends on it", "  1. AC-2: a numbered item", "  - **AC-2**: bold")
         for line in lines:
@@ -366,6 +407,26 @@ class WrappedNotes(unittest.TestCase):
         doc = parse(text)
         self.assertEqual(doc.acs, [("AC-2", "mul with zero returns zero")])
         self.assertEqual(validate(doc), [problem_for(text, first)])
+
+    def test_deeper_ac_line_ends_an_open_note(self):
+        # round 1 F1: an AC line indented deeper than the open note is its own AC, with
+        # its own wrapped note, and the unclosed one is reported on its first line
+        first = "- AC-1 (manual, measured outside the"
+        text = doc_with(
+            first + "\n    - AC-2 (PR #3\n      F1): mul with zero returns zero\n      for ints\n"
+        )
+        doc = parse(text)
+        self.assertEqual(doc.acs, [("AC-2", "(PR #3 F1) mul with zero returns zero for ints")])
+        self.assertEqual(validate(doc), [problem_for(text, first)])
+
+    def test_deeper_malformed_ac_line_ends_an_open_note(self):
+        first, second = "- AC-1 (manual, measured outside the", "    1. AC-2: a numbered item"
+        text = doc_with(first + "\n" + second + "\n")
+        doc = parse(text)
+        self.assertEqual(doc.ac_ids, [])
+        problems = validate(doc)
+        self.assertIn(problem_for(text, first), problems)
+        self.assertIn(problem_for(text, second), problems)
 
 
 class NewlyParsedAcsAreHeldToCoverage(unittest.TestCase):
