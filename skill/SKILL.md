@@ -33,7 +33,8 @@ project's CLAUDE.md says so; see `templates/CLAUDE-snippet.md`).
      know of the code; list edge and failure cases, not only the happy path.
      Write each as `- AC-n: text`; a note in parentheses before the colon
      (`- AC-2 (PR #30 F1): text`) and indented continuation lines are fine,
-     and any other line that starts like an AC stops preflight.
+     and any other line that starts like an AC stops preflight. A paragraph
+     that merely begins with an AC id, without a bullet or a colon, is prose.
    - `Out of scope`, `Dependencies`.
    Leave `What` and `Why` for phase 2.
 3. Show the acceptance criteria to the user and wait. In plan mode, they

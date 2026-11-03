@@ -17,13 +17,16 @@ Format:
     AC line; an AC line at any indent starts a new AC. Any other line in that section
     that starts like an AC ("1. AC-3", "- **AC-4**", "- AC-5 text") is a problem, never
     silently skipped: a skipped AC would also escape the reviewer's coverage check. The
-    one exception is a bare "AC-n ..." inside an open AC, a wrapped sentence that joins it,
-    unless a colon follows the id (a forgotten bullet).
+    exception is a bare "AC-n ..." with no list marker and no colon after the id (or its
+    note): inside an open AC it is a wrapped sentence that joins the text, outside one it
+    is a prose paragraph ("AC-9 was added during implementation.") and is ignored. A bare
+    "AC-n: ..." is a forgotten bullet and a problem wherever it stands. The cost: a real AC
+    written without a bullet and without a colon ("AC-3 mul returns ...") reads as prose.
 """
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from revali import ALL_KINDS, V1_KINDS
 
@@ -43,6 +46,8 @@ AC_RE = re.compile(r"^\s*[-*]\s*(AC-\d+)\s*(?:" + _NOTE + r")?\s*[:：]\s*(.*?)\
 # Starts like an AC: optional list marker, optional emphasis, then the id.
 AC_LIKE_RE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s*)?[*_`]*AC-\d+")
 LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])(?:\s|$)")
+# Starts like an AC with no list marker at all; prose unless BARE_DEF_RE matches.
+BARE_RE = re.compile(r"^\s*[*_`]*AC-\d+")
 # A bare AC definition (id, optional note, colon) without its bullet: never a wrapped sentence.
 BARE_DEF_RE = re.compile(r"^\s*[*_`]*AC-\d+[*_`]*\s*(?:" + _NOTE + r")?\s*[:：]")
 # An AC line whose note opens; it is still open when NOTE_CLOSED_RE does not match.
@@ -133,23 +138,46 @@ def _indent(line: str) -> int:
     return len(expanded) - len(expanded.lstrip())
 
 
+# What a line does in the acceptance section; see _classify.
+START, NOTE, REPORT, END, JOIN = "start", "note", "report", "end", "join"
+
+
+def _classify(line: str, indent: Optional[int]) -> str:
+    """What `line` does, `indent` being the indent of the AC line whose text or note is still
+    open (None when neither is). The one rule for an open text and an open note, so both end
+    on the same lines and report the same ones.
+
+    START: a well-formed AC line. NOTE: an AC line whose note does not close on it.
+    REPORT: starts like an AC but is not one; with nothing open only bare prose
+    ("AC-9 was added ...") is spared, so a marker glued to the id ("-AC-2 text",
+    "1.AC-2 text"), which is no list item, is reported there; inside an open text or note
+    only a list item or a bare definition is reported and a wrapped "AC-8 and AC-9 calls"
+    joins.
+    END: a blank line or a list item no deeper than `indent`, and with nothing open every
+    other line (it is skipped). JOIN: the rest, which continues the open text or note."""
+    if AC_RE.match(line):
+        return START
+    if NOTE_START_RE.match(line) and not NOTE_CLOSED_RE.match(line):
+        return NOTE
+    if AC_LIKE_RE.match(line) and (
+        LIST_ITEM_RE.match(line)
+        or BARE_DEF_RE.match(line)
+        or (indent is None and not BARE_RE.match(line))
+    ):
+        return REPORT
+    if indent is None or not line.strip():
+        return END
+    if LIST_ITEM_RE.match(line) and _indent(line) <= indent:
+        return END
+    return JOIN
+
+
 def _parse_acs(doc: ChangeDoc, lines: List[Tuple[int, str]]) -> None:
     """Fill doc.acs, doc.ac_bodies and doc.malformed_acs from the acceptance section."""
     entries: List[Tuple[str, str, List[str]]] = []  # (id, note, text parts)
     open_indent = None  # indent of the AC line whose text is still open, None when closed
     # an AC line whose note has not closed yet: [line number, first line, joined head, indent]
     pending = None
-
-    def ends_block(line: str, indent: int) -> bool:
-        """A blank line, any AC line (well-formed or not, if it has a list marker), a bare AC
-        definition, or a list item no deeper than `indent` ends an open AC text or note."""
-        return (
-            not line.strip()
-            or bool(AC_RE.match(line))
-            or bool(AC_LIKE_RE.match(line) and LIST_ITEM_RE.match(line))
-            or bool(BARE_DEF_RE.match(line))
-            or bool(LIST_ITEM_RE.match(line) and _indent(line) <= indent)
-        )
 
     def start(m, indent: int) -> None:
         nonlocal open_indent
@@ -158,7 +186,7 @@ def _parse_acs(doc: ChangeDoc, lines: List[Tuple[int, str]]) -> None:
 
     for number, line in lines:
         if pending is not None:
-            if not ends_block(line, pending[3]):
+            if _classify(line, pending[3]) == JOIN:
                 pending[2] += " " + line.strip()
                 m = AC_RE.match(pending[2])
                 if m:
@@ -168,30 +196,22 @@ def _parse_acs(doc: ChangeDoc, lines: List[Tuple[int, str]]) -> None:
                     doc.malformed_acs.append((pending[0], pending[1].strip()))
                     pending = None
                 continue
+            # the note never closed: report its AC line, then take this line afresh
             doc.malformed_acs.append((pending[0], pending[1].strip()))
             pending = None
-        m = AC_RE.match(line)
-        if m:
-            start(m, _indent(line))
-            continue
-        if NOTE_START_RE.match(line) and not NOTE_CLOSED_RE.match(line):
+        kind = _classify(line, open_indent)
+        if kind == START:
+            start(AC_RE.match(line), _indent(line))
+        elif kind == NOTE:
             pending = [number, line, line.rstrip(), _indent(line)]
             open_indent = None
-            continue
-        if AC_LIKE_RE.match(line) and (
-            open_indent is None or LIST_ITEM_RE.match(line) or BARE_DEF_RE.match(line)
-        ):
-            # reported unless it is a bare "AC-n ..." inside an open AC that is not a
-            # definition: a wrapped sentence such as "AC-8 and AC-9 calls", joined below
+        elif kind == REPORT:
             doc.malformed_acs.append((number, line.strip()))
             open_indent = None
-            continue
-        if open_indent is None:
-            continue
-        if ends_block(line, open_indent):
+        elif kind == END:
             open_indent = None
-            continue
-        entries[-1][2].append(line.strip())
+        else:
+            entries[-1][2].append(line.strip())
     if pending is not None:
         doc.malformed_acs.append((pending[0], pending[1].strip()))
     doc.malformed_acs.sort()
