@@ -85,6 +85,32 @@ class PreflightFailures(RepoCase):
         self.write(".revali/feature__mul/change.md", text)
         self.assert_stop(EXIT_ERROR, "not available in this version")
 
+    def test_malformed_ac_line_stops(self):
+        # fix/ac-parse AC-4: listed with the other change.md problems, exit 1
+        text = self.read(".revali/feature__mul/change.md").replace(
+            "- AC-2: mul with zero returns zero\n",
+            "- AC-2: mul with zero returns zero\n- **AC-3**: mul is commutative\n",
+        )
+        self.write(".revali/feature__mul/change.md", text)
+        number = text.splitlines().index("- **AC-3**: mul is commutative") + 1
+        stop = self.assert_stop(EXIT_ERROR, "before revali can run")
+        self.assertIn(
+            '  - change.md: line %d looks like an AC but is not "- AC-n: text": '
+            "- **AC-3**: mul is commutative" % number,
+            stop.message,
+        )
+
+    def test_ok_line_lists_the_ac_ids(self):
+        # fix/ac-parse AC-7
+        text = self.read(".revali/feature__mul/change.md").replace(
+            "- AC-2: mul with zero returns zero\n",
+            "- AC-2 (PR #3 F1):\n  mul with zero returns zero\n",
+        )
+        self.write(".revali/feature__mul/change.md", text)
+        lines = []
+        preflight(self.repo, log=_ListLog(lines))
+        self.assertIn("preflight: ok: Add mul to calc (feature, 2 AC: AC-1, AC-2)", lines)
+
     def test_dirty_tree(self):
         self.write("src/calc.py", "# dirty\n")
         self.assert_stop(EXIT_ERROR, "not clean")

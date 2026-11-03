@@ -31,6 +31,9 @@ project's CLAUDE.md says so; see `templates/CLAUDE-snippet.md`).
    - `Acceptance criteria` as `- AC-n: ...`, each an observable behaviour
      one test can check. Derive them from the request and from what you
      know of the code; list edge and failure cases, not only the happy path.
+     Write each as `- AC-n: text`; a note in parentheses before the colon
+     (`- AC-2 (PR #30 F1): text`) and indented continuation lines are fine,
+     and any other line that starts like an AC stops preflight.
    - `Out of scope`, `Dependencies`.
    Leave `What` and `Why` for phase 2.
 3. Show the acceptance criteria to the user and wait. In plan mode, they
