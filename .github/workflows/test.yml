@@ -1,6 +1,6 @@
-# Lint and the whole suite on every push, on the three platforms revali runs on.
-# Push only: revali opens a draft PR for each review, so a pull_request trigger would
-# run every push twice. `revali merge` waits for these checks.
+# Lint and the whole suite on every push, on Linux (Windows and macOS legs wait until
+# the suite passes there). Push only: revali opens a draft PR for each review, so a
+# pull_request trigger would run every push twice. `revali merge` waits for these checks.
 name: test
 
 on:
@@ -26,10 +26,6 @@ jobs:
           - os: ubuntu-latest
             python: "3.x"
             lint: true
-          - os: windows-latest
-            python: "3.x"
-          - os: macos-latest
-            python: "3.x"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

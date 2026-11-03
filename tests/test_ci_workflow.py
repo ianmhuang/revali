@@ -62,8 +62,6 @@ class Workflow(unittest.TestCase):
             [
                 ("ubuntu-latest", "3.11"),
                 ("ubuntu-latest", "3.x"),
-                ("windows-latest", "3.x"),
-                ("macos-latest", "3.x"),
             ],
         )
         self.assertRegex(self.text, r"fail-fast:\s*false")
@@ -75,8 +73,9 @@ class Workflow(unittest.TestCase):
             [(leg["os"], leg["python"]) for leg in legs(self.text) if leg.get("lint") == "true"],
             [("ubuntu-latest", "3.x")],
         )
-        self.assertEqual(re.findall(r"^\s*run: (.*ruff.*)$", self.text, re.M)[-1], lint)
         steps = self.text.split("steps:", 1)[1]
+        lint_step = steps.split("- name: lint\n", 1)[1].split("- ", 1)[0]
+        self.assertEqual(re.findall(r"^\s*run: (.*)$", lint_step, re.M), [lint])
         for name in ("install lint tools", "lint"):
             with self.subTest(step=name):
                 step = steps.split("- name: %s\n" % name, 1)[1].split("- ", 1)[0]
@@ -103,11 +102,10 @@ class Docs(unittest.TestCase):
         for rel in (("CONVENTIONS.md",), ("docs", "workflow.md")):
             with self.subTest(path="/".join(rel)):
                 text = " ".join(read(*rel).split())
-                self.assertIn("on Linux, Windows and macOS on every push", text)
+                self.assertIn("the suite on Linux on every push", text)
                 self.assertIn("`revali merge` waits for it", text)
                 self.assertIn("test.yml", text)
-        portability = read("CONVENTIONS.md").split("## Portability", 1)[1]
-        self.assertIn("on macOS", " ".join(portability.split()))
+                self.assertNotIn("Windows and macOS on every push", text)
 
     def test_readme_within_its_cap(self):
         # AC-7

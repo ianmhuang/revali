@@ -115,8 +115,8 @@ twice. The rule keys on that commit: amend or rebase it and the next run is a
 normal new round.
 
 revali's own CI ([.github/workflows/test.yml](../.github/workflows/test.yml)) runs lint and the
-suite on Linux, Windows and macOS on every push, and `revali merge` waits for it as it
-waits for any project's checks.
+suite on Linux on every push, and `revali merge` waits for it as it waits for any
+project's checks.
 
 ## Project setup
 
