@@ -428,6 +428,45 @@ class WrappedNotes(unittest.TestCase):
         self.assertIn(problem_for(text, first), problems)
         self.assertIn(problem_for(text, second), problems)
 
+    def test_bare_definition_inside_an_open_note_is_not_swallowed(self):
+        # round 2 F1: a forgotten bullet inside a note that later closes with "):" must not
+        # vanish into the note; AC-4 says a bare "AC-n:" is reported wherever an AC is open,
+        # and AC-10 says the note then ended without its colon, so its first line is reported
+        first = "- AC-1 (manual, measured outside the"
+        for bare in (
+            "AC-2: mul with zero returns zero",
+            "  **AC-2**: mul with zero returns zero",
+            "AC-2 (PR #3 F1)：mul with zero returns zero",
+        ):
+            with self.subTest(bare=bare):
+                text = doc_with(first + "\n" + bare + "\n  sandbox): mul handles big integers\n")
+                doc = parse(text)
+                self.assertEqual(doc.ac_ids, [])
+                problems = validate(doc)
+                self.assertIn(problem_for(text, first), problems)
+                self.assertIn(problem_for(text, bare), problems)
+
+    def test_bare_reference_inside_an_open_note_still_joins_it(self):
+        # the exception of AC-4 holds inside a note too: an id without a colon is prose
+        doc = parse(
+            doc_with(
+                "- AC-1 (manual, measured as for\n"
+                "  AC-2 and AC-3 (twenty documents),\n"
+                "  outside the sandbox): mul handles big integers\n"
+            )
+        )
+        self.assertEqual(
+            doc.acs,
+            [
+                (
+                    "AC-1",
+                    "(manual, measured as for AC-2 and AC-3 (twenty documents), "
+                    "outside the sandbox) mul handles big integers",
+                )
+            ],
+        )
+        self.assertEqual(validate(doc), [])
+
 
 class NewlyParsedAcsAreHeldToCoverage(unittest.TestCase):
     """AC-8."""
