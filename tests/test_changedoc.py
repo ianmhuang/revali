@@ -300,6 +300,21 @@ class MalformedAcs(unittest.TestCase):
         text = with_acs("- AC-1: mul returns the product\n- a plain bullet\nAC-2: mul by zero\n")
         self.assertEqual(validate(parse(text)), [malformed(text, "AC-2: mul by zero")])
 
+    def test_bare_ac_definition_inside_an_open_ac_is_reported(self):
+        # PR #46 follow-up 1: a forgotten bullet is not a wrapped sentence
+        for bare in (
+            "AC-2: mul with zero returns zero",
+            "  AC-2：mul with zero returns zero",
+            "**AC-2**: mul with zero returns zero",
+            "AC-2 (PR #3 F1): mul with zero returns zero",
+            "AC-2 (as for (m)): mul with zero returns zero",
+        ):
+            with self.subTest(bare=bare):
+                text = with_acs("- AC-1: mul returns the product\n" + bare + "\n")
+                doc = parse(text)
+                self.assertEqual(doc.acs, [("AC-1", "mul returns the product")])
+                self.assertEqual(validate(doc), [malformed(text, bare)])
+
     def test_line_numbers_count_front_matter_with_crlf(self):
         text = with_acs("- AC-1: mul returns the product of a and b\n- AC-2 two\n")
         problems = validate(parse(text.replace("\n", "\r\n")))
@@ -384,6 +399,22 @@ class WrappedNotes(unittest.TestCase):
         doc = parse(text)
         self.assertEqual(doc.acs, [("AC-2", "mul with zero returns zero")])
         self.assertEqual(validate(doc), [malformed(text, first)])
+
+    def test_deeper_ac_line_ends_an_unclosed_note(self):
+        # PR #46 F1: a nested AC line must not vanish into the open note
+        first = "- AC-9 (unclosed"
+        text = with_acs(first + "\n    - AC-10 (x\n      y): mul handles big integers\n")
+        doc = parse(text)
+        self.assertEqual(doc.acs, [("AC-10", "(x y) mul handles big integers")])
+        self.assertEqual(validate(doc), [malformed(text, first)])
+
+    def test_deeper_malformed_ac_line_ends_an_unclosed_note(self):
+        first, second = "- AC-9 (unclosed", "    - **AC-10**: bold"
+        text = with_acs(first + "\n" + second + "\n")
+        problems = validate(parse(text))
+        self.assertIn(malformed(text, first), problems)
+        self.assertIn(malformed(text, second), problems)
+        self.assertEqual(len(problems), 3, problems)  # the two, and "needs at least one"
 
     def test_note_closed_without_a_colon_is_reported(self):
         first = "- AC-9 (manual, measured"

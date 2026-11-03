@@ -12,10 +12,13 @@ Format:
     ## What / ## Why / ## Goal / ## Acceptance criteria / ## Out of scope / ## Dependencies
     Acceptance criteria are lines "- AC-1: ..." (numbering must be unique). A note in
     parentheses may stand before the colon ("- AC-2 (PR #30 F1): ...") and goes into the
-    text; the lines after an AC line join its text until a blank line or a list item
-    indented no deeper than the AC line. Any other line in that section that starts like
-    an AC ("1. AC-3", "- **AC-4**", "- AC-5 text") is a problem, never silently skipped:
-    a skipped AC would also escape the reviewer's coverage check.
+    text, and may wrap onto the following lines until ")" and the colon. The lines after
+    an AC line join its text until a blank line or a list item indented no deeper than the
+    AC line; an AC line at any indent starts a new AC. Any other line in that section
+    that starts like an AC ("1. AC-3", "- **AC-4**", "- AC-5 text") is a problem, never
+    silently skipped: a skipped AC would also escape the reviewer's coverage check. The
+    one exception is a bare "AC-n ..." inside an open AC, a wrapped sentence that joins it,
+    unless a colon follows the id (a forgotten bullet).
 """
 
 import re
@@ -40,6 +43,8 @@ AC_RE = re.compile(r"^\s*[-*]\s*(AC-\d+)\s*(?:" + _NOTE + r")?\s*[:：]\s*(.*?)\
 # Starts like an AC: optional list marker, optional emphasis, then the id.
 AC_LIKE_RE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s*)?[*_`]*AC-\d+")
 LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])(?:\s|$)")
+# A bare AC definition (id, optional note, colon) without its bullet: never a wrapped sentence.
+BARE_DEF_RE = re.compile(r"^\s*[*_`]*AC-\d+[*_`]*\s*(?:" + _NOTE + r")?\s*[:：]")
 # An AC line whose note opens; it is still open when NOTE_CLOSED_RE does not match.
 NOTE_START_RE = re.compile(r"^\s*[-*]\s*AC-\d+\s*\(")
 NOTE_CLOSED_RE = re.compile(r"^\s*[-*]\s*AC-\d+\s*" + _NOTE)
@@ -136,9 +141,12 @@ def _parse_acs(doc: ChangeDoc, lines: List[Tuple[int, str]]) -> None:
     pending = None
 
     def ends_block(line: str, indent: int) -> bool:
+        """A blank line, any AC line (well-formed or not, if it has a list marker), or a list
+        item no deeper than `indent` ends an open AC text or an open note."""
         return (
             not line.strip()
             or bool(AC_RE.match(line))
+            or bool(AC_LIKE_RE.match(line) and LIST_ITEM_RE.match(line))
             or bool(LIST_ITEM_RE.match(line) and _indent(line) <= indent)
         )
 
@@ -169,8 +177,11 @@ def _parse_acs(doc: ChangeDoc, lines: List[Tuple[int, str]]) -> None:
             pending = [number, line, line.rstrip(), _indent(line)]
             open_indent = None
             continue
-        if AC_LIKE_RE.match(line) and (open_indent is None or LIST_ITEM_RE.match(line)):
-            # reported unless it is a bare "AC-n ..." inside an open AC: a wrapped sentence
+        if AC_LIKE_RE.match(line) and (
+            open_indent is None or LIST_ITEM_RE.match(line) or BARE_DEF_RE.match(line)
+        ):
+            # reported unless it is a bare "AC-n ..." inside an open AC that is not a
+            # definition: a wrapped sentence such as "AC-8 and AC-9 calls", joined below
             doc.malformed_acs.append((number, line.strip()))
             open_indent = None
             continue
