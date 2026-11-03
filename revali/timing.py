@@ -50,9 +50,11 @@ class Timing:
         self.sandboxes[label] = self.sandboxes.get(label, 0.0) + max(0.0, seconds)
 
     def as_dict(self) -> dict:
+        """Seconds to the millisecond: a local sandbox session can take a few hundredths of a
+        second, and one decimal would store it as 0.0."""
         return {
-            "stage_s": {name: round(secs, 1) for name, secs in self.stages.items()},
-            "sandbox_s": {label: round(secs, 1) for label, secs in self.sandboxes.items()},
+            "stage_s": {name: round(secs, 3) for name, secs in self.stages.items()},
+            "sandbox_s": {label: round(secs, 3) for label, secs in self.sandboxes.items()},
         }
 
     def summary(self) -> str:
