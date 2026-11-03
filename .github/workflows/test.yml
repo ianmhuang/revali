@@ -1,0 +1,45 @@
+# Lint and the whole suite on every push, on the three platforms revali runs on.
+# Push only: revali opens a draft PR for each review, so a pull_request trigger would
+# run every push twice. `revali merge` waits for these checks.
+name: test
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / python ${{ matrix.python }}${{ matrix.lint && ' / lint' || '' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.x"
+            lint: true
+          - os: windows-latest
+            python: "3.x"
+          - os: macos-latest
+            python: "3.x"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: install lint tools
+        if: matrix.lint
+        run: python -m pip install ruff black
+      - name: lint
+        if: matrix.lint
+        run: ruff check . && black --check .
+      - name: suite
+        run: python tests/run_parallel.py

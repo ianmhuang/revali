@@ -1,7 +1,9 @@
 # revali
 
 Review, validate, merge: a headless pipeline for feature branches on your own
-GitHub repositories. Three roles take part.
+GitHub repositories. An independent AI session reviews the branch against its
+acceptance criteria and writes the acceptance tests, a sandbox runs them with
+the existing suite, and the merge waits for the result. Three roles take part.
 
 - **Developer**: the authoring session (Claude Code, or you). Writes the
   acceptance criteria before the code, gets them approved, implements, and
@@ -143,10 +145,8 @@ and the history row. Every result lands in `.revali/<branch>/`
   what happens after exit 2 or a dead run, several agents on one repository
 - [docs/configuration.md](docs/configuration.md): the three layers, models, `REVALI_DISABLE`
 - [docs/files.md](docs/files.md): every file revali reads or writes and the key that moves it
-- [docs/sandbox.md](docs/sandbox.md): the `wsl`, `ssh` and `local` runners, and the
-  verification record
-- [docs/side-effects.md](docs/side-effects.md): every git and GitHub action revali takes, read
-  before the first run
+- [docs/sandbox.md](docs/sandbox.md): the `wsl`, `ssh` and `local` runners, and the verification record
+- [docs/side-effects.md](docs/side-effects.md): every git and GitHub action revali takes, read before the first run
 - [skill/SKILL.md](skill/SKILL.md): the Claude Code skill behind `/revali`, the
   Developer's side of the workflow; [templates/CLAUDE-snippet.md](templates/CLAUDE-snippet.md)
   is the paragraph that goes into a project's `CLAUDE.md` so an authoring
