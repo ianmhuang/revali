@@ -2,6 +2,7 @@ import os
 import types
 import unittest
 
+from revali import changedoc
 from revali.changedoc import parse, validate
 from revali.review import CHANGES_REQUESTED, ac_gaps, render_review_md, render_tests_md
 from tests.fixtures.make_sample_repo import CHANGE_MD
@@ -339,6 +340,94 @@ class MalformedAcs(unittest.TestCase):
         self.assertEqual(validate(doc), [])
 
 
+class ProseOutsideAnAc(unittest.TestCase):
+    """fix/ac-prose AC-1 to AC-3: a bare line opening with an AC id and no colon is prose."""
+
+    AC_1 = "- AC-1: mul returns the product of a and b"
+    PROSE = (
+        "AC-9 was added during implementation. The first full run failed",
+        "**AC-2** was split from AC-1 after the first round",
+        "`AC-2` was split from AC-1 after the first round",
+        "AC-2 (twenty documents) was measured by hand",
+        "  AC-2 and AC-3 were merged",
+    )
+
+    def test_prose_after_a_closed_ac_is_ignored(self):
+        for closer in ("\n", "- a plain bullet\n"):
+            for prose in self.PROSE:
+                with self.subTest(closer=repr(closer), prose=prose):
+                    text = with_acs(self.AC_1 + "\n" + closer + prose + "\nsecond line of it\n")
+                    doc = parse(text)
+                    self.assertEqual(doc.acs, [("AC-1", "mul returns the product of a and b")])
+                    self.assertEqual(validate(doc), [])
+
+    def test_prose_before_the_first_ac_is_ignored(self):
+        doc = parse(with_acs(self.PROSE[0] + "\n\n" + self.AC_1 + "\n"))
+        self.assertEqual(doc.acs, [("AC-1", "mul returns the product of a and b")])
+        self.assertEqual(validate(doc), [])
+
+    def test_prose_only_still_needs_an_ac(self):
+        problems = validate(parse(with_acs(self.PROSE[0] + "\n")))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("needs at least one", problems[0])
+
+    def test_marked_or_defined_lines_after_a_closed_ac_are_still_reported(self):
+        for line in (
+            "AC-2: mul with zero returns zero",
+            "**AC-2**: mul with zero returns zero",
+            "AC-2 (PR #3 F1): mul with zero returns zero",
+            "AC-2 (as for (m))：mul with zero returns zero",
+            "- AC-2 mul with zero returns zero",
+            "1. AC-2 mul with zero returns zero",
+        ):
+            with self.subTest(line=line):
+                text = with_acs(self.AC_1 + "\n\n" + line + "\n")
+                doc = parse(text)
+                self.assertEqual(doc.ac_ids, ["AC-1"])
+                self.assertEqual(validate(doc), [malformed(text, line)])
+
+    def test_known_cost_is_documented(self):
+        # AC-3: a real AC with neither bullet nor colon reads as prose and is ignored
+        doc = parse(with_acs(self.AC_1 + "\n\nAC-3 mul returns the product of floats\n"))
+        self.assertEqual(doc.ac_ids, ["AC-1"])
+        self.assertEqual(validate(doc), [])
+        self.assertIn("without a bullet and without a colon", " ".join(changedoc.__doc__.split()))
+
+
+class LineClassesAgree(unittest.TestCase):
+    """fix/ac-prose AC-4: an open AC text and an unclosed note end on the same lines."""
+
+    # line shape -> (ends the open text or note, the line itself is reported)
+    SHAPES = {
+        "blank": ("", True, False),
+        "well-formed AC": ("- AC-2: mul by zero returns zero", True, False),
+        "marked AC-like": ("- AC-2 no colon here", True, True),
+        "bare definition": ("AC-2: mul by zero returns zero", True, True),
+        "bare prose": ("AC-2 was split from AC-1", False, False),
+        "shallow list item": ("- a plain bullet", True, False),
+        "deeper list item": ("  - a nested bullet", False, False),
+        "plain text": ("plain words that wrap", False, False),
+    }
+    TAIL = "  zzz tail"
+
+    def outcome(self, head: str, line: str, tail: str):
+        text = with_acs(head + "\n" + line + "\n" + tail + "\n")
+        number = line_no(text, head) + 1
+        doc = parse(text)
+        reported = any(p.startswith("change.md: line %d " % number) for p in validate(doc))
+        ac_1 = dict(doc.acs).get("AC-1")
+        ended = ac_1 is None or "zzz" not in ac_1
+        return ended, reported
+
+    def test_each_shape_ends_both_or_neither(self):
+        for name, (line, ends, reported) in self.SHAPES.items():
+            with self.subTest(shape=name):
+                in_text = self.outcome("- AC-1: mul returns the product", line, self.TAIL)
+                in_note = self.outcome("- AC-1 (note", line, "  zzz): mul returns the product")
+                self.assertEqual(in_text, (ends, reported))
+                self.assertEqual(in_note, (ends, reported))
+
+
 class WrappedNotes(unittest.TestCase):
     """AC-10: a note may wrap onto the following lines."""
 
@@ -504,6 +593,8 @@ class FormatIsDocumented(unittest.TestCase):
                 self.assertIn("- AC-2 (PR #30 F1): text", text)
                 self.assertIn("continuation lines", text)
                 self.assertIn("any other line that starts like an AC stops preflight", text)
+                # fix/ac-prose AC-6
+                self.assertIn("without a bullet or a colon, is prose", text)
 
 
 if __name__ == "__main__":

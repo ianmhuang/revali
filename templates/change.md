@@ -11,7 +11,8 @@ status: draft
      refuses a draft. After implementation: fill in What and Why.
      Each AC is "- AC-n: text", optionally with a note before the colon
      ("- AC-2 (PR #30 F1): text") and indented continuation lines; any
-     other line that starts like an AC stops preflight. -->
+     other line that starts like an AC stops preflight. A paragraph that
+     merely begins with an AC id, without a bullet or a colon, is prose. -->
 
 ## Request
 <the user's instruction to the author session, verbatim, in its original language>

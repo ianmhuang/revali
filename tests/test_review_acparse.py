@@ -220,14 +220,16 @@ class LinesThatOnlyLookLikeAnAc(unittest.TestCase):
         self.assertEqual(doc.ac_ids, ["AC-1", "AC-2"])
         self.assertEqual(validate(doc), [])
 
-    def test_bare_reference_outside_an_open_ac_is_reported(self):
+    def test_bare_reference_outside_an_open_ac_is_prose(self):
+        # Changed by fix/ac-prose AC-1 (was test_bare_reference_outside_an_open_ac_is_reported):
+        # a bare "AC-n ..." with no colon outside an open AC is a prose paragraph, ignored.
         for closer in ("\n", "- a plain bullet\n"):
             with self.subTest(closer=repr(closer)):
                 line = "AC-2 was added after the first round"
                 text = doc_with("- AC-1: mul returns the product\n" + closer + line + "\n")
                 doc = parse(text)
                 self.assertEqual(doc.ac_ids, ["AC-1"])
-                self.assertEqual(validate(doc), [problem_for(text, line)])
+                self.assertEqual(validate(doc), [])
 
     def test_bare_definition_inside_an_open_ac_is_reported(self):
         # AC-4 (narrowed in round 2): a colon after the id is a forgotten bullet, not a
