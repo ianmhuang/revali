@@ -141,12 +141,13 @@ def _parse_acs(doc: ChangeDoc, lines: List[Tuple[int, str]]) -> None:
     pending = None
 
     def ends_block(line: str, indent: int) -> bool:
-        """A blank line, any AC line (well-formed or not, if it has a list marker), or a list
-        item no deeper than `indent` ends an open AC text or an open note."""
+        """A blank line, any AC line (well-formed or not, if it has a list marker), a bare AC
+        definition, or a list item no deeper than `indent` ends an open AC text or note."""
         return (
             not line.strip()
             or bool(AC_RE.match(line))
             or bool(AC_LIKE_RE.match(line) and LIST_ITEM_RE.match(line))
+            or bool(BARE_DEF_RE.match(line))
             or bool(LIST_ITEM_RE.match(line) and _indent(line) <= indent)
         )
 

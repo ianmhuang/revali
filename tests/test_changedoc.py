@@ -408,6 +408,16 @@ class WrappedNotes(unittest.TestCase):
         self.assertEqual(doc.acs, [("AC-10", "(x y) mul handles big integers")])
         self.assertEqual(validate(doc), [malformed(text, first)])
 
+    def test_bare_ac_definition_ends_an_unclosed_note(self):
+        # PR #46 round 2 F1: a forgotten bullet inside an open note must not vanish into it
+        first, bare = "- AC-9 (manual", "AC-2: mul by zero"
+        text = with_acs(first + "\n" + bare + "\n  by the owner): mul handles big integers\n")
+        doc = parse(text)
+        self.assertEqual(doc.ac_ids, [])
+        problems = validate(doc)
+        self.assertIn(malformed(text, first), problems)
+        self.assertIn(malformed(text, bare), problems)
+
     def test_deeper_malformed_ac_line_ends_an_unclosed_note(self):
         first, second = "- AC-9 (unclosed", "    - **AC-10**: bold"
         text = with_acs(first + "\n" + second + "\n")
