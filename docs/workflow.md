@@ -114,6 +114,10 @@ the run skips the reviewer and goes to validation, so the review is not paid
 twice. The rule keys on that commit: amend or rebase it and the next run is a
 normal new round.
 
+revali's own CI ([.github/workflows/test.yml](../.github/workflows/test.yml)) runs lint and the
+suite on Linux on every push, and `revali merge` waits for it as it waits for any
+project's checks.
+
 ## Project setup
 
 Copy [templates/revali.toml](../templates/revali.toml) to the repo root and edit the commands; copy
