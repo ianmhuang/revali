@@ -1,10 +1,12 @@
 """revali.timing (stage and sandbox clocks) and the {files} expansion of new_test."""
 
+import os
 import unittest
 
 from revali.config import PlatformCfg
 from revali.runners import files_argument, steps_for, steps_with_files, wants_files
 from revali.timing import Timing, fmt_duration
+from tests.helpers import ROOT
 
 
 class FakeClock:
@@ -84,15 +86,41 @@ class StageClock(unittest.TestCase):
         self.t.sandbox("smoke-r1-1", 262.06)
         self.t.stage("needs_action")
         d = self.t.as_dict()
-        self.assertEqual(d["sandbox_s"], {"baseline": 499.4, "smoke-r1-1": 262.1})
+        # fix/timing-precision AC-3: was 262.1 while the dict kept one decimal
+        self.assertEqual(d["sandbox_s"], {"baseline": 499.4, "smoke-r1-1": 262.06})
         self.assertEqual(
             self.t.summary(),
             "preflight 1s, review 0s; sandbox baseline 8m19s, smoke-r1-1 4m22s",
         )
 
+    def test_short_sessions_keep_their_milliseconds(self):
+        # fix/timing-precision AC-1, AC-2: the dict keeps 3 decimals, the summary whole seconds
+        self.t.stage("preflight")
+        self.t.sandbox("baseline", 0.0123)
+        self.advance(0.0457)
+        self.t.stage("review")
+        self.t.sandbox("smoke-r1-1", 0.0004)
+        self.t.close()
+        d = self.t.as_dict()
+        self.assertEqual(d["sandbox_s"], {"baseline": 0.012, "smoke-r1-1": 0.0})
+        self.assertEqual(d["stage_s"], {"preflight": 0.046, "review": 0.0})
+        for value in list(d["stage_s"].values()) + list(d["sandbox_s"].values()):
+            self.assertIsInstance(value, float)
+        self.assertEqual(
+            self.t.summary(), "preflight 0s, review 0s; sandbox baseline 0s, smoke-r1-1 0s"
+        )
+
 
 def _plat(new_test, test="run-all"):
     return PlatformCfg(name="linux", setup="", build="", test=test, new_test=new_test)
+
+
+class HistoryDocs(unittest.TestCase):
+    def test_files_md_states_the_precision(self):
+        # fix/timing-precision AC-5
+        with open(os.path.join(ROOT, "docs", "files.md"), encoding="utf-8") as fh:
+            row = next(line for line in fh if line.startswith("| run history |"))
+        self.assertIn("rounded to the millisecond", row)
 
 
 class NewTestFiles(unittest.TestCase):
