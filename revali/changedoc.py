@@ -10,7 +10,12 @@ Format:
     ## Request
     <the user's instruction, verbatim>
     ## What / ## Why / ## Goal / ## Acceptance criteria / ## Out of scope / ## Dependencies
-    Acceptance criteria are lines "- AC-1: ..." (numbering must be unique).
+    Acceptance criteria are lines "- AC-1: ..." (numbering must be unique). A note in
+    parentheses may stand before the colon ("- AC-2 (PR #30 F1): ...") and goes into the
+    text; the lines after an AC line join its text until a blank line or a list item
+    indented no deeper than the AC line. Any other line in that section that starts like
+    an AC ("1. AC-3", "- **AC-4**", "- AC-5 text") is a problem, never silently skipped:
+    a skipped AC would also escape the reviewer's coverage check.
 """
 
 import re
@@ -29,7 +34,16 @@ SECTION_KEYS = {
     "out of scope": "out_of_scope",
     "dependencies": "dependencies",
 }
-AC_RE = re.compile(r"^\s*[-*]\s*(AC-\d+)\s*[:：]\s*(.+?)\s*$")
+# A note in parentheses, with at most one level of nested parentheses: "(probe, as for (m))".
+_NOTE = r"\(((?:[^()]|\([^()]*\))*)\)"
+AC_RE = re.compile(r"^\s*[-*]\s*(AC-\d+)\s*(?:" + _NOTE + r")?\s*[:：]\s*(.*?)\s*$")
+# Starts like an AC: optional list marker, optional emphasis, then the id.
+AC_LIKE_RE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s*)?[*_`]*AC-\d+")
+LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])(?:\s|$)")
+# An AC line whose note opens; it is still open when NOTE_CLOSED_RE does not match.
+NOTE_START_RE = re.compile(r"^\s*[-*]\s*AC-\d+\s*\(")
+NOTE_CLOSED_RE = re.compile(r"^\s*[-*]\s*AC-\d+\s*" + _NOTE)
+AC_FORM = '"- AC-n: text"'
 HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")  # a section heading, on a line without its newline
 
 
@@ -54,6 +68,10 @@ class ChangeDoc:
     status: str = ""
     sections: Dict[str, str] = field(default_factory=dict)
     acs: List[Tuple[str, str]] = field(default_factory=list)
+    # per AC, the text without its note (what the length check measures)
+    ac_bodies: List[str] = field(default_factory=list)
+    # (1-based line number, line) of each line that starts like an AC but is not one
+    malformed_acs: List[Tuple[int, str]] = field(default_factory=list)
     raw: str = ""
 
     def section(self, key: str) -> str:
@@ -86,7 +104,8 @@ def parse(text: str) -> ChangeDoc:
         idx += 1  # closing ---
     current = None
     buf: Dict[str, List[str]] = {}
-    for line in lines[idx:]:
+    acceptance: List[Tuple[int, str]] = []
+    for number, line in enumerate(lines[idx:], start=idx + 1):
         key = section_key(line)
         if key:
             current = key
@@ -97,12 +116,77 @@ def parse(text: str) -> ChangeDoc:
                 doc.title = line[2:].strip()
             continue
         buf[current].append(line)
+        if current == "acceptance":
+            acceptance.append((number, line))
     doc.sections = {k: "\n".join(v).strip() for k, v in buf.items()}
-    for line in buf.get("acceptance", []):
+    _parse_acs(doc, acceptance)
+    return doc
+
+
+def _indent(line: str) -> int:
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip())
+
+
+def _parse_acs(doc: ChangeDoc, lines: List[Tuple[int, str]]) -> None:
+    """Fill doc.acs, doc.ac_bodies and doc.malformed_acs from the acceptance section."""
+    entries: List[Tuple[str, str, List[str]]] = []  # (id, note, text parts)
+    open_indent = None  # indent of the AC line whose text is still open, None when closed
+    # an AC line whose note has not closed yet: [line number, first line, joined head, indent]
+    pending = None
+
+    def ends_block(line: str, indent: int) -> bool:
+        return (
+            not line.strip()
+            or bool(AC_RE.match(line))
+            or bool(LIST_ITEM_RE.match(line) and _indent(line) <= indent)
+        )
+
+    def start(m, indent: int) -> None:
+        nonlocal open_indent
+        entries.append((m.group(1), " ".join((m.group(2) or "").split()), [m.group(3)]))
+        open_indent = indent
+
+    for number, line in lines:
+        if pending is not None:
+            if not ends_block(line, pending[3]):
+                pending[2] += " " + line.strip()
+                m = AC_RE.match(pending[2])
+                if m:
+                    start(m, pending[3])
+                    pending = None
+                elif NOTE_CLOSED_RE.match(pending[2]):
+                    doc.malformed_acs.append((pending[0], pending[1].strip()))
+                    pending = None
+                continue
+            doc.malformed_acs.append((pending[0], pending[1].strip()))
+            pending = None
         m = AC_RE.match(line)
         if m:
-            doc.acs.append((m.group(1), m.group(2)))
-    return doc
+            start(m, _indent(line))
+            continue
+        if NOTE_START_RE.match(line) and not NOTE_CLOSED_RE.match(line):
+            pending = [number, line, line.rstrip(), _indent(line)]
+            open_indent = None
+            continue
+        if AC_LIKE_RE.match(line) and (open_indent is None or LIST_ITEM_RE.match(line)):
+            # reported unless it is a bare "AC-n ..." inside an open AC: a wrapped sentence
+            doc.malformed_acs.append((number, line.strip()))
+            open_indent = None
+            continue
+        if open_indent is None:
+            continue
+        if ends_block(line, open_indent):
+            open_indent = None
+            continue
+        entries[-1][2].append(line.strip())
+    if pending is not None:
+        doc.malformed_acs.append((pending[0], pending[1].strip()))
+    doc.malformed_acs.sort()
+    for ac_id, note, parts in entries:
+        body = " ".join(p for p in parts if p)
+        doc.ac_bodies.append(body)
+        doc.acs.append((ac_id, ("(%s) %s" % (note, body)).strip() if note else body))
 
 
 def validate(doc: ChangeDoc, allowed_kinds=V1_KINDS) -> List[str]:
@@ -128,12 +212,16 @@ def validate(doc: ChangeDoc, allowed_kinds=V1_KINDS) -> List[str]:
         problems.append("change.md: '## Goal' is empty")
     if not doc.acs:
         problems.append("change.md: '## Acceptance criteria' needs at least one '- AC-n: ...' line")
+    for number, line in doc.malformed_acs:
+        problems.append(
+            "change.md: line %d looks like an AC but is not %s: %s" % (number, AC_FORM, line)
+        )
     seen = set()
-    for ac_id, text in doc.acs:
+    for (ac_id, _), body in zip(doc.acs, doc.ac_bodies, strict=True):
         if ac_id in seen:
             problems.append("change.md: duplicate %s" % ac_id)
         seen.add(ac_id)
-        if len(text.strip()) < 8:
+        if len(body.strip()) < 8:
             problems.append("change.md: %s is too short to be testable" % ac_id)
     return problems
 

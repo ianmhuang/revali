@@ -347,7 +347,8 @@ def preflight(
         baseline(ctx)
     for note in ctx.notes:
         ctx.say("note: " + note)
-    ctx.say("ok: %s (%s, %d AC)" % (ctx.doc.title, ctx.doc.kind, len(ctx.doc.acs)))
+    ids = ctx.doc.ac_ids
+    ctx.say("ok: %s (%s, %d AC: %s)" % (ctx.doc.title, ctx.doc.kind, len(ids), ", ".join(ids)))
     return ctx
 
 
