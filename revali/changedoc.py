@@ -26,7 +26,7 @@ Format:
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from revali import ALL_KINDS, V1_KINDS
 
@@ -142,15 +142,17 @@ def _indent(line: str) -> int:
 START, NOTE, REPORT, END, JOIN = "start", "note", "report", "end", "join"
 
 
-def _classify(line: str, indent) -> str:
+def _classify(line: str, indent: Optional[int]) -> str:
     """What `line` does, `indent` being the indent of the AC line whose text or note is still
     open (None when neither is). The one rule for an open text and an open note, so both end
     on the same lines and report the same ones.
 
     START: a well-formed AC line. NOTE: an AC line whose note does not close on it.
     REPORT: starts like an AC but is not one; with nothing open only bare prose
-    ("AC-9 was added ...") is spared, inside an open text or note only a list item or a
-    bare definition is reported and a wrapped "AC-8 and AC-9 calls" joins.
+    ("AC-9 was added ...") is spared, so a marker glued to the id ("-AC-2 text",
+    "1.AC-2 text"), which is no list item, is reported there; inside an open text or note
+    only a list item or a bare definition is reported and a wrapped "AC-8 and AC-9 calls"
+    joins.
     END: a blank line or a list item no deeper than `indent`, and with nothing open every
     other line (it is skipped). JOIN: the rest, which continues the open text or note."""
     if AC_RE.match(line):
