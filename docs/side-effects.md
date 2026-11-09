@@ -25,6 +25,10 @@ stated.
   on a failure the reviewer is sent back once with the command and the output
   tail, a second failure ends the run with exit 1 and no test commit. A
   NEEDS_INFO round is checked the same way, since its files stay in the tree.
+  For the length of that lint command the reviewer's new, untracked files
+  are marked intent-to-add (`git add -N`), so a lint line that only checks
+  the files `git ls-files` lists sees them too; `git reset -q -- <files>`
+  unmarks them afterwards, whatever lint returned.
   An empty `lint` line skips this and preflight prints a note saying so
 - commits the reviewer's test files into `test_dir`, with
   `Co-Authored-By: Claude` and `Revali-Round: <n>` trailers; only new files
@@ -123,7 +127,12 @@ stated.
   ended with a verdict never triggers it (a NEEDS_INFO round's uncommitted
   files are pending, not leftovers; they go only when the round after it
   is interrupted, and a pending file that is a tracked file of the
-  reviewer's own is then restored from HEAD instead). A leftover that
+  reviewer's own is then restored from HEAD instead). In both cases, and
+  in `revali reset` after an interrupted round, a tracked file of the
+  reviewer's own from an earlier round that the session modified or
+  deleted is restored from HEAD as well, and the log names it; a change
+  you made to such a file while no session was running is yours, and
+  preflight refuses the tree as before. A leftover that
   cannot be deleted (a file another program holds open) stays in the
   tolerated list: the next run accepts it in the tree and lists it for the
   reviewer to update or delete, the log names it for you. `revali reset`
