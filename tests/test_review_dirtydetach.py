@@ -2,7 +2,8 @@
 
 A detached `revali run` on a tree preflight would refuse prints preflight's refusal at once,
 starts nothing, and records the refusal the way the run itself records a preflight stop, so
-`wait` and `status` report it and not the previous run's result (AC-1); what preflight
+`wait` and `status` report it and not the previous run's result, and writes no history row
+(AC-1); what preflight
 tolerates still starts: a NEEDS_INFO round's pending files (AC-2), an interrupted round's
 leftovers (AC-3), the state directory (AC-4). The foreground and dry runs refuse as before
 (AC-5), every entry point prints the same block for the same tree (AC-6), and `status` shows
@@ -19,7 +20,7 @@ import os
 from unittest import mock
 
 from revali import EXIT_ERROR, EXIT_OK
-from revali.state import State, lock_path
+from revali.state import State, lock_path, read_history
 from tests.helpers import RepoCase, git, run_cli
 
 HEADER = "working tree is not clean; commit or stash first:"
@@ -116,6 +117,21 @@ class RefusedBeforeDetach(DetachCase):
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertEqual(self.paths(out), ["README.md", "src/staged.py"])
         self.assert_nothing_started(out, spawn)
+
+    def test_a_refused_start_writes_no_history_row(self):
+        # nothing started, so `stats` has nothing to count (docs/files.md: one row per `run`
+        # that started; a `run` refused before it detaches writes none)
+        history = os.path.join(self.home, "history.jsonl")
+        self.edit_tracked()
+        code, out, spawn = self.detached()
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assert_nothing_started(out, spawn)
+        self.assertEqual(read_history(history), [])
+        # the run itself refusing the same tree is a run that started: its row is the first
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        rows = read_history(history)
+        self.assertEqual([(row["stage"], row["exit"]) for row in rows], [("error", EXIT_ERROR)])
 
     def test_the_previous_result_gives_way_and_the_log_stays(self):
         kept = {
