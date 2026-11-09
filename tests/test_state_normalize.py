@@ -131,6 +131,10 @@ class LoadNormalizes(unittest.TestCase):
         self.assertEqual(st.cost_usd, 1.0)
         self.assertIs(type(st.cost_usd), float)
 
+    def test_an_int_too_large_for_a_float(self):
+        # PR #53 round 1 F1: float() of it raised OverflowError, not StateError
+        self.assert_refused('{"cost_usd": 1%s}' % ("0" * 400), "'cost_usd'", "float", "too large")
+
     # --- AC-5: keys that are not fields ---------------------------------------------------
 
     def test_unknown_keys_and_method_names_are_ignored(self):

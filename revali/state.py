@@ -188,7 +188,14 @@ def _checked(path: str, name: str, hint, value):
             "%s: field '%s' should be %s, found %s"
             % (path, name, hint.__name__, type(value).__name__)
         )
-    return float(value) if hint is float else value
+    if hint is float:
+        try:
+            return float(value)
+        except OverflowError:  # an int literal past a double's range (310+ digits)
+            raise StateError(
+                "%s: field '%s' should be float, found an int too large for one" % (path, name)
+            ) from None
+    return value
 
 
 def write_retry_s(path: str) -> float:
