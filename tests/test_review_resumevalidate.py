@@ -183,6 +183,9 @@ class NoResume(ResumeCase):
         # make the state look like a run that died after that round, at the same HEAD
         state = State.load(self.rdir())
         state.stage, state.message, state.last_exit = "validate", "", -1
+        # a run that dies after recording the verdict dies before the exit 2 that marks the
+        # fix as owed (fix/fix-cycle-survives-preflight-stop)
+        state.fix_due = False
         state.save(self.rdir())
         code, out = self.rerun(claude_entry())
         self.assertEqual(code, EXIT_OK, out)
