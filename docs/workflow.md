@@ -67,7 +67,12 @@ revali in different checkouts can tell their output apart; every message
 that reports a live or dead run carries its pid. On Windows the detached
 run starts every subprocess (git, gh, claude, wsl, the `lint` line and the
 `local` runner's steps) with `CREATE_NO_WINDOW`, so no console windows
-appear while it works. `status` then prints the stage, the last message,
+appear while it works. `run` checks the working tree before it detaches:
+when preflight would refuse it (an uncommitted change outside `.revali/`,
+other than a NEEDS_INFO round's pending files) it prints the same `working
+tree is not clean` message with the paths and returns 1 without starting
+anything. After an interrupted review round it leaves the check to the run
+itself, which first cleans up what that round left. `status` then prints the stage, the last message,
 the round / fix-cycle / cost counters, the PR, and, once the branch has a
 review round, `tests: commit` or `tests: archive`: the mode its rounds run
 in, fixed for the branch (`[review] tests` in

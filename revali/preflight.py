@@ -152,21 +152,28 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
     return ctx
 
 
-def check_tree(ctx: Context, tolerate: Sequence[str] = ()) -> None:
-    """Refuse a dirty working tree. `tolerate` lists paths that may be dirty: the
-    reviewer's own uncommitted files from a NEEDS_INFO round (state.pending_test_files),
-    which the next round commits or removes."""
+def dirty_tree_problem(root: str, state_dir: str, tolerate: Sequence[str] = ()) -> str:
+    """The clean-tree refusal for `root`, or "" when the tree is clean. Changes under
+    `state_dir` never count; `tolerate` lists paths that may be dirty: the reviewer's own
+    uncommitted files from a NEEDS_INFO round (state.pending_test_files), which the next
+    round commits or removes. Shared by preflight and the detached `run`, so both refuse
+    the same tree with the same words."""
     allowed = {p.replace("\\", "/") for p in tolerate}
     dirty = [
         entry
-        for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",))
+        for entry in gitops.dirty_paths(root, (state_dir + "/",))
         if entry.split(" ", 1)[1].replace("\\", "/") not in allowed
     ]
-    if dirty:
-        raise Stop(
-            EXIT_ERROR,
-            "working tree is not clean; commit or stash first:\n  " + "\n  ".join(dirty[:20]),
-        )
+    if not dirty:
+        return ""
+    return "working tree is not clean; commit or stash first:\n  " + "\n  ".join(dirty[:20])
+
+
+def check_tree(ctx: Context, tolerate: Sequence[str] = ()) -> None:
+    """Refuse a dirty working tree (see dirty_tree_problem)."""
+    problem = dirty_tree_problem(ctx.repo_root, ctx.cfg.paths.state_dir, tolerate)
+    if problem:
+        raise Stop(EXIT_ERROR, problem)
 
 
 def check_github(ctx: Context) -> None:

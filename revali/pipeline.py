@@ -13,7 +13,7 @@ from typing import Optional
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION, gitops
 from revali.config import ConfigError, archive_root, history_path, load_user_config, paths_for
-from revali.preflight import Stop, check_tree_unmoved, locate, preflight
+from revali.preflight import Stop, check_tree_unmoved, dirty_tree_problem, locate, preflight
 from revali.procs import kill_tree, pid_alive, python_exe, spawn_detached
 from revali.state import (
     LockHeld,
@@ -141,6 +141,10 @@ def _run_detached(args) -> int:
     if owner:
         print(_tree_held_message(owner))
         return EXIT_ERROR
+    problem = _dirty_before_detach(root, rdir)
+    if problem:
+        print("ERROR: %s" % problem)
+        return EXIT_ERROR
     logs = os.path.join(rdir, paths_for(gitops.repo_root(cwd)).logs_dir)
     os.makedirs(logs, exist_ok=True)
     log_path = os.path.join(logs, "run.log")
@@ -158,6 +162,24 @@ def _run_detached(args) -> int:
     print("started revali run (pid %d); log: %s" % (child, log_path))
     print("next: `revali wait --timeout 9m` (repeat until it reports a result)")
     return EXIT_OK
+
+
+def _dirty_before_detach(root: str, rdir: str) -> str:
+    """Preflight's clean-tree refusal, asked before the child is spawned so a dirty tree is
+    reported here instead of in run.log. "" when the tree is clean, when an interrupted round
+    left files the child cleans up before its own check (`reviewer_running`), or when the
+    state or git status cannot be read (the child reports that)."""
+    try:
+        state = State.load(rdir)
+    except (OSError, ValueError):
+        return ""
+    if state is not None and state.reviewer_running:
+        return ""
+    tolerate = state.pending_test_files if state is not None else []
+    try:
+        return dirty_tree_problem(root, paths_for(root).state_dir, tolerate)
+    except gitops.GitError:
+        return ""
 
 
 def _run_foreground(args) -> int:
