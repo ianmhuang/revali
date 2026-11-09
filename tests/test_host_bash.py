@@ -26,9 +26,11 @@ def finder(on_path, files=()):
     return (lambda cmd: on_path.get(cmd)), (lambda path: path.lower() in existing)
 
 
-def find(platform, on_path, files=()):
+def find(platform, on_path, files=(), system_root=r"C:\Windows"):
     which, isfile = finder(on_path, files)
-    return hostbash.find_bash(platform=platform, which=which, isfile=isfile)
+    return hostbash.find_bash(
+        platform=platform, which=which, isfile=isfile, system_root=system_root
+    )
 
 
 class OnWindows(unittest.TestCase):
@@ -69,13 +71,38 @@ class OnWindows(unittest.TestCase):
         self.assertIsNone(find("win32", {"bash": WINDOWSAPPS_BASH.lower()}))
         self.assertIsNone(find("win32", {"bash": WINDOWSAPPS_BASH.upper().replace("\\", "/")}))
 
+    def test_the_system32_launcher_is_not_used(self):
+        # PR #54 round 1 F1: the inbox WSL component puts the same launcher in System32,
+        # ahead of WindowsApps on PATH
+        for d in ("System32", "system32", "SysWOW64", "Sysnative"):
+            with self.subTest(dir=d):
+                bash = r"C:\Windows\%s\bash.exe" % d
+                self.assertIsNone(find("win32", {"bash": bash}))
+                self.assertIsNone(find("win32", {"bash": bash.replace("\\", "/").upper()}))
+
+    def test_the_system_directory_follows_system_root(self):
+        self.assertIsNone(
+            find("win32", {"bash": r"D:\Win\System32\bash.exe"}, system_root=r"D:\Win")
+        )
+        # a bash elsewhere under the Windows directory is not the launcher
+        other = r"C:\Windows\System32\tools\bash.exe"
+        self.assertEqual(find("win32", {"bash": other}), other)
+
+    def test_git_bash_wins_over_the_system32_launcher(self):
+        got = find(
+            "win32",
+            {"git": GIT + r"\cmd\git.exe", "bash": r"C:\Windows\System32\bash.exe"},
+            [GIT + r"\bin\bash.exe"],
+        )
+        self.assertEqual(got, GIT + r"\bin\bash.exe")
+
     def test_nothing_found(self):
         self.assertIsNone(find("win32", {}))
 
     def test_the_message_names_what_was_looked_for(self):
-        text = hostbash.MISSING
+        text = hostbash.missing_message("win32")
         self.assertNotIn("\n", text)
-        for part in (r"bin\bash.exe", r"usr\bin\bash.exe", "WindowsApps", "git"):
+        for part in (r"bin\bash.exe", r"usr\bin\bash.exe", "WindowsApps", "System32", "git"):
             self.assertIn(part, text)
 
 
@@ -95,6 +122,15 @@ class Elsewhere(unittest.TestCase):
 
     def test_none_when_absent(self):
         self.assertIsNone(find("linux", {}))
+
+    def test_the_message_names_only_the_path_lookup(self):
+        # PR #54 round 1 F2: no Git Bash or WindowsApps outside Windows
+        for platform in ("linux", "darwin"):
+            with self.subTest(platform=platform):
+                text = hostbash.missing_message(platform)
+                self.assertIn("no bash on PATH", text)
+                self.assertNotIn("Git", text)
+                self.assertNotIn("WindowsApps", text)
 
 
 class StubsUseTheHelper(unittest.TestCase):
@@ -131,12 +167,12 @@ class StubsUseTheHelper(unittest.TestCase):
     def test_wsl_stub_without_bash_exits_1_with_the_message(self):
         code, err = self.run_quiet(wsl_stub.main, ["-d", "Ubuntu", "-e", "bash", "x.sh"])
         self.assertEqual(code, 1)
-        self.assertEqual(err.strip(), hostbash.MISSING)
+        self.assertEqual(err.strip(), hostbash.missing_message())
 
     def test_ssh_stub_without_bash_exits_1_with_the_message(self):
         code, err = self.run_quiet(ssh_stub.one, ["bash", "x.sh"])
         self.assertEqual(code, 1)
-        self.assertEqual(err.strip(), hostbash.MISSING)
+        self.assertEqual(err.strip(), hostbash.missing_message())
 
 
 if __name__ == "__main__":

@@ -6,7 +6,6 @@ previous README by hand; AC-12 is the rest of the suite."""
 import os
 import re
 import subprocess
-import sys
 import unittest
 from unittest import mock
 
@@ -343,9 +342,10 @@ class BranchLockRace(ReadyRepo):
 
 
 def dead_pid():
-    p = subprocess.Popen([sys.executable, "-c", "pass"])
-    p.wait()
-    return p.pid
+    """A pid no process has. The pid of a child that just exited is not one: Windows hands it
+    to the next process at once, and under a parallel suite `stop` then found it alive and
+    killed whatever had it (fix/host-bash-in-stubs)."""
+    return 2**31 - 1  # above any pid range on Windows and Linux
 
 
 class DetachedStopOnADeadRun(RepoCase):

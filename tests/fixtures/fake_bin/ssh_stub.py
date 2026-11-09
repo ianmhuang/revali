@@ -85,7 +85,7 @@ def one(words):
             return 127
         bash = hostbash.find_bash()
         if not bash:
-            print(hostbash.MISSING, file=sys.stderr)
+            print(hostbash.missing_message(), file=sys.stderr)
             return 1
         env = dict(os.environ)
         env["HOME"] = remote_root()

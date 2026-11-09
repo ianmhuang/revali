@@ -34,7 +34,7 @@ def main(argv):
     if cmd[0] == "bash":
         bash = hostbash.find_bash()
         if not bash:
-            print(hostbash.MISSING, file=sys.stderr)
+            print(hostbash.missing_message(), file=sys.stderr)
             return 1
         env = dict(os.environ)
         # A private HOME per test when REVALI_HOME is set (RepoCase sets it per test), so
