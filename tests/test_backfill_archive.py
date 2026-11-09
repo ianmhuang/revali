@@ -255,7 +255,7 @@ class Failures(BackfillCase):
         code, out, err = self.run_tool("me/proj")
         self.assertEqual(code, 1, out)
         self.assertIn("archive_dir is empty", err)
-        self.assertEqual(os.listdir(self.home), ["config.toml", "history.jsonl"])
+        self.assertEqual(sorted(os.listdir(self.home)), ["config.toml", "history.jsonl"])
         code, out, err = self.run_tool("me/proj", "--archive-dir", os.path.join(self.tmp, "a"))
         self.assertEqual(code, 0, err)
 
