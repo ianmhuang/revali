@@ -348,6 +348,7 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
             )
             state.rounds, state.test_commits, state.test_files = [], [], []
             state.fixes, state.needs_info_used, state.last_verdict = 0, False, ""
+            state.fix_due = False  # owed to a round that is gone
             state.tests_mode = ""  # the rounds that fixed the mode are gone with them
             state.baseline_sha = ""  # the tree it passed on is gone; validation runs the suite
             state.force_push = True  # the remote still has the dropped commits
@@ -371,16 +372,16 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
                 % (len(state.rounds), state.head_sha[:10]),
             )
             state.force_push = True
-        if state.stage == "needs_action":
-            if state.last_verdict in (review.CHANGES_REQUESTED, "FAIL"):
-                if ctx.head_sha == state.head_sha:
-                    raise Stop(
-                        EXIT_ACTION,
-                        "nothing changed since the last review (HEAD %s); "
-                        "fix, commit, then run again" % ctx.head_sha[:10],
-                    )
-                state.fixes += 1
-                log.stage("run", "fix cycle %d of %d" % (state.fixes, cfg.max_fixes))
+        if state.fix_due:  # not the stage: a stop since then may have recorded `error`
+            if ctx.head_sha == state.head_sha:
+                raise Stop(
+                    EXIT_ACTION,
+                    "nothing changed since the last review (HEAD %s); "
+                    "fix, commit, then run again" % ctx.head_sha[:10],
+                )
+            state.fixes += 1
+            state.fix_due = False
+            log.stage("run", "fix cycle %d of %d" % (state.fixes, cfg.max_fixes))
     if archive:
         testarchive.rebuild(ctx, state, rdir, log)
         commits = []
@@ -567,6 +568,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         return EXIT_ACTION
     if outcome.verdict == review.CHANGES_REQUESTED:
         reasons = "\n".join("  - " + r for r in outcome.reasons)
+        state.fix_due = True  # saved by _stage
         _stage(
             state,
             rdir,
@@ -618,6 +620,7 @@ def _validate_and_finish(
 
     if vout.result == validate.FAIL:
         summary = validate.summary_for_author(vout, rdir)
+        state.fix_due = True  # saved by _stage
         _stage(
             state,
             rdir,

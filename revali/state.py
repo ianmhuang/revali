@@ -79,6 +79,9 @@ class State:
     needs_info_used: bool = False
     force_push: bool = False  # set after a detected history rewrite; cleared by the next push
     last_verdict: str = ""  # APPROVE | CHANGES_REQUESTED | NEEDS_INFO | PASS | FAIL
+    fix_due: bool = False  # the last CHANGES_REQUESTED or validation FAIL still owes the author
+    # a fix cycle: set when a run stops on one, cleared when the next run counts it; the stage
+    # cannot carry it, a stop before the count records `error` or `stopped` (STATE_VERSION 7)
     reviewer_running: bool = (
         False  # a reviewer session may have left files in test_dir (STATE_VERSION 2)
     )
@@ -110,6 +113,12 @@ class State:
         for key, value in data.items():
             if hasattr(st, key):
                 setattr(st, key, value)
+        if "fix_due" not in data:
+            # a state from before STATE_VERSION 7: the stage was the record
+            st.fix_due = st.stage == "needs_action" and st.last_verdict in (
+                "CHANGES_REQUESTED",
+                "FAIL",
+            )
         return st
 
     def save(self, rdir: str) -> None:
