@@ -73,7 +73,7 @@ class SandboxLayoutTests(unittest.TestCase):
         logs = tempfile.mkdtemp(prefix="revali-scope-")
         self.addCleanup(shutil.rmtree, logs, True)
         with (
-            mock.patch.object(WslRunner, "wslpath", lambda self, p: p),
+            mock.patch.object(WslRunner, "wslpath", lambda self, p, log=None: p),
             mock.patch.object(WslRunner, "script", capture),
         ):
             with self.assertRaises(RunnerError):

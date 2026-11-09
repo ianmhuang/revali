@@ -36,6 +36,17 @@ Every sandbox session's wall time appears in the log line that
 reports its result and, with the per-stage times, in the run's final
 `run: timing` line. The distro needs git and whatever `setup` installs; on
 Ubuntu 24.04 that means `python3-venv` and `python3-pip` for a Python project.
+The WSL service itself sometimes fails a call for a while
+(`Wsl/Service/WSAETIMEDOUT`, in windows of about 30 seconds that can recur).
+Every `wsl.exe` call the runner makes (the preflight probe, `wslpath`, the
+sandbox script) is retried when its output matches `wsl_transient_errors`:
+after `wsl_retry_wait_s` seconds, up to `wsl_retries` times, with one log line
+per retry. The sandbox script is not run again once it has started (its
+first line creates the results file). When the last attempt fails too, the
+run stops with exit 1 as before, and the message adds that `wsl --shutdown`
+restarts WSL and stops every running distro, other projects' included;
+revali never runs it. With `wsl_retries = 0` there is one attempt and the
+same message.
 `runner = "local"` uses a git worktree on the host with no isolation.
 
 `runner = "ssh"` with `host = "<destination>"` does the same as `wsl` on a Linux

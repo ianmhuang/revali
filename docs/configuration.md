@@ -19,6 +19,11 @@ Unknown keys are errors in every layer. `[review] engine` and
 (`prompt`, `schema`, `checklist_builtin`) are relative to the project
 root; empty means the file revali ships with. `[validate.platform]` in
 any layer sets the defaults for every `[validate.<name>]` table.
+For `runner = "wsl"`, a `wsl.exe` call whose output carries one of
+`wsl_transient_errors` (default `["Wsl/Service/WSAETIMEDOUT"]`, matched after
+the NUL bytes of wsl.exe's UTF-16 messages are removed) is tried again after
+`wsl_retry_wait_s` seconds (default 30), up to `wsl_retries` times (default 2;
+0 turns it off); see [docs/sandbox.md](sandbox.md).
 `[validate] reuse_baseline` (default true) lets validation skip the
 existing suite (`test`) when the baseline already ran it on the same tree:
 every commit since the baseline carries the reviewer's `Revali-Round`

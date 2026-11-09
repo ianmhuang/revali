@@ -33,10 +33,27 @@ BUNDLE_TIMEOUT_S = 300
 # what `timeout(1)` returns when a step overruns; the sandbox script and the fake runner
 # both mark that exit as a timeout
 TIMEOUT_EXIT = 124
+# appended to a wsl failure that matched [validate.<platform>] wsl_transient_errors
+SHUTDOWN_HINT = (
+    "the WSL service did not answer; `wsl --shutdown` restarts WSL, which stops every running "
+    "distro, then run revali again"
+)
 
 
 class RunnerError(Exception):
     pass
+
+
+def _pause(seconds: float) -> None:
+    """The wait before a wsl retry; its own name so a test can replace it without also
+    catching the sleeps `subprocess` makes while it waits for a child."""
+    time.sleep(seconds)
+
+
+def wsl_text(text: str) -> str:
+    """wsl.exe prints its own errors in UTF-16; read as UTF-8 they keep a NUL between the
+    letters. Output from inside the distro has none, so removing them changes nothing there."""
+    return (text or "").replace("\x00", "")
 
 
 @dataclass
@@ -425,13 +442,59 @@ class WslRunner(Runner):
         super().__init__(plat)
         self.distro = plat.distro or "Ubuntu"
 
-    def _wsl(self, args: list, timeout: float, log: Logger = None):
-        return run(resolve("wsl") + ["-d", self.distro, "-e"] + args, timeout=timeout, log=log)
+    def transient(self, res) -> str:
+        """The configured pattern a failed call's output carries, or "" (also for success)."""
+        if res.ok:
+            return ""
+        text = wsl_text(res.text)
+        for pattern in self.plat.wsl_transient_errors:
+            if pattern and pattern in text:
+                return pattern
+        return ""
 
-    def wslpath(self, host_path: str) -> str:
-        res = self._wsl(["wslpath", "-a", host_path], timeout=60)
+    def failure(self, res, limit: int = 0) -> str:
+        """A failed call's output for a message: NULs removed, cut to `limit` when given,
+        and the `wsl --shutdown` hint when the error was transient."""
+        text = wsl_text(res.text).strip()
+        if limit:
+            text = text[:limit]
+        if self.transient(res):
+            text = "%s; %s" % (text, SHUTDOWN_HINT)
+        return text
+
+    def _wsl(
+        self,
+        args: list,
+        timeout: float,
+        log: Logger = None,
+        may_retry: Optional[Callable[[], bool]] = None,
+    ):
+        """One wsl.exe call, repeated after `wsl_retry_wait_s` up to `wsl_retries` times while
+        it fails with a `wsl_transient_errors` pattern (and `may_retry()` agrees). A timeout
+        of revali's own (ProcTimeout) is not retried."""
+        cmd = resolve("wsl") + ["-d", self.distro, "-e"] + args
+        res = run(cmd, timeout=timeout, log=log)
+        retries = max(self.plat.wsl_retries, 0)
+        attempt = 0
+        while attempt < retries:
+            pattern = self.transient(res)
+            if not pattern or (may_retry is not None and not may_retry()):
+                break
+            attempt += 1
+            wait = max(self.plat.wsl_retry_wait_s, 0)
+            if log:
+                log(
+                    "[wsl] %s: %s; retry %d of %d in %gs"
+                    % (self.distro, pattern, attempt, retries, wait)
+                )
+            _pause(wait)
+            res = run(cmd, timeout=timeout, log=log)
+        return res
+
+    def wslpath(self, host_path: str, log: Logger = None) -> str:
+        res = self._wsl(["wslpath", "-a", host_path], timeout=60, log=log)
         if not res.ok or not res.stdout.strip():
-            raise RunnerError("wslpath failed for %s: %s" % (host_path, res.text.strip()))
+            raise RunnerError("wslpath failed for %s: %s" % (host_path, self.failure(res)))
         return res.stdout.strip()
 
     def script(
@@ -457,9 +520,9 @@ class WslRunner(Runner):
         sandbox = sandbox_dir(root, repo_name, scope, label)
         timeout_s = self.plat.command_timeout_min * 60
         script = self.script(
-            self.wslpath(repo_root),
-            self.wslpath(logs_dir),
-            self.wslpath(extra_dir),
+            self.wslpath(repo_root, log),
+            self.wslpath(logs_dir, log),
+            self.wslpath(extra_dir, log),
             ref,
             steps,
             label,
@@ -474,9 +537,11 @@ class WslRunner(Runner):
             log("[%s] wsl %s: %d step(s) on %s" % (label, self.distro, len(steps), ref[:10]))
         try:
             res = self._wsl(
-                ["bash", self.wslpath(script_path)],
+                ["bash", self.wslpath(script_path, log)],
                 timeout=timeout_s * max(1, len(steps)) + 300,
                 log=log,
+                # a script that wrote its results ran; running it again would redo the steps
+                may_retry=lambda: not os.path.isfile(results_path),
             )
         except ProcTimeout as exc:
             raise RunnerError("wsl session for %s did not finish in time" % label) from exc
@@ -485,7 +550,7 @@ class WslRunner(Runner):
         if not res.ok and not os.path.isfile(results_path):
             raise RunnerError(
                 "wsl could not start the sandbox script (exit %d): %s"
-                % (res.returncode, res.text.strip()[:400])
+                % (res.returncode, self.failure(res, 400))
             )
         return report_from_results(logs_dir, label, steps, log)
 
@@ -676,9 +741,9 @@ class SshRunner(Runner):
                 )
 
 
-def probe_runner(plat: PlatformCfg) -> str:
+def probe_runner(plat: PlatformCfg, log: Logger = None) -> str:
     """Return "" when the runner can start, else one line for preflight. The fake runner always
-    can."""
+    can. `log` gets the wsl runner's retry lines."""
     if os.environ.get(FAKE_ENV):
         return ""
     try:
@@ -699,12 +764,14 @@ def probe_runner(plat: PlatformCfg) -> str:
                 )
         elif plat.runner == "wsl":
             runner = WslRunner(plat)
-            res = runner._wsl(["bash", "-c", SSH_PROBE], timeout=plat.connect_timeout_s + 60)
+            res = runner._wsl(
+                ["bash", "-c", SSH_PROBE], timeout=plat.connect_timeout_s + 60, log=log
+            )
             if not res.ok:
                 return (
                     "WSL distro '%s' did not start or lacks git, bash or coreutils timeout "
                     "(exit %d): %s"
-                    % (runner.distro, res.returncode, res.text.strip()[:300] or "no output")
+                    % (runner.distro, res.returncode, runner.failure(res, 300) or "no output")
                 )
     except ExeNotFound as exc:
         return str(exc)
