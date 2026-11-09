@@ -4,7 +4,8 @@
 list is invisible to it. A lint error in the reviewer's new (untracked) file must still
 bounce the reviewer once and end the run on the second attempt (AC-5); whatever lint
 returned, the reviewer's new files are untracked afterwards and a stopped round deletes
-them as before (AC-6), also when the run was killed while the lint line was running."""
+them as before (AC-6), also when the run was killed while the lint line was running, and
+also a draft the killed session had staged (in the index, in no commit)."""
 
 import unittest
 
@@ -16,6 +17,8 @@ from tests.helpers import TEST_REVIEW_MUL, RepoCase, approve_response, claude_en
 MUL = "tests/test_review_mul.py"
 SPACED = "tests/test_review_my topic.py"
 THIRD = "tests/test_review_third.py"
+STAGED = "tests/test_review_staged.py"
+CHANGED = "tests/test_review_changed.py"
 MARK = "# lint-red"
 RED = TEST_REVIEW_MUL.replace("import unittest", "import unittest  " + MARK)
 SPACED_TEXT = TEST_REVIEW_MUL.replace("MulTests", "TopicTests")
@@ -201,6 +204,41 @@ class KilledDuringTheGate(TrackedOnlyLint):
         self.assertEqual(code, EXIT_OK, out)
         self.assertFalse(self.exists(MUL))
         self.assertFalse(self.exists(SPACED))
+        self.assertEqual(self.entries(), {})
+        self.assertEqual(self.staged(), "")
+
+    def staged_drafts(self):
+        """Two more drafts of the killed session, in the index with content and in no commit:
+        one staged as it is (`A `), one staged and then changed (`AM`)."""
+        self.killed_at_the_gate(SPACED)
+        for path in (STAGED, CHANGED):
+            self.write(path, "# half written by the killed session\n")
+            git(["add", "--", path], self.repo)
+        self.write(CHANGED, "# half written by the killed session, then more\n")
+        entries = self.entries()
+        self.assertEqual(entries.get(STAGED), "A ", entries)
+        self.assertEqual(entries.get(CHANGED), "AM", entries)
+
+    def test_the_next_run_deletes_staged_drafts_too(self):
+        self.staged_drafts()
+        self.claude(writes({THIRD: THIRD_TEXT}, approve_response(tests=[third_test()])))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertNotIn("not clean", out)
+        self.assertEqual(code, EXIT_OK, out)
+        listed = git(["ls-files", "-z"], self.repo).split("\0")
+        for path in (MUL, SPACED, STAGED, CHANGED):
+            self.assertFalse(self.exists(path), path)
+            self.assertNotIn(path, listed)
+        self.assertIn(THIRD, listed)
+        self.assertEqual(self.entries(), {})
+        self.assertEqual(State.load(self.rdir()).pending_test_files, [])
+
+    def test_reset_deletes_staged_drafts_too(self):
+        self.staged_drafts()
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        for path in (MUL, SPACED, STAGED, CHANGED):
+            self.assertFalse(self.exists(path), path)
         self.assertEqual(self.entries(), {})
         self.assertEqual(self.staged(), "")
 
