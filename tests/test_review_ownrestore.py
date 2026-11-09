@@ -5,7 +5,8 @@ trailer, so the file is the reviewer's own the way the pipeline establishes it. 
 a round 2 that modifies or deletes that file and stops at the smoke run puts it back to
 HEAD and the next run passes preflight (AC-1, AC-2); a killed round 2 is cleaned by the
 run after it (AC-3); an edit the author made while no session was in flight stays, and
-both `run` and `reset` leave it alone (AC-4)."""
+both `run` and `reset` leave it alone (AC-4). The same file may also be pending (a
+NEEDS_INFO round touched it): the round after that one restores it all the same."""
 
 import os
 import unittest
@@ -216,6 +217,68 @@ class AuthorsEditStays(OwnFileCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assertFalse(self.exists(OTHER))  # the pending draft goes, as before
         self.assertEqual(self.read(MUL), EDITED)  # the author's edit does not
+
+
+class PendingOwnFile(OwnFileCase):
+    """Round 2 asks (NEEDS_INFO) after touching MUL, so MUL is the reviewer's own file and
+    pending at once. The round after it must still leave MUL with its HEAD content when it
+    stops (AC-2) or was killed (AC-3), deleted file included."""
+
+    def asking_round(self, write=None, delete=()):
+        data = approve_response(verdict="NEEDS_INFO", questions=["Which integers?"], tests=[])
+        self.claude(session(write, delete, data))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assertEqual(self.state().pending_test_files, [MUL])
+        self.assertFalse(self.state().reviewer_running)
+
+    def stop_the_round_after_it_at_the_smoke_run(self, entry):
+        # the asking round has no smoke run, so whichever number the next round carries
+        self.runner_scenario(
+            {"default": 0, "errors": {"smoke-r2-1": SANDBOX_DOWN, "smoke-r3-1": SANDBOX_DOWN}}
+        )
+        self.claude(entry)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn(SANDBOX_DOWN, out)
+
+    def assert_back_at_head(self):
+        self.assertTrue(self.exists(MUL))
+        self.assertEqual(self.read(MUL), self.committed)
+        self.assertEqual(self.status(), "")
+        self.assertEqual(self.state().pending_test_files, [])
+
+    def test_modified_while_asking_then_deleted_by_the_round_that_stops(self):  # AC-2
+        self.asking_round({MUL: EDITED})
+        self.stop_the_round_after_it_at_the_smoke_run(
+            session({OTHER: OTHER_TEXT}, delete=[MUL], data=covering(OTHER))
+        )
+        self.assert_back_at_head()
+        self.assertFalse(self.exists(OTHER))
+        self.next_run_passes()
+
+    def test_deleted_while_asking_and_the_round_after_it_stops(self):  # AC-2
+        self.asking_round(delete=[MUL])
+        self.assertFalse(self.exists(MUL))
+        self.stop_the_round_after_it_at_the_smoke_run(
+            session({OTHER: OTHER_TEXT}, data=covering(OTHER))
+        )
+        self.assert_back_at_head()
+        self.next_run_passes()
+
+    def test_deleted_while_asking_and_the_round_after_it_was_killed(self):  # AC-3
+        self.asking_round(delete=[MUL])
+        state = self.state()
+        state.reviewer_running = True
+        state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
+        self.write(LEFT, "# half written by the killed session\n")
+        self.claude(session())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertNotIn("not clean", out)
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(LEFT))
+        self.assert_back_at_head()
+        self.assertEqual(git(["show", "HEAD:" + MUL], self.repo), self.committed)
 
 
 if __name__ == "__main__":

@@ -4,19 +4,22 @@
 list is invisible to it. A lint error in the reviewer's new (untracked) file must still
 bounce the reviewer once and end the run on the second attempt (AC-5); whatever lint
 returned, the reviewer's new files are untracked afterwards and a stopped round deletes
-them as before (AC-6)."""
+them as before (AC-6), also when the run was killed while the lint line was running."""
 
 import unittest
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
+from revali.state import State
 from tests.fixtures.make_sample_repo import PY
 from tests.helpers import TEST_REVIEW_MUL, RepoCase, approve_response, claude_entry, git, run_cli
 
 MUL = "tests/test_review_mul.py"
 SPACED = "tests/test_review_my topic.py"
+THIRD = "tests/test_review_third.py"
 MARK = "# lint-red"
 RED = TEST_REVIEW_MUL.replace("import unittest", "import unittest  " + MARK)
 SPACED_TEXT = TEST_REVIEW_MUL.replace("MulTests", "TopicTests")
+THIRD_TEXT = TEST_REVIEW_MUL.replace("MulTests", "ThirdTests")
 
 # Checks only what `git ls-files` lists, one "E900 <path>" line per offending file.
 TRACKED_ONLY_LINT = """import subprocess
@@ -47,6 +50,15 @@ def writes(files, data=None):
 def asking(files):
     data = approve_response(verdict="NEEDS_INFO", questions=["Which rounding?"], tests=[])
     return writes(files, data)
+
+
+def third_test():
+    return {
+        "path": THIRD,
+        "purpose": "acceptance",
+        "covers": ["AC-1", "AC-2"],
+        "expected": "per AC",
+    }
 
 
 class TrackedOnlyLint(RepoCase):
@@ -131,6 +143,65 @@ class UntrackedAfterTheGate(TrackedOnlyLint):
         self.assertIn("E900 " + MUL, calls[1]["prompt"])
         self.assertNotIn(MARK, self.read(MUL))
         self.assertEqual(self.entries(), {MUL: "??", SPACED: "??"})  # AC-6
+        self.assertEqual(self.staged(), "")
+
+
+class KilledDuringTheGate(TrackedOnlyLint):
+    """AC-6, "a stopped round still deletes them as before": a run killed while the lint line
+    is running cannot unmark its files, so they stay intent-to-add with the round flagged as
+    in flight. The run after it, or `reset`, must dispose of them like any other draft."""
+
+    def killed_at_the_gate(self, *drafts):
+        """A NEEDS_INFO round leaves MUL pending; the round after it is killed while its lint
+        line runs over `drafts`."""
+        self.claude(asking({MUL: TEST_REVIEW_MUL}))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        state = State.load(self.rdir())
+        self.assertEqual(state.pending_test_files, [MUL])
+        state.reviewer_running = True
+        state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
+        for path in drafts:
+            if not self.exists(path):
+                self.write(path, "# half written by the killed session\n")
+            git(["add", "-N", "--", path], self.repo)
+        entries = self.entries()
+        for path in drafts:
+            self.assertEqual(entries.get(path), " A", entries)  # in the index, in no commit
+
+    def test_the_next_run_deletes_the_marked_drafts_and_goes_on(self):
+        self.killed_at_the_gate(MUL, SPACED)
+        self.claude(writes({THIRD: THIRD_TEXT}, approve_response(tests=[third_test()])))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertNotIn("not clean", out)
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(MUL))
+        self.assertFalse(self.exists(SPACED))
+        listed = git(["ls-files", "-z"], self.repo).split("\0")
+        self.assertNotIn(MUL, listed)
+        self.assertNotIn(SPACED, listed)
+        self.assertIn(THIRD, listed)  # the new round's own file was committed
+        self.assertEqual(self.entries(), {})
+        state = State.load(self.rdir())
+        self.assertEqual(state.pending_test_files, [])
+        self.assertFalse(state.reviewer_running)
+
+    def test_a_marked_draft_that_was_not_pending_goes_too(self):
+        self.killed_at_the_gate(SPACED)  # MUL stays untracked and pending
+        self.claude(writes({THIRD: THIRD_TEXT}, approve_response(tests=[third_test()])))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(MUL))
+        self.assertFalse(self.exists(SPACED))
+        self.assertEqual(self.entries(), {})
+
+    def test_reset_deletes_the_marked_drafts(self):
+        self.killed_at_the_gate(MUL, SPACED)
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(MUL))
+        self.assertFalse(self.exists(SPACED))
+        self.assertEqual(self.entries(), {})
         self.assertEqual(self.staged(), "")
 
 
