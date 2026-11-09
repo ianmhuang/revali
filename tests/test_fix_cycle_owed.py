@@ -172,6 +172,14 @@ class CountedOnce(OwedCase):
         self.assertIn("fix cycle 1 of 2", out)
         state = State.load(self.rdir())
         self.assertEqual((state.stage, state.fixes), ("error", 1))
+        # round 1, F1: an exit-2 preflight stop (lint red) then records `needs_action` over a
+        # last verdict still CHANGES_REQUESTED, which the stage rule read as a fix still owed
+        lint_red = Stop(EXIT_ACTION, "lint failed")
+        with mock.patch("revali.pipeline.preflight", side_effect=lint_red):
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        state = State.load(self.rdir())
+        self.assertEqual((state.stage, state.last_verdict), ("needs_action", "CHANGES_REQUESTED"))
         # same HEAD: not "nothing changed", and the cycle is not counted again
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)
