@@ -5,7 +5,8 @@ import os
 import re
 import tempfile
 import time
-from dataclasses import asdict, dataclass, field
+import typing
+from dataclasses import asdict, dataclass, field, fields
 from typing import List, Optional
 
 from revali import PROMPT_VERSION, STATE_VERSION, VERSION
@@ -105,14 +106,26 @@ class State:
 
     @classmethod
     def load(cls, rdir: str) -> Optional["State"]:
+        """The state in `rdir`, None when there is no state file. A field that is null takes
+        its default; keys that are not fields are ignored; anything else State cannot use
+        (not JSON, not an object, a value of the wrong type) raises StateError."""
         path = cls.path(rdir)
         if not os.path.isfile(path):
             return None
-        data = read_json_retry(path)
+        try:
+            data = read_json_retry(path)
+        except ValueError as exc:  # JSONDecodeError, or bytes that are not UTF-8
+            raise StateError("%s is not valid JSON (%s)" % (path, exc)) from exc
+        if not isinstance(data, dict):
+            raise StateError(
+                "%s does not hold a JSON object (found %s)" % (path, type(data).__name__)
+            )
+        hints = typing.get_type_hints(cls)
         st = cls()
-        for key, value in data.items():
-            if hasattr(st, key):
-                setattr(st, key, value)
+        for f in fields(cls):
+            value = data.get(f.name)
+            if value is not None:
+                setattr(st, f.name, _checked(path, f.name, hints[f.name], value))
         if "fix_due" not in data:
             # a state from before STATE_VERSION 7: the stage was the record
             st.fix_due = st.stage == "needs_action" and st.last_verdict in (
@@ -122,6 +135,8 @@ class State:
         return st
 
     def save(self, rdir: str) -> None:
+        # what is written is the current layout, whatever version the file was read as
+        self.version = STATE_VERSION
         os.makedirs(rdir, exist_ok=True)
         if not self.started_at:
             self.started_at = now_iso()
@@ -137,6 +152,50 @@ class State:
         if exit_code is not None:
             self.last_exit = exit_code
         self.save(rdir)
+
+
+class StateError(ValueError):
+    """state.json holds something State cannot use: not JSON, not an object, or a field whose
+    value has the wrong type. The message names the file and the field."""
+
+
+def _fits(expected: type, value) -> bool:
+    if isinstance(value, bool):  # a bool is an int to isinstance, not to a counter
+        return expected is bool
+    if expected is float:
+        return isinstance(value, (int, float))
+    return isinstance(value, expected)
+
+
+def _checked(path: str, name: str, hint, value):
+    """`value` for field `name` as State holds it, or StateError when its type is wrong."""
+    if typing.get_origin(hint) is list:
+        (item,) = typing.get_args(hint)
+        want = "a list of %s" % item.__name__
+        if not isinstance(value, list):
+            raise StateError(
+                "%s: field '%s' should be %s, found %s" % (path, name, want, type(value).__name__)
+            )
+        for i, element in enumerate(value):
+            if not _fits(item, element):
+                raise StateError(
+                    "%s: field '%s' should be %s, found %s at index %d"
+                    % (path, name, want, type(element).__name__, i)
+                )
+        return value
+    if not _fits(hint, value):
+        raise StateError(
+            "%s: field '%s' should be %s, found %s"
+            % (path, name, hint.__name__, type(value).__name__)
+        )
+    if hint is float:
+        try:
+            return float(value)
+        except OverflowError:  # an int literal past a double's range (310+ digits)
+            raise StateError(
+                "%s: field '%s' should be float, found an int too large for one" % (path, name)
+            ) from None
+    return value
 
 
 def write_retry_s(path: str) -> float:

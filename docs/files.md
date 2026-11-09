@@ -28,3 +28,18 @@ that moves it.
 
 Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves
 with the `REVALI_HOME` environment variable.
+
+`state.json` is revali's own file, but a hand edit is read as follows. A
+field set to `null` takes its default, mostly an empty list, `0`, `""` or
+`false`. Five fields default to something else: `stage` reads as
+`preflight`; `last_exit` reads as `-1`, a run that ended without a result,
+so `wait` and `status` report it as died; `version` is the current layout
+version; `revali_version` and `prompt_version` are those of the running
+revali. A key that is not a field is ignored. A file that is not JSON, not an
+object, or has a field of the wrong type (a string where a number belongs,
+`true` where a counter belongs, a list holding a `null`) stops every command
+that reads it with exit 1 and one `ERROR:` line naming the file and the
+field; `revali stop` still stops the run first. `revali reset` removes such a
+file, though it cannot clean up the reviewer's uncommitted test files the
+file may have listed. Every save writes the current state layout version in
+`version`, whatever version the file was read as.
