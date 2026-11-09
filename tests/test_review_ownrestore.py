@@ -6,7 +6,9 @@ a round 2 that modifies or deletes that file and stops at the smoke run puts it 
 HEAD and the next run passes preflight (AC-1, AC-2); a killed round 2 is cleaned by the
 run after it (AC-3); an edit the author made while no session was in flight stays, and
 both `run` and `reset` leave it alone (AC-4). The same file may also be pending (a
-NEEDS_INFO round touched it): the round after that one restores it all the same."""
+NEEDS_INFO round touched it): the round after that one restores it all the same. A killed
+session that deleted the file and left a draft with the same content marked intent-to-add
+(a pair `git status` reports as one rename) is cleaned up like the two separate cases."""
 
 import os
 import unittest
@@ -172,6 +174,49 @@ class InterruptedRound(OwnFileCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assertEqual(self.read(MUL), self.committed)
         self.assertEqual(self.status(), "")
+
+
+class DeletedOwnFileNextToAMarkedDraft(OwnFileCase):
+    """The killed session deleted MUL and left a draft with the same content that the lint
+    gate had marked intent-to-add. Plain `git status` reports the two as one work-tree
+    rename; the cleanup must still treat each as what it is: MUL back at HEAD (AC-3), the
+    draft deleted like any other (AC-6)."""
+
+    def killed_with_the_pair(self):
+        state = self.state()
+        state.reviewer_running = True
+        state.set_stage(self.rdir(), "review", "killed", EXIT_ERROR)
+        os.remove(os.path.join(self.repo, MUL))
+        self.write(LEFT, self.committed)
+        git(["add", "-N", "--", LEFT], self.repo)
+        paired = git(["status", "--porcelain", "--find-renames"], self.repo)
+        self.assertTrue(any("R" in line[:2] for line in paired.splitlines()), paired)
+
+    def assert_cleaned_up(self):
+        self.assertTrue(self.exists(MUL))
+        self.assertEqual(self.read(MUL), self.committed)
+        self.assertFalse(self.exists(LEFT))
+        self.assertNotIn(LEFT, git(["ls-files", "-z"], self.repo).split("\0"))
+        self.assertEqual(self.status(), "")
+
+    def test_the_run_after_it_restores_the_file_and_deletes_the_draft(self):  # AC-3, AC-6
+        self.killed_with_the_pair()
+        before = len(self.restore_lines(self.run_log()))
+        self.claude(session())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertNotIn("not clean", out)
+        self.assertEqual(code, EXIT_OK, out)
+        self.assert_cleaned_up()
+        self.assertEqual(git(["show", "HEAD:" + MUL], self.repo), self.committed)
+        named = self.restore_lines(self.run_log())
+        self.assertGreater(len(named), before, self.run_log())  # AC-3: named in the log
+        self.assertFalse(self.state().reviewer_running)
+
+    def test_reset_restores_the_file_and_deletes_the_draft(self):  # AC-3, AC-6
+        self.killed_with_the_pair()
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assert_cleaned_up()
 
 
 class AuthorsEditStays(OwnFileCase):
