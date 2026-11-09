@@ -200,8 +200,13 @@ class RetrySettings(FlakyWsl):
         self.assertEqual(len(self.calls("wslpath")), 1)
         self.assertNotIn("wsl --shutdown", str(cm.exception))
 
-    def test_negative_values_are_config_errors(self):
-        for key, value in (("wsl_retries", "-1"), ("wsl_retry_wait_s", "-0.5")):
+    def test_bad_values_are_config_errors(self):
+        for key, value in (
+            ("wsl_retries", "-1"),
+            ("wsl_retry_wait_s", "-0.5"),
+            ("wsl_transient_errors", '["Wsl/Service/WSAETIMEDOUT", " "]'),
+            ("wsl_transient_errors", "[3]"),
+        ):
             cfg = self.read("revali.toml").replace(
                 'distro = "Ubuntu"\n', 'distro = "Ubuntu"\n%s = %s\n' % (key, value), 1
             )

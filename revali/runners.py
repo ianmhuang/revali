@@ -35,7 +35,7 @@ BUNDLE_TIMEOUT_S = 300
 TIMEOUT_EXIT = 124
 # appended to a wsl failure that matched [validate.<platform>] wsl_transient_errors
 SHUTDOWN_HINT = (
-    "the WSL service kept failing; `wsl --shutdown` restarts WSL, which stops every running "
+    "the WSL service did not answer; `wsl --shutdown` restarts WSL, which stops every running "
     "distro, then run revali again"
 )
 
