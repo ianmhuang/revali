@@ -4,7 +4,8 @@
 import argparse
 import sys
 
-from revali import NAME, VERSION, pipeline
+from revali import EXIT_ERROR, NAME, VERSION, pipeline
+from revali.state import StateError
 
 
 def _command(sub, name: str, sentence: str, func):
@@ -120,6 +121,9 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
+    except StateError as exc:  # a hand-edited or damaged state.json, from any command
+        print(pipeline.state_error_line(exc))
+        return EXIT_ERROR
     except KeyboardInterrupt:
         print("interrupted")
         return 1

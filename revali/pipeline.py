@@ -19,6 +19,7 @@ from revali.state import (
     LockHeld,
     RunLog,
     State,
+    StateError,
     TreeLockHeld,
     acquire_lock,
     acquire_tree_lock,
@@ -113,6 +114,11 @@ def _print_stop(stop: Stop) -> None:
     print("%s: %s" % (label, stop.message))
 
 
+def state_error_line(exc: StateError) -> str:
+    """How every command reports a state file it cannot use (cli.main, `stop`)."""
+    return "ERROR: %s; fix the file or run `revali reset` to clear it" % exc
+
+
 # ---- run --------------------------------------------------------------------
 
 
@@ -169,16 +175,16 @@ def _dirty_before_detach(root: str, rdir: str) -> Tuple[str, Optional[State]]:
     """Preflight's clean-tree refusal, asked before the child is spawned so a dirty tree is
     reported here instead of in run.log, with the state it was read from. The problem is ""
     when the tree is clean, when an interrupted round left files the child cleans up before
-    its own check (`reviewer_running`), or when the state or git status cannot be read (the
-    child reports that)."""
+    its own check (`reviewer_running`), or when the state file or git status cannot be read
+    (the child reports that). A state file State cannot use raises StateError here, before
+    anything is spawned."""
     try:
         state = State.load(rdir)
-    except (OSError, ValueError, AttributeError, TypeError):  # unreadable, or not an object
+    except OSError:
         return "", None
     if state is not None and state.reviewer_running:
         return "", state
-    # `or []`: a hand-edited state may hold null there; the child would stop on it, not here
-    tolerate = (state.pending_test_files or []) if state is not None else []
+    tolerate = state.pending_test_files if state is not None else []
     try:
         return dirty_tree_problem(root, paths_for(root).state_dir, tolerate), state
     except (gitops.GitError, ProcError):  # ProcError: git missing or timed out
@@ -218,7 +224,12 @@ def _run_foreground(args) -> int:
         print(_tree_held_message({"pid": exc.pid, "branch": exc.branch}))
         return EXIT_ERROR
     log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(root).logs_dir)
-    state = State.load(rdir) or State()
+    try:
+        state = State.load(rdir) or State()
+    except StateError:  # reported by cli.main; this run never started
+        release_lock(rdir)
+        release_tree_lock(tpath)
+        raise
     code = EXIT_ERROR
     try:
         code = _pipeline(args, cwd, rdir, state, log)
@@ -809,7 +820,14 @@ def cmd_reset(args) -> int:
         print("ERROR: a run is in progress; `revali stop` first")
         return EXIT_ERROR
     path = State.path(rdir)
-    state = State.load(rdir)
+    try:
+        state = State.load(rdir)
+    except StateError as exc:
+        state = None
+        print(
+            "the state file could not be read (%s); the reviewer's uncommitted test files it "
+            "may list are not cleaned up, check `git status` before the next run" % exc
+        )
     if state is not None and (state.pending_test_files or state.reviewer_running):
         _reset_test_dir(state, rdir)
     if os.path.isfile(path):
@@ -906,7 +924,11 @@ def cmd_stop(args) -> int:
     if not pid:
         release_lock(rdir)  # stale when present: nobody alive owns it
         release_tree_lock(tpath)
-        state = State.load(rdir)
+        try:
+            state = State.load(rdir)
+        except StateError as exc:
+            print(state_error_line(exc))
+            return EXIT_ERROR
         if state is not None and run_died(state):
             # The process is gone and nothing recorded a result: close the episode so `wait`
             # and `status` stop reporting a death. Only the outcome fields change; what the
@@ -933,8 +955,12 @@ def cmd_stop(args) -> int:
         time.sleep(0.1)
     release_lock(rdir)
     release_tree_lock(tpath)
-    state = State.load(rdir)
     print("stopped pid %d" % pid)
+    try:
+        state = State.load(rdir)
+    except StateError as exc:
+        print(state_error_line(exc))
+        return EXIT_ERROR
     if state is not None and not _close_stopped(
         state, rdir, "stopped by user at stage '%s'" % state.stage
     ):

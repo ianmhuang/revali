@@ -147,14 +147,20 @@ class LeftToTheChild(DetachedCase):
     """round 1, F2: when the check itself cannot answer, the child starts and reports."""
 
     def test_state_file_that_is_not_an_object(self):
+        # feature/state-load-normalize AC-3 changed this case: State.load now raises
+        # StateError for it, which `run` reports before spawning (the child used to die on
+        # it with a traceback in run.log, leaving `wait` with only "died")
         self.dirty()
         os.makedirs(self.rdir(), exist_ok=True)
         with open(State.path(self.rdir()), "w", encoding="utf-8", newline="") as fh:
             fh.write("[1, 2]\n")
         code, out, spawn = self.run_detached()
-        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("does not hold a JSON object", out)
         self.assertNotIn("Traceback", out)
-        spawn.assert_called_once()
+        spawn.assert_not_called()
+        self.assertFalse(os.path.isfile(lock_path(self.rdir())))
+        self.assertFalse(os.path.isfile(self.tree_lock()))
 
     def test_git_status_failing_or_timing_out(self):
         self.dirty()
