@@ -5,8 +5,10 @@ list is invisible to it. A lint error in the reviewer's new (untracked) file mus
 bounce the reviewer once and end the run on the second attempt (AC-5); whatever lint
 returned, the reviewer's new files are untracked afterwards and a stopped round deletes
 them as before (AC-6), also when the run was killed while the lint line was running, and
-also a draft the killed session had staged (in the index, in no commit)."""
+also a draft the killed session had staged (in the index, in no commit), whether or not its
+file is still in the working tree."""
 
+import os
 import unittest
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
@@ -19,6 +21,7 @@ SPACED = "tests/test_review_my topic.py"
 THIRD = "tests/test_review_third.py"
 STAGED = "tests/test_review_staged.py"
 CHANGED = "tests/test_review_changed.py"
+GONE = "tests/test_review_gone.py"
 MARK = "# lint-red"
 RED = TEST_REVIEW_MUL.replace("import unittest", "import unittest  " + MARK)
 SPACED_TEXT = TEST_REVIEW_MUL.replace("MulTests", "TopicTests")
@@ -239,6 +242,44 @@ class KilledDuringTheGate(TrackedOnlyLint):
         self.assertEqual(code, EXIT_OK, out)
         for path in (MUL, SPACED, STAGED, CHANGED):
             self.assertFalse(self.exists(path), path)
+        self.assertEqual(self.entries(), {})
+        self.assertEqual(self.staged(), "")
+
+    def staged_then_deleted_draft(self):
+        """A draft of the killed session that is left in the index only (`AD`): staged, then
+        deleted from the working tree. Nothing of it is left to delete."""
+        self.killed_at_the_gate(SPACED)
+        self.write(GONE, "# half written by the killed session\n")
+        git(["add", "--", GONE], self.repo)
+        os.remove(os.path.join(self.repo, GONE))
+        entries = self.entries()
+        self.assertEqual(entries.get(GONE), "AD", entries)
+
+    def test_the_next_run_does_not_call_a_staged_then_deleted_draft_stuck(self):
+        self.staged_then_deleted_draft()
+        self.claude(writes({THIRD: THIRD_TEXT}, approve_response(tests=[third_test()])))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertNotIn("not clean", out)
+        self.assertEqual(code, EXIT_OK, out)
+        log = self.read(".revali/feature__mul/logs/revali.log")
+        for text in (out, log):
+            self.assertNotIn("could not remove", text)  # nothing was left to remove
+            self.assertNotIn("will tolerate", text)
+        for call in self.fake_calls("claude"):
+            self.assertNotIn(GONE, call["prompt"])  # not handed to the reviewer as a leftover
+        listed = git(["ls-files", "-z"], self.repo).split("\0")
+        for path in (MUL, SPACED, GONE):
+            self.assertFalse(self.exists(path), path)
+            self.assertNotIn(path, listed)
+        self.assertEqual(self.entries(), {})
+
+    def test_reset_does_not_ask_to_delete_a_staged_then_deleted_draft_by_hand(self):
+        self.staged_then_deleted_draft()
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("by hand", out)  # nothing is left for the author to delete
+        self.assertNotIn("could not remove", out)
+        self.assertFalse(self.exists(GONE))
         self.assertEqual(self.entries(), {})
         self.assertEqual(self.staged(), "")
 
