@@ -60,7 +60,9 @@ class FlakyWsl(RepoCase):
         )
 
     def retry_lines(self):
-        return [ln for ln in self.lines if "retry" in ln and "wsl" in ln.lower()]
+        # only the runner's own lines: the `$ cmd` lines carry paths, and a sandbox under a
+        # branch like fix/wsl-transient-retry has both words in them
+        return [ln for ln in self.lines if ln.startswith("[wsl]") and " retry " in ln]
 
     def sandbox_run(self, runner, steps, label="validate-r1"):
         head = git(["rev-parse", "HEAD"], self.repo).strip()
