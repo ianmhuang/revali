@@ -563,12 +563,12 @@ def discard_unfinished_tests(
         # marked intent-to-add when the run was killed before its `finally` could unmark it.
         # It is never committed, so it is a draft like an untracked one.
         if (
-            code in ("??", "A")
+            (code == "??" or code[0] == "A")
             and under_test_dir(path, ctx.cfg.project.test_dir)
             and gitops.matches_any(path, [pattern])
         ):
             try:
-                if code == "A":
+                if code[0] == "A":
                     gitops.git_ok(["reset", "-q", "--", path], ctx.repo_root)
                 os.remove(os.path.join(ctx.repo_root, path))
                 removed.append(path)
@@ -609,8 +609,9 @@ def drop_pending_tests(
     the reviewer deleted comes back the same way; HEAD must have it (an intent-to-add entry
     is in the index but not in HEAD)."""
     restored = []
+    tracked = set(tracked_test_files(ctx))
     for path in state.pending_test_files:
-        if path in tracked_test_files(ctx) and _in_head(path, ctx.repo_root):
+        if path in tracked and _in_head(path, ctx.repo_root):
             _restore_from_head(path, ctx.repo_root)
             restored.append(path)
     if restored and log:

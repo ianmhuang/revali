@@ -218,6 +218,19 @@ class PendingOrMarkedLeftovers(OwnFileCase):
         self.assertFalse(self.exists(self.DRAFT))
         self.assertNotIn(self.DRAFT, git(["ls-files"], self.repo))
 
+    def test_a_draft_added_and_then_changed_goes_too(self):
+        # round 2 follow-up: "AM" is in the index and in no commit, like " A"
+        self.previous_state(reviewer_running=True)
+        self.write(self.DRAFT, "# half written\n")
+        git(["add", "--", self.DRAFT], self.repo)
+        self.write(self.DRAFT, "# half written, then more\n")
+        self.assertIn("AM " + self.DRAFT, porcelain(self.repo))
+        self.claude(claude_entry(write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(self.DRAFT))
+        self.assertNotIn(self.DRAFT, git(["ls-files"], self.repo))
+
     def test_reset_after_a_killed_lint_gate(self):
         self.previous_state(reviewer_running=True)
         self.mark_draft()

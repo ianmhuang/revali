@@ -55,8 +55,8 @@ every one a branch commit references with `Fixes #n` (see
 that preflight runs on the working tree and stops on with exit 2; the same
 line gates the reviewer's tests: after the reviewer writes them the line
 runs again, a failure sends the reviewer back once, a second failure ends
-the run. During that second run the reviewer's new files are intent-to-add
-(`git add -N`), so `git ls-files` lists them and a line that checks only
+the run. Whenever the line runs over the reviewer's tests, the reviewer's
+new files are intent-to-add (`git add -N`), so `git ls-files` lists them and a line that checks only
 tracked files sees them; they are untracked again afterwards (see
 [docs/side-effects.md](side-effects.md)). Leave it empty and nothing checks formatting or style, for your
 diff or for the reviewer's files; preflight prints a note when that is so.
