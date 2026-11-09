@@ -187,6 +187,22 @@ class WrongTypeIsRefused(StateFileCase):
                 self.assertEqual(st.cost_usd, float(value))
                 self.assertIs(type(st.cost_usd), float)
 
+    def test_an_int_too_large_for_a_float_is_refused(self):
+        # round 1, F1: an int is accepted for a float field, but one no float can hold is a
+        # StateError naming the field, not an OverflowError
+        for digits in (400, 2000):
+            with self.subTest(digits=digits):
+                text = self.refused('{"stage": "review", "cost_usd": 1%s}' % ("0" * digits))
+                self.assertIn("cost_usd", text)
+                self.assertIn("float", text)
+
+    def test_the_largest_ints_a_float_holds_are_accepted(self):
+        for value in (2**53, 10**300):
+            with self.subTest(value=value):
+                st = self.load({"cost_usd": value})
+                self.assertEqual(st.cost_usd, float(value))
+                self.assertIs(type(st.cost_usd), float)
+
     def test_values_of_the_right_type_are_kept(self):
         data = {
             "stage": "validate",

@@ -20,6 +20,8 @@ BROKEN = {
     '{"stage": "review", "pending_test_files": ["tests/a.py", null]}': "pending_test_files",
     "[1, 2]": "",
     '{"stage": "review",': "",
+    # round 1, F1: an int no float can hold, in a float field
+    '{"stage": "review", "cost_usd": 1%s}' % ("0" * 400): "cost_usd",
 }
 
 
