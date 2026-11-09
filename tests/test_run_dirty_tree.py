@@ -130,6 +130,18 @@ class Tolerated(DetachedCase):
         self.assertEqual(code, EXIT_OK, out)
         spawn.assert_called_once()
 
+    def test_null_pending_list_is_an_empty_one(self):
+        # round 2 follow-up: a state with "pending_test_files": null still gets an answer
+        self.dirty()
+        os.makedirs(self.rdir(), exist_ok=True)
+        with open(State.path(self.rdir()), "w", encoding="utf-8", newline="") as fh:
+            fh.write('{"stage": "needs_action", "pending_test_files": null}\n')
+        code, out, spawn = self.run_detached()
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertNotIn("Traceback", out)
+        self.assertIn("src/calc.py", out)
+        spawn.assert_not_called()
+
 
 class LeftToTheChild(DetachedCase):
     """round 1, F2: when the check itself cannot answer, the child starts and reports."""

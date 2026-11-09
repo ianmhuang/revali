@@ -177,7 +177,8 @@ def _dirty_before_detach(root: str, rdir: str) -> Tuple[str, Optional[State]]:
         return "", None
     if state is not None and state.reviewer_running:
         return "", state
-    tolerate = state.pending_test_files if state is not None else []
+    # `or []`: a hand-edited state may hold null there; the child would stop on it, not here
+    tolerate = (state.pending_test_files or []) if state is not None else []
     try:
         return dirty_tree_problem(root, paths_for(root).state_dir, tolerate), state
     except (gitops.GitError, ProcError):  # ProcError: git missing or timed out
