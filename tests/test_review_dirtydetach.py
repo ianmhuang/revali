@@ -79,7 +79,9 @@ class RefusedBeforeDetach(DetachCase):
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertEqual(self.paths(out), ["src/calc.py", "src/extra.py"])
         self.assert_nothing_started(out, spawn)
-        self.assertIsNone(State.load(self.rdir()))
+        # AC-1 as changed after round 1 (F1): the refusal is recorded like a preflight stop
+        state = State.load(self.rdir())
+        self.assertEqual((state.stage, state.last_exit), ("error", EXIT_ERROR))
         self.assertFalse(os.path.isfile(self.run_log()))
 
     def test_a_staged_addition_and_a_deleted_file_count(self):
@@ -91,7 +93,7 @@ class RefusedBeforeDetach(DetachCase):
         self.assertEqual(self.paths(out), ["README.md", "src/staged.py"])
         self.assert_nothing_started(out, spawn)
 
-    def test_the_previous_result_and_log_stay_as_they_were(self):
+    def test_the_previous_result_gives_way_and_the_log_stays(self):
         State(stage="needs_action", message="changes requested in round 1", last_exit=2).save(
             self.rdir()
         )
@@ -105,10 +107,12 @@ class RefusedBeforeDetach(DetachCase):
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertEqual(self.paths(out), ["src/calc.py"])
         self.assert_nothing_started(out, spawn)
+        # AC-1 as changed after round 1 (F1): the previous result gives way to the refusal,
+        # so `wait` does not report it; the log stays as it was
         with open(State.path(self.rdir()), "rb") as fh:
-            self.assertEqual(fh.read(), state_before)
+            self.assertNotEqual(fh.read(), state_before)
         state = State.load(self.rdir())
-        self.assertEqual((state.stage, state.last_exit), ("needs_action", 2))
+        self.assertEqual((state.stage, state.last_exit), ("error", EXIT_ERROR))
         with open(self.run_log(), "rb") as fh:
             self.assertEqual(fh.read(), b"the earlier run's output\n")
 

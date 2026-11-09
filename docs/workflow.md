@@ -71,8 +71,10 @@ appear while it works. `run` checks the working tree before it detaches:
 when preflight would refuse it (an uncommitted change outside `.revali/`,
 other than a NEEDS_INFO round's pending files) it prints the same `working
 tree is not clean` message with the paths and returns 1 without starting
-anything. After an interrupted review round it leaves the check to the run
-itself, which first cleans up what that round left. `status` then prints the stage, the last message,
+anything; the refusal is recorded as stage `error` with exit 1, so `wait`
+and `status` report it rather than the previous run's result. After an
+interrupted review round it leaves the check to the run itself, which
+first cleans up what that round left. `status` then prints the stage, the last message,
 the round / fix-cycle / cost counters, the PR, and, once the branch has a
 review round, `tests: commit` or `tests: archive`: the mode its rounds run
 in, fixed for the branch (`[review] tests` in

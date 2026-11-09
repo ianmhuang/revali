@@ -9,12 +9,12 @@ import shutil
 import sys
 import time
 import traceback
-from typing import Optional
+from typing import Optional, Tuple
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION, gitops
 from revali.config import ConfigError, archive_root, history_path, load_user_config, paths_for
 from revali.preflight import Stop, check_tree_unmoved, dirty_tree_problem, locate, preflight
-from revali.procs import kill_tree, pid_alive, python_exe, spawn_detached
+from revali.procs import ProcError, kill_tree, pid_alive, python_exe, spawn_detached
 from revali.state import (
     LockHeld,
     RunLog,
@@ -141,9 +141,10 @@ def _run_detached(args) -> int:
     if owner:
         print(_tree_held_message(owner))
         return EXIT_ERROR
-    problem = _dirty_before_detach(root, rdir)
+    problem, state = _dirty_before_detach(root, rdir)
     if problem:
         print("ERROR: %s" % problem)
+        _record_refusal(state or State(), rdir, problem)
         return EXIT_ERROR
     logs = os.path.join(rdir, paths_for(gitops.repo_root(cwd)).logs_dir)
     os.makedirs(logs, exist_ok=True)
@@ -164,22 +165,36 @@ def _run_detached(args) -> int:
     return EXIT_OK
 
 
-def _dirty_before_detach(root: str, rdir: str) -> str:
+def _dirty_before_detach(root: str, rdir: str) -> Tuple[str, Optional[State]]:
     """Preflight's clean-tree refusal, asked before the child is spawned so a dirty tree is
-    reported here instead of in run.log. "" when the tree is clean, when an interrupted round
-    left files the child cleans up before its own check (`reviewer_running`), or when the
-    state or git status cannot be read (the child reports that)."""
+    reported here instead of in run.log, with the state it was read from. The problem is ""
+    when the tree is clean, when an interrupted round left files the child cleans up before
+    its own check (`reviewer_running`), or when the state or git status cannot be read (the
+    child reports that)."""
     try:
         state = State.load(rdir)
-    except (OSError, ValueError):
-        return ""
+    except (OSError, ValueError, AttributeError, TypeError):  # unreadable, or not an object
+        return "", None
     if state is not None and state.reviewer_running:
-        return ""
+        return "", state
     tolerate = state.pending_test_files if state is not None else []
     try:
-        return dirty_tree_problem(root, paths_for(root).state_dir, tolerate)
-    except gitops.GitError:
-        return ""
+        return dirty_tree_problem(root, paths_for(root).state_dir, tolerate), state
+    except (gitops.GitError, ProcError):  # ProcError: git missing or timed out
+        return "", state
+
+
+def _record_refusal(state: State, rdir: str, problem: str) -> None:
+    """Record a start refused before detaching the way the child records a preflight stop
+    (stage `error`, the message, exit 1), so `wait` and `status` report the refusal and not
+    the previous run's result. Nothing ran, so no history row and no run.log line."""
+    try:
+        state.set_stage(rdir, "error", problem, EXIT_ERROR)
+    except OSError as exc:
+        print(
+            "ERROR: the state file could not be updated either (%s); `wait` and `status` "
+            "still show the previous run's result" % exc
+        )
 
 
 def _run_foreground(args) -> int:
