@@ -14,6 +14,10 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import hostbash  # noqa: E402
+
 
 def remote_root():
     """REVALI_FAKE_REMOTE, else a directory under the test's REVALI_HOME (private per test,
@@ -79,9 +83,9 @@ def one(words):
         if os.environ.get("REVALI_FAKE_SSH_BASH_FAILS"):
             print("bash: cannot execute", file=sys.stderr)
             return 127
-        bash = shutil.which("bash")
+        bash = hostbash.find_bash()
         if not bash:
-            print("no bash on this host", file=sys.stderr)
+            print(hostbash.MISSING, file=sys.stderr)
             return 1
         env = dict(os.environ)
         env["HOME"] = remote_root()
