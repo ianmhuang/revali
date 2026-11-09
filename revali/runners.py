@@ -44,6 +44,12 @@ class RunnerError(Exception):
     pass
 
 
+def _pause(seconds: float) -> None:
+    """The wait before a wsl retry; its own name so a test can replace it without also
+    catching the sleeps `subprocess` makes while it waits for a child."""
+    time.sleep(seconds)
+
+
 def wsl_text(text: str) -> str:
     """wsl.exe prints its own errors in UTF-16; read as UTF-8 they keep a NUL between the
     letters. Output from inside the distro has none, so removing them changes nothing there."""
@@ -481,7 +487,7 @@ class WslRunner(Runner):
                     "[wsl] %s: %s; retry %d of %d in %gs"
                     % (self.distro, pattern, attempt, retries, wait)
                 )
-            time.sleep(wait)
+            _pause(wait)
             res = run(cmd, timeout=timeout, log=log)
         return res
 

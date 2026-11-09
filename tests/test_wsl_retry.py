@@ -164,14 +164,15 @@ class RetrySettings(FlakyWsl):
 
     def test_wait_between_attempts(self):
         self.plan(wslpath=2)
-        with mock.patch("revali.runners.time.sleep") as sleep:
+        # revali's own pause only: time.sleep is also what subprocess polls a child with
+        with mock.patch("revali.runners._pause") as sleep:
             WslRunner(self.plat(wait=7.5)).wslpath(r"C:\repo", log=self.lines.append)
         self.assertEqual([c.args[0] for c in sleep.call_args_list], [7.5, 7.5])
         self.assertEqual(len(self.calls("wslpath")), 3)
 
     def test_zero_retries_makes_one_call(self):
         self.plan(wslpath=1)
-        with mock.patch("revali.runners.time.sleep") as sleep:
+        with mock.patch("revali.runners._pause") as sleep:
             with self.assertRaises(RunnerError):
                 WslRunner(self.plat(retries=0)).wslpath(r"C:\repo", log=self.lines.append)
         self.assertEqual(len(self.calls("wslpath")), 1)
