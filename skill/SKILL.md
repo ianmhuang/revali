@@ -65,6 +65,9 @@ python "<revali dir>/revali.py" wait --timeout 9m
 
 `run` detaches and returns at once. Call `wait` repeatedly until it returns
 something other than 4. Use the Bash tool's background mode if it has one.
+When `run` itself returns 1 (a dirty working tree, another run in progress),
+nothing was started: report its message and fix the cause before running
+again.
 
 Acting on the result:
 
