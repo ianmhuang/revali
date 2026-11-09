@@ -220,11 +220,21 @@ class PorcelainPaths(RepoCase):
             ),
         )
 
-    def test_rename_entry_carries_only_the_new_path(self):
+    def test_a_rename_is_a_deletion_and_an_addition(self):
+        # Was "carries only the new path" (R entry, second field skipped). Since
+        # fix/stop-restores-own-tests status runs with --no-renames, so each path is its own
+        # entry and no second field exists to misread (a work-tree rename ` R`, which an
+        # intent-to-add file can form, was misparsed); the guards then restore the old path
+        # from HEAD and remove the new one instead of checking out a path HEAD lacks.
         git(["mv", "tests/test_calc.py", "tests/test calc.py"], self.repo)
-        entries = status_porcelain(self.repo)
-        self.assertEqual(entries, [("R ", "tests/test calc.py")])  # AC-3
-        self.assertEqual(dirty_paths(self.repo, (".revali/",)), ["R tests/test calc.py"])
+        entries = sorted(status_porcelain(self.repo))
+        self.assertEqual(
+            entries, [("A ", "tests/test calc.py"), ("D ", "tests/test_calc.py")]
+        )  # AC-3: unquoted, and nothing misread
+        self.assertEqual(
+            sorted(dirty_paths(self.repo, (".revali/",))),
+            ["A tests/test calc.py", "D tests/test_calc.py"],
+        )
 
     def test_new_test_files_reports_odd_names_unquoted(self):
         ctx = preflight(self.repo)

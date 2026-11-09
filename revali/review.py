@@ -537,7 +537,8 @@ def discard_unfinished_tests(
     stage: str = "review",
     only: Optional[Sequence[str]] = None,
 ) -> Tuple[List[str], List[str]]:
-    """Delete untracked files matching test_file_pattern under test_dir after a review round
+    """Delete untracked files (and files only added to the index, unstaged first) matching
+    test_file_pattern under test_dir after a review round
     stopped before its tests were committed: they are half-written and would make the next
     run refuse a dirty tree. This and testarchive.remove_placed (the copies of the archived
     files a round placed there, in archive mode) are the only deletions inside test_dir
@@ -558,15 +559,22 @@ def discard_unfinished_tests(
         path = path.replace("\\", "/")
         if wanted is not None and path not in wanted:
             continue
+        # "A" is a file in the index but not in HEAD: above all a draft the lint gate had
+        # marked intent-to-add when the run was killed before its `finally` could unmark it.
+        # It is never committed, so it is a draft like an untracked one.
         if (
-            code.strip() == "??"
+            (code == "??" or code[0] == "A")
             and under_test_dir(path, ctx.cfg.project.test_dir)
             and gitops.matches_any(path, [pattern])
         ):
             try:
-                os.remove(os.path.join(ctx.repo_root, path))
+                if code[0] == "A":
+                    gitops.git_ok(["reset", "-q", "--", path], ctx.repo_root)
+                full = os.path.join(ctx.repo_root, path)
+                if os.path.lexists(full):  # "AD": only the index entry was left
+                    os.remove(full)
                 removed.append(path)
-            except OSError as exc:
+            except (OSError, gitops.GitError) as exc:
                 stuck.append(path)
                 reasons.append("%s (%s)" % (path, exc))
     if removed and log:
@@ -599,10 +607,13 @@ def drop_pending_tests(
     reviewer had modified (its own file from an earlier round) goes back to HEAD, so the next
     run does not refuse a file the author was told to leave alone. `keep` lists the files
     the cleanup could not delete: they stay in (or join) the list, so the next run tolerates
-    them and hands them to the reviewer instead of refusing the tree."""
+    them and hands them to the reviewer instead of refusing the tree. A tracked pending file
+    the reviewer deleted comes back the same way; HEAD must have it (an intent-to-add entry
+    is in the index but not in HEAD)."""
     restored = []
+    tracked = set(tracked_test_files(ctx))
     for path in state.pending_test_files:
-        if path in tracked_test_files(ctx) and os.path.exists(os.path.join(ctx.repo_root, path)):
+        if path in tracked and _in_head(path, ctx.repo_root):
             _restore_from_head(path, ctx.repo_root)
             restored.append(path)
     if restored and log:
@@ -622,6 +633,32 @@ def drop_pending_tests(
     state.pending_test_files[:] = kept
 
 
+def restore_own_tests(
+    ctx: Context, state: State, log: Optional[RunLog], left_by: str, stage: str
+) -> List[str]:
+    """Restore from HEAD the reviewer's own test files from earlier rounds (`state.test_files`,
+    committed, so HEAD has them) that a session modified or deleted before its round could
+    commit. Only for a session that was in flight: the round started on a tree preflight found
+    clean, so nothing but that session changed them. A pending NEEDS_INFO file is left to
+    drop_pending_tests, which logs it on its own. Returns the restored paths."""
+    restored = []
+    for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",)):
+        code, path = entry.split(" ", 1)
+        path = path.replace("\\", "/")
+        if code[0] in "?A" or path not in state.test_files or path in state.pending_test_files:
+            continue  # not in HEAD, not the reviewer's, or a pending file
+        _restore_from_head(path, ctx.repo_root)
+        restored.append(path)
+    restored.sort()
+    if restored and log:
+        log.stage(
+            stage,
+            "restored %d test file(s) of the reviewer's own from earlier rounds that %s "
+            "modified or deleted: %s" % (len(restored), left_by, ", ".join(restored)),
+        )
+    return restored
+
+
 def discard_round_leftovers(
     ctx: Context,
     state: State,
@@ -639,7 +676,11 @@ def discard_round_leftovers(
     leave it None. `tolerated_next_run` False skips the "next run will tolerate" line: `reset`
     drops the state that would carry the list and gives its own advice. In archive mode the
     copies of the archived files the round placed in test_dir go first (by the state's list,
-    whatever their names), the archive itself is never touched."""
+    whatever their names), the archive itself is never touched.
+    `only` None also means a session was in flight (the round's own stop path, the run after
+    an interrupted round, `reset` with `reviewer_running`), so the reviewer's own files from
+    earlier rounds that it changed go back to HEAD too; with a list, no session ran and such a
+    change is the author's, left for preflight to refuse."""
     from revali import testarchive  # lazily: testarchive uses this module's helpers
 
     stuck: List[str] = []
@@ -647,6 +688,8 @@ def discard_round_leftovers(
         _, stuck = testarchive.remove_placed(ctx, state, log, stage)
     _, more = discard_unfinished_tests(ctx, log, left_by, stage=stage, only=only)
     stuck += more
+    if only is None:
+        restore_own_tests(ctx, state, log, left_by, stage)
     drop_pending_tests(
         ctx, state, log, stage=stage, keep=stuck, tolerated_next_run=tolerated_next_run
     )
@@ -674,6 +717,10 @@ def under_test_dir(path: str, test_dir: str) -> bool:
     p = path.replace("\\", "/").rstrip("/")
     d = test_dir.replace("\\", "/").rstrip("/") + "/"
     return p.startswith(d)
+
+
+def _in_head(path: str, root: str) -> bool:
+    return gitops._git(["cat-file", "-e", "HEAD:" + path], root).ok
 
 
 def _restore_from_head(path: str, root: str) -> None:
@@ -886,6 +933,36 @@ def format_files(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> 
         )
 
 
+def _intent_to_add(ctx: Context, test_files: List[str]) -> List[str]:
+    """`git add -N` the untracked ones among `test_files`; returns the paths it added."""
+    wanted = set(test_files)
+    untracked = []
+    for entry in gitops.dirty_paths(ctx.repo_root, (ctx.cfg.paths.state_dir + "/",)):
+        code, path = entry.split(" ", 1)
+        if code == "??" and path.replace("\\", "/") in wanted:
+            untracked.append(path)
+    if untracked:
+        try:
+            gitops.git_ok(["add", "-N", "--"] + untracked, ctx.repo_root)
+        except gitops.GitError as exc:
+            raise Stop(
+                EXIT_ERROR, "could not mark the reviewer's files for lint: %s" % exc
+            ) from exc
+    return untracked
+
+
+def _undo_intent_to_add(ctx: Context, paths: List[str]) -> None:
+    """Untracked again, as the rest of the round (cleanup, commit) expects them."""
+    if not paths:
+        return
+    try:
+        gitops.git_ok(["reset", "-q", "--"] + paths, ctx.repo_root)
+    except gitops.GitError as exc:
+        raise Stop(
+            EXIT_ERROR, "could not unmark the reviewer's files after lint: %s" % exc
+        ) from exc
+
+
 def lint_check(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> Optional[str]:
     """Run `[project] lint` over the working tree with the reviewer's files in it. None =
     green or nothing to check; a string = red (bounce to the reviewer). Preflight ran the
@@ -893,6 +970,9 @@ def lint_check(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> Op
     cmd = ctx.cfg.project.lint.strip()
     if not cmd or not test_files:
         return None
+    # a lint command that walks `git ls-files` would skip the new files; intent-to-add lists
+    # them there without staging content, and is undone whatever lint did
+    added = _intent_to_add(ctx, test_files)
     try:
         res = run_shell(
             cmd,
@@ -902,6 +982,8 @@ def lint_check(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> Op
         )
     except ProcTimeout as exc:
         raise Stop(EXIT_ERROR, "lint timed out on the reviewer's files: %s" % exc) from exc
+    finally:
+        _undo_intent_to_add(ctx, added)
     # a command the shell cannot find is a non-zero exit like any other red lint result;
     # preflight ran the same line first and normally stops there
     if log:
