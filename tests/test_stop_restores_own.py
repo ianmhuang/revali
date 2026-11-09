@@ -231,6 +231,22 @@ class PendingOrMarkedLeftovers(OwnFileCase):
         self.assertFalse(self.exists(self.DRAFT))
         self.assertNotIn(self.DRAFT, git(["ls-files"], self.repo))
 
+    def test_a_draft_added_and_then_deleted_is_reported_removed(self):
+        # round 3 F1: "AD" leaves only the index entry; nothing is stuck
+        self.previous_state(reviewer_running=True, pending=[self.DRAFT])
+        self.write(self.DRAFT, "# half written\n")
+        git(["add", "--", self.DRAFT], self.repo)
+        os.remove(os.path.join(self.repo, self.DRAFT))
+        self.assertIn("AD " + self.DRAFT, porcelain(self.repo))
+        self.claude(claude_entry(write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("could not remove", out)
+        self.assertNotIn("tolerate", out)
+        self.assertIn("removed 1 unfinished test file(s)", out)
+        self.assertNotIn(self.DRAFT, git(["ls-files"], self.repo))
+        self.assertEqual(State.load(self.rdir()).pending_test_files, [])
+
     def test_reset_after_a_killed_lint_gate(self):
         self.previous_state(reviewer_running=True)
         self.mark_draft()

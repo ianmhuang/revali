@@ -570,7 +570,9 @@ def discard_unfinished_tests(
             try:
                 if code[0] == "A":
                     gitops.git_ok(["reset", "-q", "--", path], ctx.repo_root)
-                os.remove(os.path.join(ctx.repo_root, path))
+                full = os.path.join(ctx.repo_root, path)
+                if os.path.lexists(full):  # "AD": only the index entry was left
+                    os.remove(full)
                 removed.append(path)
             except (OSError, gitops.GitError) as exc:
                 stuck.append(path)
