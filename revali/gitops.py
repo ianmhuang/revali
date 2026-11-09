@@ -54,9 +54,12 @@ def rev_parse(ref: str, cwd: str) -> Optional[str]:
 
 def status_porcelain(cwd: str) -> List[Tuple[str, str]]:
     """(XY, path) per entry of `git status --porcelain -z`: NUL-separated, so paths with
-    spaces or non-ASCII characters arrive unquoted. A rename or copy carries the
-    original path in a second field, which is skipped."""
-    res = git_ok(["status", "--porcelain", "-z", "--untracked-files=all"], cwd)
+    spaces or non-ASCII characters arrive unquoted. `--no-renames`: every path is its own
+    entry (a rename is a `D` plus an `A`). Without it an intent-to-add file and a deleted
+    tracked one with similar content pair up as a work-tree rename (` R`), whose second
+    field the old index-only skip below did not expect. A rename or copy that still
+    arrives carries the original path in a second field, which is skipped."""
+    res = git_ok(["status", "--porcelain", "-z", "--untracked-files=all", "--no-renames"], cwd)
     fields = res.stdout.split("\0")
     entries = []
     i = 0
@@ -66,7 +69,7 @@ def status_porcelain(cwd: str) -> List[Tuple[str, str]]:
         if len(entry) < 4:
             continue
         code, path = entry[:2], entry[3:]
-        if code[0] in "RC":
+        if code[0] in "RC" or code[1] in "RC":
             i += 1  # the path it was renamed or copied from
         entries.append((code, path))
     return entries

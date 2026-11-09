@@ -247,6 +247,33 @@ class PendingOrMarkedLeftovers(OwnFileCase):
         self.assertNotIn(self.DRAFT, git(["ls-files"], self.repo))
         self.assertEqual(State.load(self.rdir()).pending_test_files, [])
 
+    def pair_as_rename(self):
+        """The interrupted session deleted its own FILE and left a draft with the same content
+        intent-to-add: git pairs them as a work-tree rename (` R`) unless told not to."""
+        os.remove(os.path.join(self.repo, FILE))
+        self.write(self.DRAFT, TEST_REVIEW_MUL)
+        git(["add", "-N", "--", self.DRAFT], self.repo)
+        self.assertIn(" R %s -> %s" % (FILE, self.DRAFT), porcelain(self.repo))
+
+    def test_status_lists_a_work_tree_rename_as_two_paths(self):
+        # round 4 validation: a rename record's second field was parsed as an entry
+        from revali import gitops
+
+        self.pair_as_rename()
+        self.assertEqual(
+            sorted(gitops.status_porcelain(self.repo)), [(" A", self.DRAFT), (" D", FILE)]
+        )
+
+    def test_a_deleted_own_file_paired_with_a_marked_draft_is_cleaned_up(self):
+        self.previous_state(reviewer_running=True)
+        self.pair_as_rename()
+        self.claude(claude_entry(write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(self.DRAFT))
+        self.assertNotIn(self.DRAFT, git(["ls-files"], self.repo))
+        self.assertEqual(self.read(FILE), TEST_REVIEW_MUL)
+
     def test_reset_after_a_killed_lint_gate(self):
         self.previous_state(reviewer_running=True)
         self.mark_draft()

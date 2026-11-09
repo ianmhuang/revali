@@ -81,7 +81,9 @@ class TrackedOnlyLint(RepoCase):
 
     def entries(self):
         """{path: XY} from `git status --porcelain -z`, untracked files listed one by one."""
-        out = git(["status", "--porcelain", "-z", "--untracked-files=all"], self.repo)
+        out = git(
+            ["status", "--porcelain", "-z", "--untracked-files=all", "--no-renames"], self.repo
+        )
         return {field[3:]: field[:2] for field in out.split("\0") if len(field) > 3}
 
     def staged(self):
@@ -249,7 +251,7 @@ class KilledDuringTheGate(TrackedOnlyLint):
         """A draft of the killed session that is left in the index only (`AD`): staged, then
         deleted from the working tree. Nothing of it is left to delete."""
         self.killed_at_the_gate(SPACED)
-        self.write(GONE, "# half written by the killed session\n")
+        self.write(GONE, "# gone draft\n")
         git(["add", "--", GONE], self.repo)
         os.remove(os.path.join(self.repo, GONE))
         entries = self.entries()
