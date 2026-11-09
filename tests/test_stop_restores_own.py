@@ -168,6 +168,65 @@ class AuthorsChangeIsLeftAlone(OwnFileCase):
         self.assertEqual(self.read(FILE), EDITED)
 
 
+class PendingOrMarkedLeftovers(OwnFileCase):
+    """Round 1 F1 and F2: a pending own file that is deleted, and a draft left intent-to-add
+    by a run killed during the lint gate."""
+
+    DRAFT = "tests/test_review_draft.py"
+
+    def mark_draft(self):
+        self.write(self.DRAFT, "# half written\n")
+        git(["add", "-N", "--", self.DRAFT], self.repo)
+        self.assertIn(" A " + self.DRAFT, porcelain(self.repo))
+
+    def test_a_pending_own_file_the_next_round_deletes_comes_back(self):
+        self.previous_state(reviewer_running=False, pending=[FILE])
+        self.write(FILE, EDITED)  # the NEEDS_INFO round's change, tolerated by preflight
+        self.runner_scenario({"default": 0, "errors": {"smoke-r1-1": SANDBOX_ERROR}})
+        drop = claude_entry(write_tests=False)
+        drop["delete_files"] = [FILE]
+        self.claude(drop)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)  # AC-2
+        self.assertIn("sandbox failed", out)
+        self.assert_clean_and_restored()
+        self.assertEqual(State.load(self.rdir()).pending_test_files, [])
+
+    def test_reset_brings_back_a_deleted_pending_own_file(self):
+        self.previous_state(reviewer_running=False, pending=[FILE])
+        os.remove(os.path.join(self.repo, FILE))
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assert_clean_and_restored()
+
+    def test_a_draft_marked_by_a_killed_lint_gate_is_unmarked_and_deleted(self):
+        self.previous_state(reviewer_running=True)
+        self.mark_draft()
+        self.claude(claude_entry(write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(self.DRAFT))
+        self.assertIn(self.DRAFT, out)
+        self.assertNotIn(self.DRAFT, git(["ls-files"], self.repo))
+
+    def test_the_same_when_the_draft_was_pending(self):
+        self.previous_state(reviewer_running=True, pending=[self.DRAFT])
+        self.mark_draft()
+        self.claude(claude_entry(write_tests=False))
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(self.DRAFT))
+        self.assertNotIn(self.DRAFT, git(["ls-files"], self.repo))
+
+    def test_reset_after_a_killed_lint_gate(self):
+        self.previous_state(reviewer_running=True)
+        self.mark_draft()
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(self.exists(self.DRAFT))
+        self.assertEqual(porcelain(self.repo).strip(), "")
+
+
 class LsFilesLintCase(RepoCase):
     def setUp(self):
         super().setUp()
@@ -256,6 +315,11 @@ class Docs(unittest.TestCase):
             "modified or deleted is restored from HEAD",
             text,
         )
+        self.assertIn("restored whoever made it", text)  # round 1 F3
+        self.assertIn("marked intent-to-add when the run was killed", text)  # round 1 F2
+        with open(os.path.join(ROOT, "docs", "configuration.md"), encoding="utf-8") as fh:
+            config = " ".join(fh.read().split())
+        self.assertIn("intent-to-add (`git add -N`)", config)  # round 1 F4
 
 
 if __name__ == "__main__":

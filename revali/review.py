@@ -537,7 +537,8 @@ def discard_unfinished_tests(
     stage: str = "review",
     only: Optional[Sequence[str]] = None,
 ) -> Tuple[List[str], List[str]]:
-    """Delete untracked files matching test_file_pattern under test_dir after a review round
+    """Delete untracked files (and files only added to the index, unstaged first) matching
+    test_file_pattern under test_dir after a review round
     stopped before its tests were committed: they are half-written and would make the next
     run refuse a dirty tree. This and testarchive.remove_placed (the copies of the archived
     files a round placed there, in archive mode) are the only deletions inside test_dir
@@ -558,15 +559,20 @@ def discard_unfinished_tests(
         path = path.replace("\\", "/")
         if wanted is not None and path not in wanted:
             continue
+        # "A" is a file in the index but not in HEAD: above all a draft the lint gate had
+        # marked intent-to-add when the run was killed before its `finally` could unmark it.
+        # It is never committed, so it is a draft like an untracked one.
         if (
-            code.strip() == "??"
+            code in ("??", "A")
             and under_test_dir(path, ctx.cfg.project.test_dir)
             and gitops.matches_any(path, [pattern])
         ):
             try:
+                if code == "A":
+                    gitops.git_ok(["reset", "-q", "--", path], ctx.repo_root)
                 os.remove(os.path.join(ctx.repo_root, path))
                 removed.append(path)
-            except OSError as exc:
+            except (OSError, gitops.GitError) as exc:
                 stuck.append(path)
                 reasons.append("%s (%s)" % (path, exc))
     if removed and log:
@@ -599,10 +605,12 @@ def drop_pending_tests(
     reviewer had modified (its own file from an earlier round) goes back to HEAD, so the next
     run does not refuse a file the author was told to leave alone. `keep` lists the files
     the cleanup could not delete: they stay in (or join) the list, so the next run tolerates
-    them and hands them to the reviewer instead of refusing the tree."""
+    them and hands them to the reviewer instead of refusing the tree. A tracked pending file
+    the reviewer deleted comes back the same way; HEAD must have it (an intent-to-add entry
+    is in the index but not in HEAD)."""
     restored = []
     for path in state.pending_test_files:
-        if path in tracked_test_files(ctx) and os.path.exists(os.path.join(ctx.repo_root, path)):
+        if path in tracked_test_files(ctx) and _in_head(path, ctx.repo_root):
             _restore_from_head(path, ctx.repo_root)
             restored.append(path)
     if restored and log:
@@ -706,6 +714,10 @@ def under_test_dir(path: str, test_dir: str) -> bool:
     p = path.replace("\\", "/").rstrip("/")
     d = test_dir.replace("\\", "/").rstrip("/") + "/"
     return p.startswith(d)
+
+
+def _in_head(path: str, root: str) -> bool:
+    return gitops._git(["cat-file", "-e", "HEAD:" + path], root).ok
 
 
 def _restore_from_head(path: str, root: str) -> None:

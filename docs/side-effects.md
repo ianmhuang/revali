@@ -130,9 +130,15 @@ stated.
   reviewer's own is then restored from HEAD instead). In both cases, and
   in `revali reset` after an interrupted round, a tracked file of the
   reviewer's own from an earlier round that the session modified or
-  deleted is restored from HEAD as well, and the log names it; a change
-  you made to such a file while no session was running is yours, and
-  preflight refuses the tree as before. A leftover that
+  deleted is restored from HEAD as well, and the log names it. revali
+  cannot tell who changed such a file: after an interrupted round, until
+  the next `run` or `reset` has cleaned up, an uncommitted change to one
+  of the reviewer's files is restored whoever made it, so commit or stash
+  your own edit first. With no round interrupted, preflight refuses such
+  a change as before. A draft the lint gate had marked intent-to-add when
+  the run was killed is unmarked and deleted like any other leftover, and
+  so is any file on the pattern there that is in the index but in no
+  commit. A leftover that
   cannot be deleted (a file another program holds open) stays in the
   tolerated list: the next run accepts it in the tree and lists it for the
   reviewer to update or delete, the log names it for you. `revali reset`
