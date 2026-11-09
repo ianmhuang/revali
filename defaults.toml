@@ -83,6 +83,12 @@ network = false
 command_timeout_min = 15
 connect_timeout_s = 15               # ssh only: ConnectTimeout, and the budget for short remote commands
 transfer_timeout_min = 10            # ssh only: one scp transfer (inputs up, logs down)
+wsl_retries = 2                      # wsl only: retries of a wsl.exe call that failed with a
+                                     # wsl_transient_errors pattern; 0 = no retry
+wsl_retry_wait_s = 30                # pause before each retry; the service timeouts seen on
+                                     # 2026-11-09 came in windows of about 30 s
+wsl_transient_errors = ["Wsl/Service/WSAETIMEDOUT"]  # substrings of wsl.exe's output (NULs
+                                     # removed: it prints its own errors in UTF-16)
 sandbox_dir = "~/.revali/sandbox"   # inside the WSL distro or on the ssh host; ~ is that user's home
 setup = ""
 build = ""

@@ -51,7 +51,10 @@ issue_assignee = "author"         # "author" (the PR author) or "" (unassigned)
 [validate.linux]
 runner = "wsl"                    # wsl | local | ssh
 distro = "Ubuntu"                 # wsl only
-# host = "user@box"               # ssh only; port and key come from ~/.ssh/config
+# wsl_retries = 2                 # wsl only: retries of a call that failed with a transient error
+# wsl_retry_wait_s = 30           # wsl only: pause before each retry
+# wsl_transient_errors = ["Wsl/Service/WSAETIMEDOUT"]   # wsl only: what counts as transient
+# host = "user@box"             # ssh only; port and key come from ~/.ssh/config
 # connect_timeout_s = 15          # ssh only; default from defaults.toml
 # transfer_timeout_min = 10       # ssh only; one scp transfer
 command_timeout_min = 15

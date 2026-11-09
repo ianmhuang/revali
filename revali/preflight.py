@@ -202,7 +202,7 @@ def check_runner(ctx: Context) -> None:
     from revali.runners import probe_runner
 
     plat = ctx.cfg.validate.platforms[ctx.cfg.project.platforms[0]]
-    problem = probe_runner(plat)
+    problem = probe_runner(plat, log=ctx.detail)
     if problem:
         raise Stop(EXIT_ERROR, problem)
 

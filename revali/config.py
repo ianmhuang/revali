@@ -103,6 +103,9 @@ class PlatformCfg:
     command_timeout_min: int = 0
     connect_timeout_s: int = 0
     transfer_timeout_min: int = 0
+    wsl_retries: int = 0  # wsl only: retries of a call that failed with a transient error
+    wsl_retry_wait_s: float = 0.0
+    wsl_transient_errors: List[str] = field(default_factory=list)
     sandbox_dir: str = ""
     setup: str = ""
     build: str = ""
@@ -411,6 +414,12 @@ def parse_project_config(
             problems.append(
                 "validate.%s.connect_timeout_s and transfer_timeout_min must be positive" % name
             )
+        if plat.wsl_retries < 0:
+            problems.append("validate.%s.wsl_retries must be >= 0" % name)
+        if plat.wsl_retry_wait_s < 0:
+            problems.append("validate.%s.wsl_retry_wait_s must be >= 0" % name)
+        if not all(isinstance(p, str) and p.strip() for p in plat.wsl_transient_errors):
+            problems.append("validate.%s.wsl_transient_errors must list non-empty strings" % name)
     for role, cfg in (("review", review), ("validate", validate)):
         if role == "review" and cfg.engine in RETIRED_REVIEW_ENGINES and cfg.engine not in engines:
             problems.append(
