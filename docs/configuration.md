@@ -24,6 +24,11 @@ For `runner = "wsl"`, a `wsl.exe` call whose output carries one of
 the NUL bytes of wsl.exe's UTF-16 messages are removed) is tried again after
 `wsl_retry_wait_s` seconds (default 30), up to `wsl_retries` times (default 2;
 0 turns it off); see [docs/sandbox.md](sandbox.md).
+For `runner = "wsl"` and `runner = "ssh"`, `max_procs` (default 4096) is the
+`ulimit -u` the sandbox sets, 0 for none. It is a total for every process
+and thread of the user in that WSL distro or on that ssh host, other
+sandboxes and the user's own programs included, not an allowance per
+sandbox; see [docs/sandbox.md](sandbox.md).
 `[validate] reuse_baseline` (default true) lets validation skip the
 existing suite (`test`) when the baseline already ran it on the same tree:
 every commit since the baseline carries the reviewer's `Revali-Round`
