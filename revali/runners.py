@@ -499,15 +499,15 @@ def stage_inputs(
             write_text(os.path.join(extra_dir, rel), content)
         for name, cmd in steps:
             write_text(os.path.join(logs_dir, "%s-%s.cmd" % (label, name)), cmd + "\n")
+        for stale in ("%s.results" % label, "%s-script.log" % label):
+            # an earlier session's file must not be read as this session's
+            path = os.path.join(logs_dir, stale)
+            if os.path.isfile(path):
+                os.remove(path)
     except BaseException:
         # the runner's own cleanup only starts once this returns
         shutil.rmtree(extra_dir, ignore_errors=True)
         raise
-    for stale in ("%s.results" % label, "%s-script.log" % label):
-        # an earlier session's file must not be read as this session's
-        path = os.path.join(logs_dir, stale)
-        if os.path.isfile(path):
-            os.remove(path)
     return steps, extra_dir
 
 
@@ -581,7 +581,13 @@ def report_from_results(
                 )
             raise SessionEndedEarly(
                 "row %d of the sandbox results is not a complete result (`%s`); the session "
-                "was stopped while writing it; see %s" % (index + 1, "\\t".join(row), results_path)
+                "was stopped while writing it; see %s%s"
+                % (
+                    index + 1,
+                    "\\t".join(row),
+                    results_path,
+                    script_log_note(logs_dir, label, max_procs),
+                )
             )
         name, rc, to = row
         if name != "clone" and (
@@ -863,6 +869,19 @@ class SshRunner(Runner):
         steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files)
         bundle = "%s.bundle" % label
         bundle_path = os.path.join(logs_dir, bundle)
+        try:
+            return self._session(
+                repo_root, ref, steps, logs_dir, label, log, scope, extra_dir, bundle, bundle_path
+            )
+        finally:
+            # whatever ended the session, before or after the ssh calls
+            shutil.rmtree(extra_dir, ignore_errors=True)
+            if os.path.isfile(bundle_path):
+                os.remove(bundle_path)
+
+    def _session(
+        self, repo_root, ref, steps, logs_dir, label, log, scope, extra_dir, bundle, bundle_path
+    ):
         # --all: a bare sha has no ref name and git refuses to bundle it; the script checks out
         # `ref`
         res = run(
@@ -872,7 +891,6 @@ class SshRunner(Runner):
             log=log,
         )
         if not res.ok:
-            shutil.rmtree(extra_dir, ignore_errors=True)
             raise RunnerError("git bundle create failed: %s" % res.text.strip()[:400])
         repo_name = remote_name(repo_root)
         shell_root, scp_root = sandbox_root(self.plat)
@@ -951,9 +969,6 @@ class SshRunner(Runner):
                 removed = self._cleanup(
                     [inbox, rlogs, sandbox], [base, repo_base] if scope else [base], log
                 )
-                shutil.rmtree(extra_dir, ignore_errors=True)
-                if os.path.isfile(bundle_path):
-                    os.remove(bundle_path)
             if res is not None and not res.ok and not os.path.isfile(results_path):
                 raise RunnerError(
                     "the sandbox script on %s could not start (exit %d): %s"
@@ -968,7 +983,11 @@ class SshRunner(Runner):
             if res is not None and res.returncode == SSH_CONNECTION_LOST and cut_short:
                 dirs = ", ".join((sandbox, inbox, rlogs))
                 if removed:
-                    left = "revali removed this session's directories there (%s)" % dirs
+                    left = (
+                        "revali removed this session's directories there (%s); a script still "
+                        "running may create them again, so delete any of them left once it "
+                        "has ended" % dirs
+                    )
                 else:
                     left = (
                         "this session's directories %s are left there; delete them once the "

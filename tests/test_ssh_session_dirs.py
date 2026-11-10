@@ -12,6 +12,7 @@ import unittest
 from unittest import mock
 
 from revali.config import PlatformCfg
+from revali.procs import ExeNotFound, ProcTimeout
 from revali.runners import (
     RunnerError,
     SessionEndedEarly,
@@ -148,6 +149,8 @@ class LostConnection(SshSessionCase):
         text, sid = self.lost()
         self.assertIn("may still be running on box", text)
         self.assertIn("revali removed this session's directories there", text)
+        # PR #63 F2: the script may still be running and create them again
+        self.assertIn("delete any of them left once it has ended", text)
         for d in self.dirs(sid):
             self.assertIn(d, text)
         self.assertIn("A later session uses directories of its own", text)
@@ -173,6 +176,38 @@ class LostConnection(SshSessionCase):
         self.assertNotIsInstance(cm.exception, SessionEndedEarly)
         self.assertIn("the sandbox results file is damaged: row 1", text)
         self.assertNotIn("may still be running", text)
+
+
+@unittest.skipUnless(HAVE_BASH, "needs bash")
+class SshInputsLeft(SshSessionCase):
+    """PR #63 follow-up: an ssh session that fails before its first ssh call leaves neither
+    `<label>-extra` nor the bundle in the logs directory."""
+
+    def logs_after(self, exc_type, **patches):
+        logs = os.path.join(self.tmp, "logs-%d" % len(self.calls()))
+        with mock.patch.multiple("revali.runners", **patches):
+            with self.assertRaises(exc_type):
+                self.session([("test", "true")])
+        self.assertEqual(self.calls(), [])
+        return sorted(os.listdir(logs))
+
+    def test_writing_the_script_fails(self):
+        from revali.state import write_text
+
+        def write(path, text):
+            if path.endswith(LABEL + ".sh"):
+                raise OSError("disk full")
+            return write_text(path, text)
+
+        left = self.logs_after(OSError, write_text=mock.Mock(side_effect=write))
+        self.assertNotIn(LABEL + "-extra", left)
+        self.assertNotIn(LABEL + ".bundle", left)
+
+    def test_git_bundle_does_not_finish(self):
+        for exc in (ProcTimeout("git timed out"), ExeNotFound("git not found")):
+            with self.subTest(exc=type(exc).__name__):
+                left = self.logs_after(type(exc), run=mock.Mock(side_effect=exc))
+                self.assertNotIn(LABEL + "-extra", left)
 
 
 class DamagedResults(unittest.TestCase):
@@ -276,6 +311,27 @@ class WslExtraDir(unittest.TestCase):
                         self.run_session()
                 self.assertFalse(os.path.exists(self.extra()))
 
+    def test_dropping_a_stale_file_fails(self):
+        # PR #63 F1: removing an earlier session's results or script log is part of staging
+        real_remove = os.remove
+
+        for stale in (LABEL + ".results", LABEL + "-script.log"):
+            with self.subTest(stale=stale):
+                path = os.path.join(self.logs, stale)
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write("old\n")
+
+                def remove(p, stale=stale):
+                    if p.endswith(stale):
+                        raise PermissionError("in use")
+                    return real_remove(p)
+
+                with mock.patch("revali.runners.os.remove", side_effect=remove):
+                    with self.assertRaises(PermissionError):
+                        self.run_session()
+                self.assertFalse(os.path.exists(self.extra()))
+                real_remove(path)
+
     def test_clone_source_fails(self):
         with mock.patch("revali.runners.clone_source", side_effect=RunnerError("no clone")):
             with self.assertRaises(RunnerError):
@@ -341,6 +397,15 @@ class ScriptLogNote(unittest.TestCase):
         self.assertIn("before `setup` finished", text)
         self.assertIn(path, text)
         self.assertIn("`Killed`", text)
+
+    def test_also_when_the_last_row_was_cut_off(self):
+        # PR #63 F3: the third way a session ends early
+        text, path = self.ended_early("Killed\n", rows="setup\t0\t0\ntest\t")
+        self.assertIn("stopped while writing it", text)
+        self.assertIn(path, text)
+        self.assertIn("`Killed`", text)
+        plain, _ = self.ended_early(None, rows="setup\t0\t0\ntest\t")
+        self.assertNotIn(path, plain)
 
 
 class Docs(unittest.TestCase):

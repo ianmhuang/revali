@@ -149,6 +149,7 @@ class SshLayoutTests(SshCase):
             calls[3][1][-2],
             r"^box:\.revali/sandbox/sample/feature__mul/validate-r1-%s-logs/\.$" % SID,
         )
+        self.assertEqual(calls[3][1][-1], ".")
         self.assertIn("mkdir -p ", calls[0][1][-1])
         self.assertIn("feature__mul", calls[0][1][-1])
         cleanup = calls[4][1][-1]
