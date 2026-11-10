@@ -74,10 +74,8 @@ class Rows(unittest.TestCase):
         self.assertIn("validate-r1-setup.log", text)
         self.assertIn("validate-r1-clone.log", text)
 
-    def test_no_rows_when_no_step_has_a_command_is_the_old_message(self):
-        with self.assertRaises(RunnerError) as ctx:
-            self.report(steps=[("setup", ""), ("test", " ")])
-        self.assertIn("produced no results", str(ctx.exception))
+    def test_no_rows_says_the_results_may_not_have_been_writable(self):  # PR #57 F4
+        self.assertIn("cannot write under its logs directory", self.refused())
 
     def test_a_row_cut_off_while_written_is_refused(self):  # PR #57 follow-up
         for line in ("setup\n", "setup\t\n", "setup\t0\n", "setup\tx\t0\n", "setup\t0\t\n"):

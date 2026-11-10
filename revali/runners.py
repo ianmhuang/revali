@@ -468,22 +468,20 @@ def report_from_results(
                 "[%s] %s -> exit %d%s"
                 % (label, name, step.returncode, ", timed out" if step.timed_out else "")
             )
-    clone_log = os.path.join(logs_dir, "%s-clone.log" % label)
     if not report.steps and expected:
         # a row is written when its step finishes, so no row means the session ended before
-        # or while running the first step
+        # or while running the first step, or the script could not write its results at all
         raise RunnerError(
             "the sandbox session ended before `%s` finished (no result for it, nor for any "
-            "step); %s. Nothing was checked; see %s and %s"
+            "step); usually %s, but a script that cannot write under its logs directory ends "
+            "the same way. Nothing was checked; see %s and %s"
             % (
                 expected[0],
                 OUTSIDE_STOP,
                 os.path.join(logs_dir, "%s-%s.log" % (label, expected[0])),
-                clone_log,
+                os.path.join(logs_dir, "%s-clone.log" % label),
             )
         )
-    if not report.steps and steps:
-        raise RunnerError("the sandbox script produced no results; see %s" % clone_log)
     done = len(report.steps)
     if done < len(expected) and report.steps[-1].ok:
         # the rows stop after a passing step: the session was stopped from outside during or

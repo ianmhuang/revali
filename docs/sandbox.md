@@ -56,7 +56,9 @@ error: the run stops with exit 1 and a message saying the session ended
 before the first step without a result finished (a row is written when its
 step finishes, so that step may have been running, and its log may be
 partly filled), never a pass for steps that did not finish. A session with
-no row at all is reported the same way for its first step. A base rerun
+no row at all is reported the same way for its first step; the message
+adds that a script unable to write under its logs directory ends the same
+way. A base rerun
 records it as unavailable. Rows that do not match the session's steps (an
 unknown, repeated or out-of-order step) and a row cut off while being
 written are refused the same way.
