@@ -14,6 +14,7 @@ from revali.runners import RunnerError, report_from_results
 from revali.state import State
 from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, PY, toml_str
 from tests.helpers import FAKE_BIN, RepoCase, _quote, claude_entry, run_cli
+from tests.test_ssh_runner import HAVE_BASH
 
 STEPS = [("setup", "s"), ("build", ""), ("test", "t"), ("new_test", "n")]  # build: no command
 TERMINATED = "The Windows Subsystem for Linux instance has terminated."
@@ -25,7 +26,8 @@ class Rows(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
 
     def report(self, *rows, steps=STEPS):
-        with open(os.path.join(self.dir, "validate-r1.results"), "w", encoding="utf-8") as fh:
+        path = os.path.join(self.dir, "validate-r1.results")
+        with open(path, "w", encoding="utf-8", newline="") as fh:
             fh.write("".join("%s\t%s\t0\n" % r for r in rows))
         return report_from_results(self.dir, "validate-r1", steps)
 
@@ -65,10 +67,31 @@ class Rows(unittest.TestCase):
         r = self.report(("setup", 0), ("test", 0), ("new_test", 0))
         self.assertNotIn("build", [s.name for s in r.steps])
 
-    def test_no_rows_is_still_the_old_message(self):
+    def test_no_rows_names_the_first_step(self):  # PR #57 F2
+        text = self.refused()
+        self.assertIn("ended before `setup` finished", text)
+        self.assertIn("wsl --shutdown", text)
+        self.assertIn("validate-r1-setup.log", text)
+        self.assertIn("validate-r1-clone.log", text)
+
+    def test_no_rows_when_no_step_has_a_command_is_the_old_message(self):
         with self.assertRaises(RunnerError) as ctx:
-            self.report()
+            self.report(steps=[("setup", ""), ("test", " ")])
         self.assertIn("produced no results", str(ctx.exception))
+
+    def test_a_row_cut_off_while_written_is_refused(self):  # PR #57 follow-up
+        for line in ("setup\n", "setup\t\n", "setup\t0\n", "setup\tx\t0\n", "setup\t0\t\n"):
+            with self.subTest(line=line):
+                path = os.path.join(self.dir, "validate-r1.results")
+                with open(path, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(line)
+                with self.assertRaises(RunnerError) as ctx:
+                    report_from_results(self.dir, "validate-r1", STEPS)
+                self.assertIn("not a complete result", str(ctx.exception))
+
+    def test_a_negative_exit_code_is_a_complete_row(self):
+        r = self.report(("setup", -9))
+        self.assertEqual(r.failed.returncode, -9)
 
     # --- AC-3 -----------------------------------------------------------------------------
 
@@ -85,6 +108,7 @@ class Rows(unittest.TestCase):
         self.assertIn("do not match", self.refused(("setup", 1), ("test", 0)))
 
 
+@unittest.skipUnless(HAVE_BASH, "needs bash")
 class DiedPartWay(RepoCase):
     """AC-4: the whole pipeline on the wsl runner, with a wsl.exe that loses the end of one
     session (the stub keeps only the first rows and fails as WSL does when it is shut down)."""

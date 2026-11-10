@@ -410,6 +410,12 @@ def stage_inputs(
     return steps, extra_dir
 
 
+OUTSIDE_STOP = (
+    "it was stopped from outside: `wsl --shutdown`, the WSL VM or the ssh connection went "
+    "away, or the script was killed for memory"
+)
+
+
 def report_from_results(
     logs_dir: str, label: str, steps: List[Tuple[str, str]], log: Logger = None
 ) -> RunReport:
@@ -424,7 +430,14 @@ def report_from_results(
     # the script runs the steps that have a command, in order, and stops at the first failure
     expected = [name for name, cmd in steps if cmd.strip()]
     for index, row in enumerate(rows):
-        name, rc, to = (row + ["0", "0"])[:3]
+        if len(row) != 3 or not re.fullmatch(r"-?\d+", row[1]) or row[2] not in ("0", "1"):
+            # the script writes name, exit code and timeout flag in one printf; anything else
+            # was cut off while being written and must not read as a pass
+            raise RunnerError(
+                "row %d of the sandbox results is not a complete result (`%s`); the session "
+                "was stopped while writing it; see %s" % (index + 1, "\\t".join(row), results_path)
+            )
+        name, rc, to = row
         if name != "clone" and (
             index >= len(expected)
             or name != expected[index]
@@ -455,20 +468,36 @@ def report_from_results(
                 "[%s] %s -> exit %d%s"
                 % (label, name, step.returncode, ", timed out" if step.timed_out else "")
             )
-    if not report.steps and steps:
+    clone_log = os.path.join(logs_dir, "%s-clone.log" % label)
+    if not report.steps and expected:
+        # a row is written when its step finishes, so no row means the session ended before
+        # or while running the first step
         raise RunnerError(
-            "the sandbox script produced no results; see %s"
-            % os.path.join(logs_dir, "%s-clone.log" % label)
+            "the sandbox session ended before `%s` finished (no result for it, nor for any "
+            "step); %s. Nothing was checked; see %s and %s"
+            % (
+                expected[0],
+                OUTSIDE_STOP,
+                os.path.join(logs_dir, "%s-%s.log" % (label, expected[0])),
+                clone_log,
+            )
         )
+    if not report.steps and steps:
+        raise RunnerError("the sandbox script produced no results; see %s" % clone_log)
     done = len(report.steps)
     if done < len(expected) and report.steps[-1].ok:
-        # the rows stop after a passing step: the session was stopped from outside before the
-        # rest ran, and what did not run must not read as passed
+        # the rows stop after a passing step: the session was stopped from outside during or
+        # before the next step, and what did not finish must not read as passed
         raise RunnerError(
-            "the sandbox session ended before `%s` ran (the last result is `%s` passing); it "
-            "was stopped from outside: `wsl --shutdown`, the WSL VM or the ssh connection went "
-            "away, or the script was killed for memory. Nothing after `%s` was checked; see %s"
-            % (expected[done], report.steps[-1].name, report.steps[-1].name, results_path)
+            "the sandbox session ended before `%s` finished (no result for it; the last result "
+            "is `%s` passing); %s. Nothing after `%s` was checked; see %s"
+            % (
+                expected[done],
+                report.steps[-1].name,
+                OUTSIDE_STOP,
+                report.steps[-1].name,
+                results_path,
+            )
         )
     return report
 
