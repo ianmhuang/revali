@@ -4,7 +4,11 @@ logged in one line and the session's report, or the error that ended it, comes b
 The runners run for real (a real git worktree, the ssh / scp stubs). The one cleanup step a
 test is about is made to fail where revali meets the system: `subprocess.run` for a command
 that times out, cannot start or exits non-zero, `os.remove` / `shutil.rmtree` for a file or
-directory held open."""
+directory held open.
+
+Round 2 adds the two cleanup paths of round 1's F1 (the local runner's temp directory after
+a failed `git worktree add`, the `<label>-extra` directory when staging fails) and F2 (the
+line for a directory says why it is still there)."""
 
 import os
 import shutil
@@ -14,6 +18,7 @@ import unittest
 from unittest import mock
 
 from revali.config import PlatformCfg
+from revali.procs import ProcError
 from revali.runners import LocalRunner, RunnerError, SshRunner, WslRunner
 from tests.helpers import RepoCase, _quote, git
 from tests.test_ssh_runner import HAVE_BASH, SshCase, plat
@@ -76,16 +81,44 @@ def held_open(suffix, message):
     return mock.patch.object(os, "remove", remove)
 
 
-def kept(suffix):
-    """shutil.rmtree that leaves every directory ending in `suffix` where it is."""
+def kept(which):
+    """shutil.rmtree that leaves a directory where it is: one whose path ends in `which` (a
+    string), or for which `which(path)` holds."""
     real = shutil.rmtree
+    test = which if callable(which) else lambda path: path.endswith(which)
 
     def rmtree(path, *a, **kw):
-        if str(path).endswith(suffix):
+        if test(str(path)):
             return None
         return real(path, *a, **kw)
 
     return mock.patch.object(shutil, "rmtree", rmtree)
+
+
+def refused(suffix, message):
+    """shutil.rmtree that cannot remove a directory ending in `suffix` and reports it the way
+    the real one does: to the `onexc` / `onerror` handler it was given, by raising without
+    one, and not at all with `ignore_errors`."""
+    real = shutil.rmtree
+
+    def rmtree(path, *a, **kw):
+        if not str(path).endswith(suffix):
+            return real(path, *a, **kw)
+        exc = PermissionError(13, message)
+        if kw.get("onexc"):
+            kw["onexc"](os.rmdir, path, exc)
+        elif kw.get("onerror"):
+            kw["onerror"](os.rmdir, path, (PermissionError, exc, None))
+        elif not (kw.get("ignore_errors") or (a and a[0])):
+            raise exc
+        return None
+
+    return mock.patch.object(shutil, "rmtree", rmtree)
+
+
+def session_temp_dir(path):
+    """The local runner's temp directory for LABEL (it holds the worktree)."""
+    return os.path.basename(path).startswith("revali-%s-" % LABEL)
 
 
 def about(lines, *needles):
@@ -190,6 +223,37 @@ class LocalWorktreeCleanup(RepoCase):
             self.session([("test", step)], decide, lines)
         self.assertIn("step could not start", str(cm.exception))
         self.one_line(lines, self.cmds.worktree(), "timed out")
+
+    def test_the_temp_dir_left_after_a_failed_add_is_named(self):
+        # round 1 F1 (1): the cleanup before the `finally`, when `git worktree add` fails
+        def decide(argv):
+            if git_cmd(argv, "worktree", "add"):
+                return (128, "fatal: invalid reference: nope\n")
+            return None
+
+        lines = []
+        with kept(session_temp_dir):
+            with self.assertRaises(RunnerError) as cm:
+                self.session([("test", "exit 0")], decide, lines)
+        tmp = os.path.dirname(self.cmds.worktree())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.assertIn("git worktree add failed: fatal: invalid reference: nope", str(cm.exception))
+        self.one_line(lines, tmp, "left for you to delete")
+
+    def test_an_add_that_times_out_leaves_no_temp_dir(self):
+        def decide(argv):
+            if git_cmd(argv, "worktree", "add"):
+                return subprocess.TimeoutExpired(argv, 300)
+            return None
+
+        lines = []
+        with self.assertRaises(ProcError) as cm:
+            self.session([("test", "exit 0")], decide, lines)
+        tmp = os.path.dirname(self.cmds.worktree())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.assertIn("timed out", str(cm.exception))
+        self.assertFalse(os.path.exists(tmp), tmp)
+        self.assertEqual(about(lines, "left for you to delete"), [])
 
 
 class SshCleanupCase(SshCase):
@@ -300,6 +364,39 @@ class SshExtraDirLeft(SshCleanupCase):
             report = self.session([("test", "true")], lines)
         self.assertTrue(report.ok)
         self.assertEqual(len(about(lines, os.path.join(self.logs, LABEL + "-extra"))), 1, lines)
+
+    def test_the_line_says_why_the_directory_is_still_there(self):
+        # round 1 F2
+        os.environ["REVALI_FAKE_SSH_DOWN"] = "1"
+        lines = []
+        with refused(LABEL + "-extra", "in use by another\nprocess"):
+            with self.assertRaises(RunnerError) as cm:
+                self.session([("test", "true")], lines)
+        self.assertIn("could not reach host 'box'", str(cm.exception))
+        found = about(lines, os.path.join(self.logs, LABEL + "-extra"))
+        self.assertEqual(len(found), 1, lines)
+        self.assertIn("in use by another process", found[0])  # on one line
+        self.assertIn("left for you to delete", found[0])
+
+
+class StagingFails(SshCleanupCase):
+    """Round 1 F1 (2): staging the inputs fails before the runner's own `finally` exists, and
+    the `<label>-extra` directory it made cannot be removed."""
+
+    def test_the_staging_error_is_raised_and_the_directory_is_named_once(self):
+        # a directory where the step's command file goes: writing the file fails on any host
+        blocked = os.path.join(self.tmp, "logs", "%s-test.cmd" % LABEL)
+        os.makedirs(blocked)
+        lines = []
+        with kept(LABEL + "-extra"):
+            with self.assertRaises(OSError) as cm:
+                self.session([("test", "true")], lines)
+        self.assertIn("%s-test.cmd" % LABEL, str(cm.exception))
+        extra = os.path.join(self.logs, LABEL + "-extra")
+        self.assertTrue(os.path.isdir(extra))
+        found = about(lines, extra)
+        self.assertEqual(len(found), 1, lines)
+        self.assertIn("left for you to delete", found[0])
 
 
 class WslExtraDirLeft(RepoCase):
