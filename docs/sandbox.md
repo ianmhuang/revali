@@ -4,11 +4,20 @@ Where the Validator runs the existing suite and the Reviewer's tests, and
 what the three runners need.
 
 `[validate.linux] runner = "wsl"` clones the branch into the WSL distro's own
-filesystem (`sandbox_dir`, default `~/.revali/sandbox/<repo>/<branch>/<label>/`,
-where `<branch>` is the run's branch with `/` written as `__`, so worktrees of
-one repository validate side by side), runs `setup`, `build`,
+filesystem (`sandbox_dir`, default
+`~/.revali/sandbox/<repo>/<branch>-<key>/<label>/`, where `<repo>` is the
+checkout's directory name, `<branch>` is the run's branch with `/` written
+as `__`, and `<key>` is 8 hex characters derived from the checkout's real
+path and the exact branch name, so worktrees of one repository, repositories
+whose directories share a name, and branches such as `feature/x` and
+`feature__x` validate side by side, while one checkout and branch keep the
+same directory from run to run), runs `setup`, `build`,
 `test`, `new_test` there with a per-step timeout, copies the logs back, and
-deletes the clone and the `<branch>` and `<repo>` directories once empty. A
+deletes the clone and the `<branch>-<key>` and `<repo>` directories once
+empty. Earlier revali versions used `<repo>/<branch>/<label>`; a session
+that was killed may have left such a directory behind. revali does not
+remove directories of the old layout; delete them by hand when no run is
+in progress. A
 `new_test` command may contain `{files}`: it is replaced by the reviewer's
 test files (paths relative to the repository root, space separated, quoted
 when they contain whitespace), this round's files in the smoke run and every
@@ -61,7 +70,11 @@ adds that a script unable to write under its logs directory ends the same
 way. A base rerun
 records it as unavailable. Rows that do not match the session's steps (an
 unknown, repeated or out-of-order step) and a row cut off while being
-written are refused the same way.
+written are refused the same way. On the ssh runner, when the ssh call
+that runs the script ends with exit 255 (the connection went away) and
+the session is a sandbox error, the message adds that the script may
+still be running on the host until its steps time out: revali has no
+connection left to stop it.
 `runner = "local"` uses a git worktree on the host with no isolation.
 
 `runner = "ssh"` with `host = "<destination>"` does the same as `wsl` on a Linux

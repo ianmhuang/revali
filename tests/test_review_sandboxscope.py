@@ -12,7 +12,7 @@ import unittest
 
 from revali import EXIT_OK, gitops
 from revali.config import PlatformCfg
-from revali.runners import SshRunner, WslRunner
+from revali.runners import SshRunner, WslRunner, sandbox_key
 from revali.state import State
 from tests.helpers import FAKE_BIN, RepoCase, _quote, claude_entry, git, run_cli
 from tests.test_ssh_runner import HAVE_BASH, SshCase, plat
@@ -196,8 +196,12 @@ class SshScopeTests(SshCase):
         self.assertIn("READY TO MERGE", out)
         uploads = [c[1][-1] for c in self.calls() if c[0] == "scp" and c[1][-1].startswith("box:")]
         self.assertTrue(uploads)
+        # fix/sandbox-key-collision: the branch level carries the checkout's key
+        branch_dir = "box:.revali/sandbox/sample/feature__mul-%s/" % sandbox_key(
+            self.repo, "feature/mul"
+        )
         for target in uploads:
-            self.assertTrue(target.startswith("box:.revali/sandbox/sample/feature__mul/"), target)
+            self.assertTrue(target.startswith(branch_dir), target)
         self.assertEqual(self.remote_leftovers(), [])
 
 
@@ -258,7 +262,8 @@ class ReadmeLayoutTests(unittest.TestCase):
         return text[start : end if end >= 0 else len(text)]
 
     def test_files_table_and_sandbox_section_show_the_branch_level(self):
-        self.assertIn("`~/.revali/sandbox/<repo>/<branch>/<label>/`", self.text)
+        # fix/sandbox-key-collision: the branch level carries the checkout's key
+        self.assertIn("`~/.revali/sandbox/<repo>/<branch>-<key>/<label>/`", self.text)
         self.assertNotIn("sandbox/<repo>/<label>/", self.text)
         section = self.section(self.text, "# Sandbox")
         self.assertIn("<repo>/<branch>/<label>", section)

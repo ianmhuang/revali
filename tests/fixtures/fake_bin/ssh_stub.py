@@ -4,7 +4,9 @@ host's bash (Git Bash on Windows, /bin/bash elsewhere) and HOME set to that dire
 Every call is appended to $REVALI_FAKE_LOG. Use via REVALI_SSH_CMD="<python> <this file>".
 
 Knobs: REVALI_FAKE_SSH_DOWN=1 refuses every connection (exit 255);
-REVALI_FAKE_SSH_BASH_FAILS=1 makes `bash` fail before the script starts.
+REVALI_FAKE_SSH_BASH_FAILS=1 makes `bash` fail before the script starts;
+REVALI_FAKE_SSH_SCRIPT_DROP=<n> runs the script, keeps the first n rows of every results file
+on the host and exits 255 as ssh does when the connection goes away.
 """
 
 import json
@@ -89,7 +91,21 @@ def one(words):
             return 1
         env = dict(os.environ)
         env["HOME"] = remote_root()
-        return subprocess.run([bash, local(words[1])], env=env).returncode
+        rc = subprocess.run([bash, local(words[1])], env=env).returncode
+        drop = os.environ.get("REVALI_FAKE_SSH_SCRIPT_DROP")
+        if drop is None:
+            return rc
+        # the connection went away mid-session: only the first rows reached the results file
+        for root, _dirs, files in os.walk(remote_root()):
+            for name in files:
+                if name.endswith(".results"):
+                    path = os.path.join(root, name)
+                    with open(path, encoding="utf-8", newline="") as fh:
+                        rows = fh.readlines()[: int(drop)]
+                    with open(path, "w", encoding="utf-8", newline="") as fh:
+                        fh.write("".join(rows))
+        print("Connection to host closed by remote host.", file=sys.stderr)
+        return 255
     print("ssh_stub: unhandled %s" % words, file=sys.stderr)
     return 2
 

@@ -17,6 +17,7 @@ from revali.runners import (
     RunnerError,
     RunReport,
     get_runner,
+    sandbox_key,
     steps_for,
     steps_with_files,
     tail,
@@ -145,6 +146,7 @@ def run_baseline(ctx: Context, ref: str, log: Optional[RunLog]) -> str:
             "baseline",
             log.detail if log else None,
             scope=safe_branch(ctx.branch),
+            key=sandbox_key(ctx.repo_root, ctx.branch),
         )
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, "sandbox failed during baseline: %s" % exc) from exc
@@ -327,6 +329,7 @@ def run_validation(
                 label,
                 log.detail if log else None,
                 scope=safe_branch(ctx.branch),
+                key=sandbox_key(ctx.repo_root, ctx.branch),
             )
         except RunnerError as exc:
             raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc) from exc
@@ -445,6 +448,7 @@ def rerun_on_base(
             label,
             log.detail if log else None,
             scope=safe_branch(ctx.branch),
+            key=sandbox_key(ctx.repo_root, ctx.branch),
         )
     except RunnerError as exc:
         out.reason = "sandbox error: %s" % exc
