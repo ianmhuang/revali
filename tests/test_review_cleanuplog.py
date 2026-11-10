@@ -8,7 +8,11 @@ directory held open.
 
 Round 2 adds the two cleanup paths of round 1's F1 (the local runner's temp directory after
 a failed `git worktree add`, the `<label>-extra` directory when staging fails) and F2 (the
-line for a directory says why it is still there)."""
+line for a directory says why it is still there).
+
+Round 3 adds the two follow-ups of round 2: a worktree that `git worktree add` registered
+before it stopped is dropped from the repository's list, and an earlier session's
+`<label>-extra` directory that cannot be removed before staging is named in the log."""
 
 import os
 import shutil
@@ -33,8 +37,9 @@ def git_cmd(argv, *words):
 
 class Commands:
     """While active, `decide(argv)` sees every command started through subprocess.run and
-    settles its outcome: None runs it, an exception is raised in its place, and
-    (exit code, stderr) is returned as its result without running it."""
+    settles its outcome: None runs it, an exception is raised in its place,
+    (exit code, stderr) is returned as its result without running it, and a function is
+    called with a `really()` that runs the command, to answer for it afterwards."""
 
     def __init__(self, decide):
         self.decide = decide
@@ -50,6 +55,8 @@ class Commands:
             answer = self.decide(argv)
             if isinstance(answer, BaseException):
                 raise answer
+            if callable(answer):
+                return answer(lambda: real(args, *a, **kw))
             if answer is not None:
                 return subprocess.CompletedProcess(args, answer[0], stdout="", stderr=answer[1])
             return real(args, *a, **kw)
@@ -95,15 +102,19 @@ def kept(which):
     return mock.patch.object(shutil, "rmtree", rmtree)
 
 
-def refused(suffix, message):
+def refused(suffix, message, times=None):
     """shutil.rmtree that cannot remove a directory ending in `suffix` and reports it the way
     the real one does: to the `onexc` / `onerror` handler it was given, by raising without
-    one, and not at all with `ignore_errors`."""
+    one, and not at all with `ignore_errors`. With `times`, only that many removals are
+    refused and the later ones happen."""
     real = shutil.rmtree
+    left = [times]
 
     def rmtree(path, *a, **kw):
-        if not str(path).endswith(suffix):
+        if not str(path).endswith(suffix) or left[0] == 0:
             return real(path, *a, **kw)
+        if left[0] is not None:
+            left[0] -= 1
         exc = PermissionError(13, message)
         if kw.get("onexc"):
             kw["onexc"](os.rmdir, path, exc)
@@ -255,6 +266,47 @@ class LocalWorktreeCleanup(RepoCase):
         self.assertFalse(os.path.exists(tmp), tmp)
         self.assertEqual(about(lines, "left for you to delete"), [])
 
+    def add_registers_and_then(self, outcome):
+        """A session whose `git worktree add` really runs, so the worktree is registered, and
+        then ends as `outcome(argv)` says: an exception to raise or (exit code, stderr)."""
+
+        def decide(argv):
+            if not git_cmd(argv, "worktree", "add"):
+                return None
+
+            def answer(really):
+                done = really()
+                if done.returncode != 0:
+                    raise AssertionError("git worktree add: %s" % done.stderr)
+                end = outcome(argv)
+                if isinstance(end, BaseException):
+                    raise end
+                return subprocess.CompletedProcess(argv, end[0], stdout="", stderr=end[1])
+
+            return answer
+
+        lines = []
+        with self.assertRaises((ProcError, RunnerError)) as cm:
+            self.session([("test", "exit 0")], decide, lines)
+        tmp = os.path.dirname(self.cmds.worktree())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        # neither the directory nor its entry in the repository's worktree list is left
+        self.assertFalse(os.path.exists(tmp), tmp)
+        listed = git(["worktree", "list", "--porcelain"], self.repo)
+        self.assertNotIn(os.path.basename(tmp), listed)
+        self.assertEqual(about(lines, "could not"), [])
+        return str(cm.exception)
+
+    def test_a_worktree_registered_before_the_add_timed_out_is_dropped(self):
+        # round 2 follow-up
+        message = self.add_registers_and_then(lambda argv: subprocess.TimeoutExpired(argv, 300))
+        self.assertIn("timed out", message)
+
+    def test_a_worktree_registered_before_the_add_failed_is_dropped(self):
+        # round 2 follow-up
+        message = self.add_registers_and_then(lambda argv: (128, "fatal: stopped midway\n"))
+        self.assertIn("git worktree add failed: fatal: stopped midway", message)
+
 
 class SshCleanupCase(SshCase):
     def session(self, steps, lines):
@@ -397,6 +449,29 @@ class StagingFails(SshCleanupCase):
         found = about(lines, extra)
         self.assertEqual(len(found), 1, lines)
         self.assertIn("left for you to delete", found[0])
+
+
+class StaleExtraDirBeforeStaging(SshCleanupCase):
+    """Round 2 follow-up: the `<label>-extra` directory an earlier session left cannot be
+    removed before staging, so its files travel with this session's and the log says so."""
+
+    def test_named_once_and_the_sessions_error_is_raised(self):
+        os.environ["REVALI_FAKE_SSH_DOWN"] = "1"
+        extra = os.path.join(self.tmp, "logs", LABEL + "-extra")
+        os.makedirs(os.path.join(extra, "t"))
+        with open(os.path.join(extra, "t", "old.py"), "w", encoding="utf-8") as fh:
+            fh.write("old\n")
+        lines = []
+        # held while the inputs are staged, free again when the session ends
+        with refused(LABEL + "-extra", "in use by another process", times=1):
+            with self.assertRaises(RunnerError) as cm:
+                self.session([("test", "true")], lines)
+        self.assertIn("could not reach host 'box'", str(cm.exception))
+        found = about(lines, extra)
+        self.assertEqual(len(found), 1, lines)
+        self.assertIn("could not remove", found[0])
+        self.assertIn("in use by another process", found[0])
+        self.assertFalse(os.path.exists(extra), extra)
 
 
 class WslExtraDirLeft(RepoCase):
