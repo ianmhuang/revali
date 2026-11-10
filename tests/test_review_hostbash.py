@@ -9,7 +9,9 @@ AC-1: on Windows the bash is Git Bash, found from the git on PATH (`<Git>\\bin\\
       PATH at all.
 AC-2: a bash on PATH is used on Windows only when it is not under a `WindowsApps`
       directory; with nothing usable the stubs print one line naming what was looked for
-      and exit 1.
+      and exit 1. Round 1 added two things to this: the same launcher in the Windows system
+      directory (`%SystemRoot%\\System32`) is refused as well, and off Windows the line
+      names only the PATH lookup that was made there.
 AC-3: elsewhere the answer is the `bash` on PATH, as before.
 AC-4: wsl_stub, ssh_stub and (through wsl_stub) wsl_flaky_stub run the bash the one helper
       found; no stub looks bash up on its own.
@@ -42,6 +44,9 @@ BIN_BASH = GIT + r"\bin\bash.exe"
 USR_BIN_BASH = GIT + r"\usr\bin\bash.exe"
 WINDOWSAPPS_BASH = r"C:\Users\reviewer\AppData\Local\Microsoft\WindowsApps\bash.exe"
 OTHER_BASH = r"C:\msys64\usr\bin\bash.exe"
+# the made-up host's Windows directory, handed to the lookup so this machine's does not matter
+SYSTEM_ROOT = r"C:\Windows"
+SYSTEM32_BASH = SYSTEM_ROOT + r"\System32\bash.exe"
 
 # what the stubs read from the environment; cleared so a caller's settings do not leak in
 KNOBS = (
@@ -58,9 +63,10 @@ def norm(path):
     return ntpath.normcase(ntpath.normpath(str(path)))
 
 
-def lookup(platform, on_path, files=()):
+def lookup(platform, on_path, files=(), system_root=SYSTEM_ROOT):
     """find_bash on a made-up host. `on_path` maps a command to what PATH resolves it to,
-    `files` are the files that exist. `platform` None leaves it to sys.platform.
+    `files` are the files that exist, `system_root` is its Windows directory. `platform`
+    None leaves it to sys.platform.
     Returns (the answer, the commands PATH was asked for)."""
     existing = {norm(f) for f in files}
     asked = []
@@ -75,7 +81,7 @@ def lookup(platform, on_path, files=()):
     def isfile(path):
         return norm(path) in existing
 
-    kwargs = {"which": which, "isfile": isfile}
+    kwargs = {"which": which, "isfile": isfile, "system_root": system_root}
     if platform is not None:
         kwargs["platform"] = platform
     return hostbash.find_bash(**kwargs), asked
@@ -158,6 +164,47 @@ class PathBashOnWindows(PathCase):
         self.assertIsNone(got)
 
 
+class System32LauncherOnWindows(PathCase):
+    """AC-2 as extended by round 1 F1: the inbox WSL component keeps the same launcher in the
+    Windows system directory, which PATH lists before WindowsApps."""
+
+    def test_the_system32_launcher_is_never_the_answer(self):
+        cases = {
+            "alone": ({"bash": SYSTEM32_BASH}, SYSTEM_ROOT),
+            "git without a bash beside it": (
+                {"git": GIT_ON_PATH, "bash": SYSTEM32_BASH},
+                SYSTEM_ROOT,
+            ),
+            # PATH usually spells the directory C:\WINDOWS\system32
+            "as PATH spells it": ({"bash": r"C:\WINDOWS\system32\bash.exe"}, SYSTEM_ROOT),
+            "forward slashes": ({"bash": SYSTEM32_BASH.replace("\\", "/")}, SYSTEM_ROOT),
+            "the system root in another case": ({"bash": SYSTEM32_BASH}, r"c:\WINDOWS"),
+            "the 32-bit system directory": (
+                {"bash": SYSTEM_ROOT + r"\SysWOW64\bash.exe"},
+                SYSTEM_ROOT,
+            ),
+            "a Windows directory elsewhere": ({"bash": r"E:\WinNT\System32\bash.exe"}, r"E:\WinNT"),
+        }
+        for label, (on_path, system_root) in cases.items():
+            with self.subTest(case=label):
+                got, _ = lookup("win32", on_path, system_root=system_root)
+                self.assertIsNone(got)
+
+    def test_git_bash_wins_over_the_system32_launcher(self):
+        got, _ = lookup("win32", {"git": GIT_ON_PATH, "bash": SYSTEM32_BASH}, [BIN_BASH])
+        self.assertSamePath(got, BIN_BASH)
+
+    def test_a_bash_outside_the_system_directory_itself_is_still_used(self):
+        cases = {
+            "a directory below it": SYSTEM_ROOT + r"\System32\tools\bash.exe",
+            "a directory of the same name elsewhere": r"D:\Tools\System32\bash.exe",
+        }
+        for label, bash in cases.items():
+            with self.subTest(case=label):
+                got, _ = lookup("win32", {"bash": bash})
+                self.assertSamePath(got, bash)
+
+
 class Elsewhere(unittest.TestCase):
     """AC-3"""
 
@@ -198,6 +245,9 @@ class OnThisHost(unittest.TestCase):
             return
         if got is not None:
             self.assertNotIn("windowsapps", norm(got).split("\\"))
+            root = os.environ.get("SystemRoot")
+            if root:
+                self.assertNotEqual(norm(ntpath.dirname(got)), norm(ntpath.join(root, "System32")))
             self.assertTrue(os.path.isfile(got), got)
 
 
@@ -258,6 +308,22 @@ class Stubs(unittest.TestCase):
                 said = lines[0].lower()
                 for looked_for in ("bash", "git", "windowsapps"):
                     self.assertIn(looked_for, said)
+
+    def test_off_windows_the_line_names_only_the_path_lookup(self):
+        # round 1 F2: git and WindowsApps are not looked at there, so the line names neither
+        for platform in ("linux", "darwin"):
+            for name, entry, argv in self.entries():
+                with self.subTest(platform=platform, stub=name):
+                    code, err, started = self.call(entry, argv, None, platform=platform)
+                    self.assertEqual(code, 1)
+                    self.assertEqual(started, [])
+                    lines = [line for line in err.splitlines() if line.strip()]
+                    self.assertEqual(len(lines), 1, err)
+                    said = lines[0].lower()
+                    for looked_for in ("bash", "path"):
+                        self.assertIn(looked_for, said)
+                    for not_looked_for in ("git", "windowsapps", "system32"):
+                        self.assertNotIn(not_looked_for, said)
 
     def test_no_stub_looks_bash_up_on_its_own(self):
         helper = os.path.basename(hostbash.__file__)
