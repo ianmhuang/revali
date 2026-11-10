@@ -5,6 +5,7 @@ sandbox script itself runs with the host's bash, as the WSL runner tests do.
 """
 
 import os
+import re
 import shutil
 import sys
 import unittest
@@ -19,6 +20,7 @@ from tests.helpers import FAKE_BIN, RepoCase, _quote, claude_entry, git, run_cli
 SSH_STUB = os.path.join(FAKE_BIN, "ssh_stub.py")
 SCP_STUB = os.path.join(FAKE_BIN, "scp_stub.py")
 HAVE_BASH = os.name == "nt" or os.path.exists("/bin/bash")
+SID = "[0-9a-f]{8}"  # a session's id in its remote directory names (fix/ssh-session-dirs)
 
 
 def without_scp():
@@ -201,11 +203,13 @@ class TransportTests(SshCase):
         self.assertIn("validate-r1.bundle", calls[1][1])
         self.assertIn("validate-r1.sh", calls[1][1])
         self.assertIn("validate-r1-extra", calls[1][1])
-        self.assertTrue(
-            calls[1][1][-1].startswith("box:.revali/sandbox/sample/validate-r1-in"), calls[1][1]
-        )
+        # fix/ssh-session-dirs AC-1: the remote names carry the session id
+        self.assertRegex(calls[1][1][-1], r"^box:\.revali/sandbox/sample/validate-r1-%s-in/$" % SID)
         self.assertTrue(calls[2][1][-1].startswith('bash "$HOME"/'), calls[2][1])
-        self.assertEqual(calls[3][1][-2:], ["box:.revali/sandbox/sample/validate-r1-logs/.", "."])
+        self.assertRegex(
+            calls[3][1][-2], r"^box:\.revali/sandbox/sample/validate-r1-%s-logs/\.$" % SID
+        )
+        self.assertEqual(calls[3][1][-1], ".")
         self.assertTrue(calls[4][1][-1].startswith("rm -rf "), calls[4][1])
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
@@ -220,7 +224,7 @@ class TransportTests(SshCase):
         self.assertTrue(report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in report.steps])
         self.assertEqual(self.remote_leftovers(), [])
         upload = [c for c in self.calls() if c[0] == "scp"][0][1][-1]
-        self.assertEqual(upload, "box:.revali/sandbox/my_project/validate-r5-in/")
+        self.assertRegex(upload, r"^box:\.revali/sandbox/my_project/validate-r5-%s-in/$" % SID)
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_failed_cleanup_is_logged_not_raised(self):
@@ -234,7 +238,11 @@ class TransportTests(SshCase):
         )
         self.assertTrue(report.ok)
         self.assertTrue(
-            any("could not remove" in line and "validate-r6-in" in line for line in lines), lines
+            any(
+                "could not remove" in line and re.search("validate-r6-%s-in" % SID, line)
+                for line in lines
+            ),
+            lines,
         )
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")

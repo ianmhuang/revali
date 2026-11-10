@@ -15,6 +15,7 @@ the wsl runner, the scp upload target on the ssh runner.
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -180,9 +181,10 @@ class SshDirectories(SshCase):
 
     def branch_level(self, upload):
         """The <repo>/<branch>[-<key>] directory of an upload target, on the fake host."""
-        prefix, suffix = "box:", "/%s-in/" % LABEL
-        self.assertTrue(upload.startswith(prefix) and upload.endswith(suffix), upload)
-        return os.path.join(self.remote, *upload[len(prefix) : -len(suffix)].split("/"))
+        # fix/ssh-session-dirs AC-1: the target is `<label>-<session id>-in/` since that change
+        match = re.fullmatch(r"box:(.+)/%s-%s-in/" % (LABEL, HEX8), upload)
+        self.assertIsNotNone(match, upload)
+        return os.path.join(self.remote, *match.group(1).split("/"))
 
     def sandbox_root(self):
         return os.path.join(self.remote, ".revali", "sandbox")
@@ -195,7 +197,8 @@ class SshDirectories(SshCase):
         self.assertNotEqual(first, second)
         for upload in (first, second):
             self.assertRegex(
-                upload, r"^box:\.revali/sandbox/my_repo/feature__mul-%s/validate-r1-in/$" % HEX8
+                upload,
+                r"^box:\.revali/sandbox/my_repo/feature__mul-%s/validate-r1-%s-in/$" % (HEX8, HEX8),
             )
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
@@ -220,7 +223,8 @@ class SshDirectories(SshCase):
         self.assertNotEqual(first, second)
         for upload in (first, second):
             self.assertRegex(
-                upload, r"^box:\.revali/sandbox/app/feature__mul-%s/validate-r1-in/$" % HEX8
+                upload,
+                r"^box:\.revali/sandbox/app/feature__mul-%s/validate-r1-%s-in/$" % (HEX8, HEX8),
             )
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
@@ -230,20 +234,27 @@ class SshDirectories(SshCase):
         self.assertNotEqual(slash, underscores)
         for upload in (slash, underscores):
             self.assertRegex(
-                upload, r"^box:\.revali/sandbox/sample/feature__x-%s/validate-r1-in/$" % HEX8
+                upload,
+                r"^box:\.revali/sandbox/sample/feature__x-%s/validate-r1-%s-in/$" % (HEX8, HEX8),
             )
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_one_checkout_and_branch_keep_their_directory_and_leave_nothing(self):  # AC-4
         first = self.session(self.repo, BRANCH)
         self.assertEqual(os.listdir(self.sandbox_root()), [])  # <label>, <branch>-<key>, <repo>
-        self.assertEqual(first, self.session(self.repo, BRANCH))
+        # fix/ssh-session-dirs AC-1: the <branch>-<key> level is kept; the session's own
+        # directories below it are new every time
+        again = self.session(self.repo, BRANCH)
+        self.assertEqual(self.branch_level(first), self.branch_level(again))
+        self.assertNotEqual(first, again)
         self.assertEqual(os.listdir(self.sandbox_root()), [])
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_without_a_key_the_layout_is_unchanged(self):  # AC-6
         upload = self.session(self.repo, BRANCH, keyed=False)
-        self.assertEqual(upload, "box:.revali/sandbox/sample/feature__mul/validate-r1-in/")
+        self.assertRegex(
+            upload, r"^box:\.revali/sandbox/sample/feature__mul/validate-r1-%s-in/$" % HEX8
+        )
         self.assertEqual(os.listdir(self.sandbox_root()), [])
 
 

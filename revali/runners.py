@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import tempfile
@@ -50,6 +51,13 @@ class RunnerError(Exception):
 
 class SessionEndedEarly(RunnerError):
     """The results stop before the session's own end: it was stopped from outside."""
+
+
+def session_id() -> str:
+    """8 hex characters, new for every ssh sandbox session: the session's remote directories
+    carry it, so a script a lost connection left running on the host shares nothing with a
+    later session of the same checkout, branch and label."""
+    return secrets.token_hex(4)
 
 
 def _pause(seconds: float) -> None:
@@ -486,10 +494,15 @@ def stage_inputs(
     extra_dir = os.path.join(logs_dir, "%s-extra" % label)
     shutil.rmtree(extra_dir, ignore_errors=True)
     os.makedirs(extra_dir, exist_ok=True)
-    for rel, content in (extra_files or {}).items():
-        write_text(os.path.join(extra_dir, rel), content)
-    for name, cmd in steps:
-        write_text(os.path.join(logs_dir, "%s-%s.cmd" % (label, name)), cmd + "\n")
+    try:
+        for rel, content in (extra_files or {}).items():
+            write_text(os.path.join(extra_dir, rel), content)
+        for name, cmd in steps:
+            write_text(os.path.join(logs_dir, "%s-%s.cmd" % (label, name)), cmd + "\n")
+    except BaseException:
+        # the runner's own cleanup only starts once this returns
+        shutil.rmtree(extra_dir, ignore_errors=True)
+        raise
     for stale in ("%s.results" % label, "%s-script.log" % label):
         # an earlier session's file must not be read as this session's
         path = os.path.join(logs_dir, stale)
@@ -504,26 +517,35 @@ OUTSIDE_STOP = (
 )
 
 
-def script_fork_hint(logs_dir: str, label: str, max_procs: int) -> str:
-    """A sentence for a session that ended early when the script's own stderr
-    (<label>-script.log) shows it could not fork while a process limit was set; else ""."""
-    if max_procs <= 0:
-        return ""
+SCRIPT_LOG_QUOTE = 200  # characters of the script log's first line quoted in the message
+
+
+def script_log_note(logs_dir: str, label: str, max_procs: int) -> str:
+    """A sentence for a session that ended early whose script wrote anything to its own
+    stderr (<label>-script.log): the file and its first non-empty line, plus the process
+    limit as a likely cause when that file shows a failed fork and a limit was set; "" for
+    an empty or missing file."""
     path = os.path.join(logs_dir, "%s-script.log" % label)
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
     except OSError:
         return ""
-    if not any(p in text for p in FORK_ERRORS):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
         return ""
+    note = ". The sandbox script's own errors (%s) begin `%s`" % (
+        path,
+        lines[0][:SCRIPT_LOG_QUOTE],
+    )
+    if max_procs <= 0 or not any(p in text for p in FORK_ERRORS):
+        return note
     # a substring match, so it names a likely cause, not a certain one
-    return (
-        ". The sandbox script's own errors (%s) show a failed attempt to start a process; if "
-        "the process limit caused it, max_procs = %d counts every process and thread of this "
-        "user in the WSL distro or on the ssh host, other sandboxes and the user's own programs "
-        "included: raise [validate.<platform>] max_procs, or set it to 0 for no limit"
-        % (path, max_procs)
+    return note + (
+        " and show a failed attempt to start a process; if the process limit caused it, "
+        "max_procs = %d counts every process and thread of this user in the WSL distro or on "
+        "the ssh host, other sandboxes and the user's own programs included: raise "
+        "[validate.<platform>] max_procs, or set it to 0 for no limit" % max_procs
     )
 
 
@@ -548,8 +570,15 @@ def report_from_results(
     expected = [name for name, cmd in steps if cmd.strip()]
     for index, row in enumerate(rows):
         if len(row) != 3 or not re.fullmatch(r"-?\d+", row[1]) or row[2] not in ("0", "1"):
-            # the script writes name, exit code and timeout flag in one printf; anything else
-            # was cut off while being written and must not read as a pass
+            # the script writes name, exit code and timeout flag in one printf; a last row
+            # that is anything else was cut off while being written and must not read as a
+            # pass; one with rows after it was not cut off, the file is damaged
+            if index < len(rows) - 1:
+                raise RunnerError(
+                    "the sandbox results file is damaged: row %d is not a complete result "
+                    "(`%s`) and rows follow it; nothing in it is trusted; see %s"
+                    % (index + 1, "\\t".join(row), results_path)
+                )
             raise SessionEndedEarly(
                 "row %d of the sandbox results is not a complete result (`%s`); the session "
                 "was stopped while writing it; see %s" % (index + 1, "\\t".join(row), results_path)
@@ -597,7 +626,7 @@ def report_from_results(
                 OUTSIDE_STOP,
                 os.path.join(logs_dir, "%s-%s.log" % (label, expected[0])),
                 os.path.join(logs_dir, "%s-clone.log" % label),
-                script_fork_hint(logs_dir, label, max_procs),
+                script_log_note(logs_dir, label, max_procs),
             )
         )
     done = len(report.steps)
@@ -613,7 +642,7 @@ def report_from_results(
                 OUTSIDE_STOP,
                 report.steps[-1].name,
                 results_path,
-                script_fork_hint(logs_dir, label, max_procs),
+                script_log_note(logs_dir, label, max_procs),
             )
         )
     return report
@@ -716,36 +745,39 @@ class WslRunner(Runner):
         scope = sandbox_scope(scope, key)
         source, ref = clone_source(repo_root, ref, log)
         steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files)
-        repo_name = os.path.basename(os.path.normpath(repo_root)) or "repo"
-        root, _ = sandbox_root(self.plat)
-        sandbox = sandbox_dir(root, repo_name, scope, label)
-        timeout_s = self.plat.command_timeout_min * 60
-        script = self.script(
-            self.wslpath(source, log),
-            self.wslpath(logs_dir, log),
-            self.wslpath(extra_dir, log),
-            ref,
-            steps,
-            label,
-            sandbox,
-            timeout_s,
-            scope=scope,
-        )
-        script_path = os.path.join(logs_dir, "%s.sh" % label)
-        write_text(script_path, script)
         results_path = os.path.join(logs_dir, "%s.results" % label)
-        if log:
-            log("[%s] wsl %s: %d step(s) on %s" % (label, self.distro, len(steps), ref[:10]))
+        # everything from here on can fail (a wslpath, writing the script, the session); the
+        # extra files are only for this session and never stay in the logs directory
         try:
-            res = self._wsl(
-                ["bash", self.wslpath(script_path, log)],
-                timeout=timeout_s * max(1, len(steps)) + 300,
-                log=log,
-                # a script that wrote its results ran; running it again would redo the steps
-                may_retry=lambda: not os.path.isfile(results_path),
+            repo_name = os.path.basename(os.path.normpath(repo_root)) or "repo"
+            root, _ = sandbox_root(self.plat)
+            sandbox = sandbox_dir(root, repo_name, scope, label)
+            timeout_s = self.plat.command_timeout_min * 60
+            script = self.script(
+                self.wslpath(source, log),
+                self.wslpath(logs_dir, log),
+                self.wslpath(extra_dir, log),
+                ref,
+                steps,
+                label,
+                sandbox,
+                timeout_s,
+                scope=scope,
             )
-        except ProcTimeout as exc:
-            raise RunnerError("wsl session for %s did not finish in time" % label) from exc
+            script_path = os.path.join(logs_dir, "%s.sh" % label)
+            write_text(script_path, script)
+            if log:
+                log("[%s] wsl %s: %d step(s) on %s" % (label, self.distro, len(steps), ref[:10]))
+            try:
+                res = self._wsl(
+                    ["bash", self.wslpath(script_path, log)],
+                    timeout=timeout_s * max(1, len(steps)) + 300,
+                    log=log,
+                    # a script that wrote its results ran; running it again would redo the steps
+                    may_retry=lambda: not os.path.isfile(results_path),
+                )
+            except ProcTimeout as exc:
+                raise RunnerError("wsl session for %s did not finish in time" % label) from exc
         finally:
             shutil.rmtree(extra_dir, ignore_errors=True)
         if not res.ok and not os.path.isfile(results_path):
@@ -846,12 +878,15 @@ class SshRunner(Runner):
         shell_root, scp_root = sandbox_root(self.plat)
         repo_base = "%s/%s" % (shell_root, repo_name)
         base = sandbox_dir(repo_base, scope)  # <root>/<repo>/<branch>-<key>, or <root>/<repo>
-        inbox = "%s/%s-in" % (base, label)
-        rlogs = "%s/%s-logs" % (base, label)
-        sandbox = "%s/%s" % (base, label)
+        # this session's own name on the host: a script that a lost connection left running
+        # keeps its directories, and this session never touches them
+        own = "%s-%s" % (label, session_id())
+        inbox = "%s/%s-in" % (base, own)
+        rlogs = "%s/%s-logs" % (base, own)
+        sandbox = "%s/%s" % (base, own)
         scp_base = sandbox_dir(scp_root, repo_name, scope)
-        scp_inbox = "%s/%s-in" % (scp_base, label)
-        scp_logs = "%s/%s-logs" % (scp_base, label)
+        scp_inbox = "%s/%s-in" % (scp_base, own)
+        scp_logs = "%s/%s-logs" % (scp_base, own)
         timeout_s = self.plat.command_timeout_min * 60
         script = self.script(
             "%s/%s" % (inbox, bundle),
@@ -874,6 +909,7 @@ class SshRunner(Runner):
             log("[%s] ssh %s: %d step(s) on %s" % (label, self.host, len(steps), ref[:10]))
         transfer_s = self.plat.transfer_timeout_min * 60 or None  # None: no limit
         res = None
+        removed = False
         try:
             try:
                 r = self._ssh(
@@ -912,7 +948,9 @@ class SshRunner(Runner):
             except ExeNotFound as exc:
                 raise RunnerError(str(exc)) from exc
             finally:
-                self._cleanup([inbox, rlogs, sandbox], [base, repo_base] if scope else [base], log)
+                removed = self._cleanup(
+                    [inbox, rlogs, sandbox], [base, repo_base] if scope else [base], log
+                )
                 shutil.rmtree(extra_dir, ignore_errors=True)
                 if os.path.isfile(bundle_path):
                     os.remove(bundle_path)
@@ -928,22 +966,33 @@ class SshRunner(Runner):
             # row means it had exited, and rows that do not match the steps prove neither
             cut_short = isinstance(exc, SessionEndedEarly) or not os.path.isfile(results_path)
             if res is not None and res.returncode == SSH_CONNECTION_LOST and cut_short:
+                dirs = ", ".join((sandbox, inbox, rlogs))
+                if removed:
+                    left = "revali removed this session's directories there (%s)" % dirs
+                else:
+                    left = (
+                        "this session's directories %s are left there; delete them once the "
+                        "script has ended" % dirs
+                    )
                 raise RunnerError(
                     "%s. The ssh connection to %s went away (exit %d), so the script may still "
-                    "be running on %s until its steps time out (%d min each)"
+                    "be running on %s until its steps time out (%d min each); %s. A later "
+                    "session uses directories of its own"
                     % (
                         exc,
                         self.host,
                         SSH_CONNECTION_LOST,
                         self.host,
                         self.plat.command_timeout_min,
+                        left,
                     )
                 ) from exc
             raise
 
-    def _cleanup(self, paths: List[str], parents: List[str], log: Logger = None) -> None:
+    def _cleanup(self, paths: List[str], parents: List[str], log: Logger = None) -> bool:
         """Remove the staging dirs and the clone on the host, then the parent dirs (innermost
-        first) when nothing else is in them; a failure is logged, never raised."""
+        first) when nothing else is in them; a failure is logged, never raised. True when the
+        removal succeeded."""
         # the exit code is rm's
         command = "rm -rf %s && rmdir --ignore-fail-on-non-empty %s" % (
             " ".join(shell_path(p) for p in paths),
@@ -956,14 +1005,16 @@ class SshRunner(Runner):
             reason = str(exc)
         else:
             reason = r.text.strip()[:200]
+        ok = r is not None and r.ok
         if log:
-            if r is not None and r.ok:
+            if ok:
                 log("[ssh] removed %s on %s" % (", ".join(paths), self.host))
             else:
                 log(
                     "[ssh] could not remove %s on %s (left for you to delete): %s"
                     % (", ".join(paths), self.host, reason or "no output")
                 )
+        return ok
 
 
 def probe_runner(plat: PlatformCfg, log: Logger = None) -> str:

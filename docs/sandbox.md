@@ -78,7 +78,21 @@ that runs the script ends with exit 255 (the connection went away) and
 no results came back or they stop early (a row cut off while being
 written included), the message adds that the script may
 still be running on the host until its steps time out: revali has no
-connection left to stop it.
+connection left to stop it. Every ssh session therefore works in
+directories of its own on the host: the clone, the uploaded inputs and the
+remote logs are `<label>-<id>`, `<label>-<id>-in` and `<label>-<id>-logs`
+under `<repo>/<branch>-<key>`, where `<id>` is 8 random hex characters new
+for each session, so a later session of the same checkout, branch and label
+never reads that script's results or deletes its clone, and its cleanup
+removes only its own directories. The message names this session's three
+directories and says whether revali removed them; when the removal failed
+they are left on the host, and you delete them once the script has ended.
+The names in your logs directory (`<label>.results`, `<label>-<step>.log`)
+do not carry the id. The wsl runner keeps `<label>`: ending `wsl.exe` ends
+the script inside the distro too. A results row cut off while being
+written counts as a session stopped from outside only when it is the last
+row; a broken row with rows after it means the results file is damaged,
+and the run stops with exit 1 saying so.
 A wsl or ssh sandbox caps the size of a file a step writes (`ulimit -f
 4000000`, in 1024-byte blocks) and the number of processes (`ulimit -u`,
 `[validate.<platform>] max_procs`, default 4096; 0 sets no process limit).
@@ -98,7 +112,9 @@ to `<label>-script.log` in the logs directory; when the script itself
 cannot start a step (the user's processes already fill the limit), the
 session ends without that step's result, and the "session ended" error
 adds a sentence naming `max_procs` and that file if it holds one of those
-strings. A host whose hard limit is below `max_procs` keeps its own,
+strings. Whatever the file holds, a "session ended" error names it and
+quotes its first non-empty line (up to 200 characters) when it is not
+empty; the `max_procs` sentence needs one of the strings and a limit. A host whose hard limit is below `max_procs` keeps its own,
 lower limit, and the file-size cap still applies. Linux does not apply
 the process limit to root (or to a user with `CAP_SYS_RESOURCE`), so
 `max_procs` has no effect when the sandbox runs as root. The local runner
