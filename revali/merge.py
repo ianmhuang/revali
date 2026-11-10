@@ -235,15 +235,9 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
             "run `git pull` there" % (_one_line(str(exc)), root, base)
         )
     try:
-        removed, why = _delete_local_branch(
-            root, branch, log, when=gitops.current_branch(root) == base
-        )
-        local = "on %s, branch %s %s%s" % (
-            gitops.current_branch(root),
-            branch,
-            "removed" if removed else "kept",
-            why,
-        )
+        on = gitops.current_branch(root)  # `git branch -D` does not move HEAD
+        removed, why = _delete_local_branch(root, branch, log, when=on == base)
+        local = "on %s, branch %s %s%s" % (on, branch, "removed" if removed else "kept", why)
     except GIT_FAILURES as exc:
         local = "could not tell whether branch %s was removed: %s" % (
             branch,

@@ -298,6 +298,20 @@ class FollowUpStops(PrimaryTreeCase):
         self.assertIn("could not tell whether branch feature/mul was removed", local)
         self.assertEqual(len(self.notes(out)), 1, out)
 
+    def test_the_deletion_is_reported_once_it_ran(self):
+        # PR #64 F4: git breaking right after `git branch -D` must not lose its result
+        real = gitops.current_branch
+
+        def current_branch(cwd):
+            if self.gh_calls("pr", "merge") and gitops.rev_parse("feature/mul", cwd) is None:
+                raise gitops.GitError("git rev-parse --abbrev-ref HEAD failed: index broken")
+            return real(cwd)
+
+        with mock.patch("revali.gitops.current_branch", side_effect=current_branch):
+            out = self.merged()
+        self.assertIn("branch feature/mul removed", self.line_with(out, "local: on main"))
+        self.assertEqual(self.notes(out), [], out)
+
     def test_only_the_branch_step_fails(self):
         # PR #64 F3: the tree was updated, so no note sends the user to pull again
         real = gitops.rev_parse
