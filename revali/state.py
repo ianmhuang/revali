@@ -444,14 +444,80 @@ class RunLog:
 # ---- history ----------------------------------------------------------------
 
 
-def append_history(path: str, record: dict) -> None:
+def _try_os_lock(fd: int) -> bool:
+    """One non-blocking attempt at an exclusive OS lock on `fd` (byte 0 on Windows, the whole
+    file elsewhere); the OS drops it when the process ends."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _os_unlock(fd: int) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass  # closing the descriptor releases it as well
+
+
+def _lock_history(lock: str, path: str, retry_s: Optional[float]) -> Optional[int]:
+    """The descriptor of `lock` with the OS lock held, or None when the lock file cannot be
+    opened or another process holds the lock past the window (`retry_s`, else `[paths]
+    write_retry_s`, looked up on the first refusal only). None means: append unlocked."""
+    try:
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:
+        return None
+    deadline = None
+    pause = 0.01
+    while not _try_os_lock(fd):
+        if deadline is None:
+            window = write_retry_s(path) if retry_s is None else retry_s
+            deadline = time.monotonic() + window
+        if time.monotonic() >= deadline:
+            os.close(fd)
+            return None
+        time.sleep(pause)
+        pause = min(pause * 2, 0.1)
+    return fd
+
+
+def append_history(path: str, record: dict, retry_s: Optional[float] = None) -> None:
+    """Append one row. Writers in other processes (other projects, other worktrees) are kept
+    apart by an OS lock on `<path>.lock`, never on the history file, so readers are not
+    blocked: without it Windows lost up to a quarter of the rows of 4 concurrent writers.
+    A lock that cannot be had within the window is skipped rather than the row dropped."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     record = dict(record)
     record.setdefault("at", now_iso())
     record.setdefault("revali_version", VERSION)
     record.setdefault("prompt_version", PROMPT_VERSION)
-    with open(path, "a", encoding="utf-8", newline="\n") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    fd = _lock_history(path + ".lock", path, retry_s)
+    try:
+        with open(path, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(line)
+    finally:
+        if fd is not None:
+            _os_unlock(fd)
+            os.close(fd)
 
 
 def read_history(path: str) -> List[dict]:
