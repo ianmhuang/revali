@@ -66,9 +66,11 @@ it fails. A checkout or pull that still fails is a `note:` line with git's
 error (both errors when the two attempts differ, since a first attempt that
 stopped in a conflict makes the second fail for that reason) and what to
 run. Any other git failure while updating the tree is a note saying
-updating the tree stopped; a git failure while deleting the local branch
-makes the `local:` line say it could not tell whether the branch was
-removed. The PR is merged, so the exit code stays 0.
+updating the tree stopped. When git cannot be run while deleting the
+local branch, the `local:` line says it could not tell whether the branch
+was removed; a `git branch -D` that runs and fails leaves the branch, and
+the line says it was kept, with git's error. The PR is merged, so the
+exit code stays 0.
 
 ## Running
 
