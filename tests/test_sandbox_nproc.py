@@ -102,6 +102,22 @@ class GeneratedScript(unittest.TestCase):
         self.assertIn("ulimit -f 4000000 2>/dev/null", limit_lines(text))
 
 
+class StaleScriptLog(unittest.TestCase):
+    """PR #59 F2: a session must not be judged by an earlier session's script log."""
+
+    def test_stage_inputs_removes_it(self):
+        logs = tempfile.mkdtemp(prefix="revali stale ")
+        self.addCleanup(rmtree_force, logs)
+        stale = os.path.join(logs, "v-script.log")
+        other = os.path.join(logs, "w-script.log")
+        for path in (stale, other):
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(FORK_FAIL + "\n")
+        stage_inputs(logs, "v", [("test", "true")], {})
+        self.assertFalse(os.path.exists(stale))
+        self.assertTrue(os.path.exists(other))  # another label's file is not this session's
+
+
 class ConfigKey(RepoCase):
     """AC-1, AC-2, AC-4: the key in defaults.toml, in the project and user layers, bad values."""
 
@@ -232,7 +248,7 @@ class StepLogHint(RepoCase):
 
 
 PARENT_FORK_FAIL = "/x/validate-r1.sh: fork: Resource temporarily unavailable"
-SCRIPT_HINT = "The sandbox script itself could not start a process"
+SCRIPT_HINT = "show a failed attempt to start a process; if the process limit caused it"
 
 
 def dying_before(cls, step_index, stderr_line, code="exit 0"):

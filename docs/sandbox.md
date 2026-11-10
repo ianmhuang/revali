@@ -91,14 +91,18 @@ tasks each, in the WSL distro with nothing else running; the old fixed
 limit was 512. When a step fails (not by timeout) with `Resource
 temporarily unavailable`, `can't start new thread` or `EAGAIN` in its
 output while the limit is set, the script appends a line starting
-`revali:` to that step's log naming `max_procs` and its value; the step's
-result is unchanged. The script's own errors go to `<label>-script.log`
-in the logs directory; when the script itself cannot start a step (the
-user's processes already fill the limit), the session ends without that
-step's result, and the "session ended" error adds a sentence naming
-`max_procs` and that file if it holds one of those strings. A host whose hard limit is below `max_procs` keeps
-its own, lower limit, and the file-size cap still applies. The local
-runner sets neither limit.
+`revali:` to that step's log naming `max_procs` and its value as a likely
+cause (the strings are matched as text, and socket I/O can print
+`EAGAIN` too); the step's result is unchanged. The script's own errors go
+to `<label>-script.log` in the logs directory; when the script itself
+cannot start a step (the user's processes already fill the limit), the
+session ends without that step's result, and the "session ended" error
+adds a sentence naming `max_procs` and that file if it holds one of those
+strings. A host whose hard limit is below `max_procs` keeps its own,
+lower limit, and the file-size cap still applies. Linux does not apply
+the process limit to root (or to a user with `CAP_SYS_RESOURCE`), so
+`max_procs` has no effect when the sandbox runs as root. The local runner
+sets neither limit.
 `runner = "local"` uses a git worktree on the host with no isolation.
 
 `runner = "ssh"` with `host = "<destination>"` does the same as `wsl` on a Linux

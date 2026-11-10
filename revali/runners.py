@@ -389,7 +389,7 @@ __PROC_LIMIT__
 hint_limit() {
     # the result row is written first: this needs a process, and the user may still have none
     grep -q __FORK_PATTERNS__ "$1" 2>/dev/null || return 0
-    printf "\nrevali: this step could not start a process or thread while max_procs = %s was in force; that limit counts every process and thread of this user in this WSL distro or on this ssh host, other sandboxes and the user's own programs included. Raise [validate.<platform>] max_procs, or set it to 0 for no limit.\n" "$MAX_PROCS" >> "$1"
+    printf "\nrevali: this log shows a failed attempt to start a process or thread (or another EAGAIN). If the process limit caused it: max_procs = %s counts every process and thread of this user in this WSL distro or on this ssh host, other sandboxes and the user's own programs included; raise [validate.<platform>] max_procs, or set it to 0 for no limit.\n" "$MAX_PROCS" >> "$1"
 }
 run_step() {
     local name="$1" rc to log="$LOGS/$LABEL-$1.log"
@@ -480,7 +480,7 @@ def stage_inputs(
     logs_dir: str, label: str, steps: List[Tuple[str, str]], extra_files: Dict[str, str]
 ) -> Tuple[List[Tuple[str, str]], str]:
     """Write one .cmd file per non-empty step and the extra files under logs_dir; drop a
-    stale results file. Returns (non-empty steps, extra dir)."""
+    stale results file and script log. Returns (non-empty steps, extra dir)."""
     os.makedirs(logs_dir, exist_ok=True)
     steps = [(n, c) for n, c in steps if c.strip()]
     extra_dir = os.path.join(logs_dir, "%s-extra" % label)
@@ -490,9 +490,11 @@ def stage_inputs(
         write_text(os.path.join(extra_dir, rel), content)
     for name, cmd in steps:
         write_text(os.path.join(logs_dir, "%s-%s.cmd" % (label, name)), cmd + "\n")
-    results_path = os.path.join(logs_dir, "%s.results" % label)
-    if os.path.isfile(results_path):
-        os.remove(results_path)
+    for stale in ("%s.results" % label, "%s-script.log" % label):
+        # an earlier session's file must not be read as this session's
+        path = os.path.join(logs_dir, stale)
+        if os.path.isfile(path):
+            os.remove(path)
     return steps, extra_dir
 
 
@@ -515,11 +517,13 @@ def script_fork_hint(logs_dir: str, label: str, max_procs: int) -> str:
         return ""
     if not any(p in text for p in FORK_ERRORS):
         return ""
+    # a substring match, so it names a likely cause, not a certain one
     return (
-        ". The sandbox script itself could not start a process (see %s) while max_procs = %d "
-        "was in force: that limit counts every process and thread of this user in the WSL "
-        "distro or on the ssh host, other sandboxes and the user's own programs included; "
-        "raise [validate.<platform>] max_procs, or set it to 0 for no limit" % (path, max_procs)
+        ". The sandbox script's own errors (%s) show a failed attempt to start a process; if "
+        "the process limit caused it, max_procs = %d counts every process and thread of this "
+        "user in the WSL distro or on the ssh host, other sandboxes and the user's own programs "
+        "included: raise [validate.<platform>] max_procs, or set it to 0 for no limit"
+        % (path, max_procs)
     )
 
 
