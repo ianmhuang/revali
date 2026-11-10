@@ -15,7 +15,8 @@ The sessions run the real WslRunner / SshRunner against the repository's stand-i
 wsl.exe, ssh and scp. The script's own stderr is produced by the script itself: the session
 is given an extra file where the checked-out tree has a directory, so the script's `cp`
 complains, naming that path, and the directory's name (`EAGAIN`) is one of the strings. A
-session that ends early is the stand-in losing result rows after the script ran. The limits
+session that ends early is the stand-in losing result rows after the script ran, or (for
+the earlier session's script log) not running the script at all. The limits
 the sessions set are large on purpose: on Linux they are really set, and a small one would
 count this user's other processes against the test.
 """
@@ -52,10 +53,13 @@ import wsl_stub
 
 
 def main(argv):
-    code = wsl_stub.main(argv)
     cmd = argv[3:] if argv[:1] == ["-d"] else argv
+    is_script = cmd[:1] == ["bash"] and cmd[1:2] != ["-c"]
+    if is_script and os.environ.get("FORKHINT_SKIP_SCRIPT"):
+        return 0  # the session ended before the script ran a single line
+    code = wsl_stub.main(argv)
     keep = os.environ.get("FORKHINT_KEEP_ROWS")
-    if keep is None or cmd[:1] != ["bash"] or cmd[1:2] == ["-c"]:
+    if keep is None or not is_script:
         return code
     path = os.environ["FORKHINT_RESULTS"]
     with open(path, "r", encoding="utf-8", newline="") as fh:
@@ -108,6 +112,7 @@ def use_stubs(case):
         "REVALI_FAKE_SSH_RM_FAILS",
         "REVALI_FAKE_SSH_SCRIPT_DROP",
         "FORKHINT_KEEP_ROWS",
+        "FORKHINT_SKIP_SCRIPT",
     ):
         os.environ.pop(knob, None)
 
@@ -407,6 +412,20 @@ class WslScriptLog(_ScriptLogCase):
         self.assertIn("`setup`", text)
         self.assertNotIn("max_procs", text)
         self.assertIn("EAGAIN", self.script_log())
+
+    def test_an_earlier_sessions_script_log_is_not_read_as_this_sessions(self):
+        # round 1, F2: the same label and logs directory twice; the first session leaves a
+        # script log holding one of the strings, the second never runs a line of its script
+        self.assertTrue(self.session(self.FORK_LIKE).ok)
+        self.assertIn("EAGAIN", self.script_log())
+        os.environ["FORKHINT_SKIP_SCRIPT"] = "1"
+        self.addCleanup(os.environ.pop, "FORKHINT_SKIP_SCRIPT", None)
+        with self.assertRaises(SessionEndedEarly) as cm:
+            self.session({})
+        text = str(cm.exception)
+        self.assertIn("`setup`", text)
+        self.assertNotIn("max_procs", text)
+        self.assertNotIn(SCRIPT_LOG, text)
 
 
 @unittest.skipUnless(HAVE_BASH, "needs bash")
