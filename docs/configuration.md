@@ -31,6 +31,14 @@ trailer and touches only `test_dir`. A fix round, an author commit or a
 rebase brings the full suite back; `revali reset` makes the next run redo
 the baseline, after which validation may reuse it again. Set the key to
 false to run the suite every time.
+`[validate] parallel_baseline` (default true) starts the baseline when the
+other preflight checks have passed and lets it run while the PR stage and
+the round 1 reviewer run, instead of before them. When it fails, the
+reviewer session is stopped (its cost is then not known) or its answer is
+discarded, and the run ends as a failed baseline always did (exit 1, "branch
+is broken before review"), except that the branch may already be pushed with
+its draft PR open. Set it to false for the old order: nothing is pushed and
+no reviewer is paid for a branch whose suite fails.
 `[validate] rerun_on_base` (default true) makes a validation that fails
 in the reviewer's tests (`new_test`) run the same test files once more on
 the base tip, so the diagnosis session can tell whether the branch

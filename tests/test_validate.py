@@ -34,6 +34,9 @@ def diagnosis(cause="code", **kw):
 
 class BaselineTests(RepoCase):
     def test_broken_baseline_stops_before_review(self):
+        # the order before feature/parallel-baseline; the parallel case (the PR may be open by
+        # then) is tests/test_parallel_baseline.py
+        self.sequential_baseline()
         self.runner_scenario(
             {
                 "default": 0,

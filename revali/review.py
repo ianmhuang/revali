@@ -474,7 +474,13 @@ def planned_reviewer(ctx: Context) -> models.Resolved:
 
 
 def spawn_reviewer(
-    ctx: Context, prompt: str, rdir: str, round_no: int, attempt: int, log: Optional[RunLog]
+    ctx: Context,
+    prompt: str,
+    rdir: str,
+    round_no: int,
+    attempt: int,
+    log: Optional[RunLog],
+    cancel=None,
 ) -> ReviewerRun:
     cfg = ctx.cfg.review
     engine = engines.for_role(ctx.cfg, "review")
@@ -507,6 +513,7 @@ def spawn_reviewer(
         raw_path=raw_path,
         may_write=[ctx.cfg.project.test_dir],
         shell_allow=list(SHELL_ALLOW),
+        cancel=cancel,
     )
     result = engine.run(request, log)
     problems = validate_shape(result.data)
@@ -1347,11 +1354,15 @@ def render_tests_md(ctx: Context, state: State, rounds: List[dict]) -> str:
 # ---- the round --------------------------------------------------------------
 
 
-def run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> RoundOutcome:
+def run_round(
+    ctx: Context, state: State, rdir: str, log: Optional[RunLog], baseline=None
+) -> RoundOutcome:
     """One review round. Whatever stops it before the tests are committed leaves no
-    half-written test files behind."""
+    half-written test files behind. `baseline` is the validate.BaselineJob still running
+    alongside round 1, if any: a failure stops the reviewer, and the reviewer's answer is
+    acted on only once the baseline has passed."""
     try:
-        return _run_round(ctx, state, rdir, log)
+        return _run_round(ctx, state, rdir, log, baseline)
     except Stop:
         discard_round_leftovers(ctx, state, log, "the reviewer", stage="review")
         state.reviewer_running = False
@@ -1365,7 +1376,9 @@ def _spent(state: State, rdir: str, cost: float) -> None:
         state.save(rdir)
 
 
-def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> RoundOutcome:
+def _run_round(
+    ctx: Context, state: State, rdir: str, log: Optional[RunLog], baseline=None
+) -> RoundOutcome:
     from revali import testarchive
 
     round_no = len(state.rounds) + 1
@@ -1389,14 +1402,32 @@ def _run_round(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> 
             True  # cleared when this round ends; a later run cleans up otherwise
         )
         state.save(rdir)
+        if baseline is not None:
+            baseline.raise_if_failed()  # failed already: no reviewer is paid for this branch
         try:
-            rr = spawn_reviewer(ctx, prompt, rdir, round_no, attempt, log)
+            rr = spawn_reviewer(
+                ctx,
+                prompt,
+                rdir,
+                round_no,
+                attempt,
+                log,
+                cancel=baseline.failed if baseline is not None else None,
+            )
         except Stop as stop:
             _spent(state, rdir, stop.cost)
             raise
         # counted now: whatever stops this round from here on, the session was paid for
         _spent(state, rdir, rr.cost)
         total_cost += rr.cost
+        if baseline is not None:
+            baseline.settle(
+                state,
+                rdir,
+                log,
+                note="the reviewer's answer was discarded ($%.2f counted in the run's cost)"
+                % rr.cost,
+            )
         if rr.denials and log:
             log.stage(
                 "review", "note: %d tool call(s) were denied by the allowlist" % len(rr.denials)

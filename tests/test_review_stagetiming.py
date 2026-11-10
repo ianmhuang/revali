@@ -114,6 +114,9 @@ class TheTimingLine(TimingCase):
     def test_a_run_that_stops_in_preflight_exit_1_still_names_preflight(self):
         """The baseline fails: the run ends with exit 1 inside preflight. Preflight ran (for
         as long as the baseline took), so the timing line and the row name it."""
+        # feature/parallel-baseline (Ian's call): only with the baseline inside preflight does a
+        # failing one end the run there; with parallel_baseline, the default, it ends later
+        self.sequential_baseline()
         self.runner_scenario({"default": 0, "results": {"baseline": {"test": 1}}})
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)

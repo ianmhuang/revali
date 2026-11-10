@@ -43,7 +43,9 @@ fallback_model = "auto"
 budget_usd = 1.0
 reuse_baseline = true             # skip the existing suite in validation when only the reviewer's
                                   # test commits followed the baseline; false = run it every time
-rerun_on_base = true              # rerun the reviewer's failing tests on the base tip for the diagnosis
+parallel_baseline = true          # run the baseline while the PR stage and round 1 review run; false =
+                                  # baseline first, nothing pushed and no reviewer paid when it fails
+rerun_on_base = true             # rerun the reviewer's failing tests on the base tip for the diagnosis
 issue_on = true                   # open a GitHub issue when a failure is diagnosed as a pre-existing bug
 issue_assignee = "author"         # "author" (the PR author) or "" (unassigned)
 # issue_template = "docs/issue.md"        # replace the built-in issue body (same $placeholders)

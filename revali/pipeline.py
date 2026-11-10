@@ -449,27 +449,68 @@ def _model_label(chosen) -> str:
 
 
 def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
-    from revali import pr as prstage
     from revali import review, validate
 
     if not state.repo:
         # so a run that stops in preflight still names its repo in history
         state.repo = gitops.remote_repo("origin", cwd)
-    # the preflight clock starts here: preflight() below includes the baseline sandbox session,
-    # and the state's preflight stage is only recorded once it has passed
+    # the preflight clock starts here: preflight() below includes the baseline sandbox session
+    # unless it runs in parallel, and the state's preflight stage is only recorded once it has
+    # passed
     log.timing.stage("preflight")
     first_pass = not state.rounds and not args.dry_run
-    baseline_hook = (lambda ctx: validate.baseline(ctx, state, rdir, log)) if first_pass else None
+    jobs = []
+
+    def baseline_hook(ctx):
+        if not ctx.cfg.validate.parallel_baseline:
+            validate.baseline(ctx, state, rdir, log)
+        elif validate.baseline_steps(ctx) is not None:
+            jobs.append(validate.BaselineJob.start(ctx, log))
+        else:
+            validate.run_baseline(ctx, ctx.head_sha, log)  # logs why there is none
+
     cleanup_hook = review.interruption_cleanup(state, rdir, log) if not args.dry_run else None
     ctx = preflight(
         cwd,
         base_override=args.base or "",
         dry_run=args.dry_run,
         log=log,
-        baseline=baseline_hook,
+        baseline=baseline_hook if first_pass else None,
         before_tree=cleanup_hook,
         tolerate=state.pending_test_files,
     )
+    job = jobs[0] if jobs else None
+    if job is None:
+        return _after_preflight(args, ctx, state, rdir, log, None)
+    try:
+        return _after_preflight(args, ctx, state, rdir, log, job)
+    except Stop as stop:
+        failure = job.finish()
+        if failure is not None and not job.raised:
+            # the baseline failed while something else ended the run: report the baseline, as
+            # the run would have before parallel_baseline, and say what happened to the rest
+            raise validate.with_note(failure, _baseline_note(stop)) from None
+        raise
+    finally:
+        job.finish()  # never leave a sandbox session running behind the run
+        try:
+            job.record(state, rdir)  # a passed baseline is kept whatever ended the run
+        except OSError:
+            pass  # the state file is busy; the run's own outcome matters more than this sha
+
+
+def _baseline_note(stop: Stop) -> str:
+    from revali.engines.base import SessionCancelled
+
+    if isinstance(stop, SessionCancelled):
+        return "the reviewer session was stopped when the baseline failed; its cost is not known"
+    return "the run also stopped for this: %s" % stop.message.split("\n")[0]
+
+
+def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) -> int:
+    from revali import pr as prstage
+    from revali import review
+
     _rerun_bookkeeping(ctx, state, rdir, log)
     resume_round = _approved_round_awaiting_validation(ctx, state)
     state.branch, state.base = ctx.branch, ctx.base
@@ -518,7 +559,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         )
 
     _stage(state, rdir, log, "review", "reviewer round %d" % (len(state.rounds) + 1))
-    outcome = review.run_round(ctx, state, rdir, log)
+    outcome = review.run_round(ctx, state, rdir, log, baseline=baseline)
     if outcome.commit_sha:
         check_tree_unmoved(ctx, tail="the test commit was not pushed")
         state.pending_effect = "push"

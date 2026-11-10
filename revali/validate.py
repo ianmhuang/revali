@@ -2,6 +2,7 @@
 
 import os
 import string
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -106,14 +107,30 @@ def baseline(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> No
     """Existing suite must pass on the branch before anyone reviews it. On success the commit
     it passed on is recorded (`state.baseline_sha`) so validation can tell when the suite it
     would run is the one that already ran."""
+    sha = run_baseline(ctx, ctx.head_sha, log)
+    if sha:
+        state.baseline_sha = sha
+        state.save(rdir)
+
+
+def baseline_steps(ctx: Context):
+    """The baseline's steps, or None when there is no baseline to run (a docs change, or no
+    existing test command)."""
     if ctx.doc.kind == "docs":
-        return
-    plat = platform(ctx)
-    steps = [s for s in steps_for(plat, ["setup", "build", "test"]) if s[1].strip()]
-    if not any(name == "test" for name, _ in steps):
-        if log:
+        return None
+    steps = [s for s in steps_for(platform(ctx), ["setup", "build", "test"]) if s[1].strip()]
+    return steps if any(name == "test" for name, _ in steps) else None
+
+
+def run_baseline(ctx: Context, ref: str, log: Optional[RunLog]) -> str:
+    """Run the existing suite on commit `ref` in the sandbox. Returns `ref` when it passed, ""
+    when there was nothing to run; raises Stop when it failed. Touches no state, so it may run
+    on a thread of its own (BaselineJob)."""
+    steps = baseline_steps(ctx)
+    if steps is None:
+        if log and ctx.doc.kind != "docs":
             log.stage("preflight", "no existing test command; baseline skipped")
-        return
+        return ""
     runner = _runner(ctx)
     if log:
         log.stage("preflight", "baseline: existing suite on %s" % runner.name)
@@ -121,7 +138,7 @@ def baseline(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> No
     try:
         report = runner.run(
             ctx.repo_root,
-            "HEAD",
+            ref,
             steps,
             {},
             ctx.logs,
@@ -153,8 +170,89 @@ def baseline(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> No
                 tail(failed.text, 20),
             ),
         )
-    state.baseline_sha = ctx.head_sha
-    state.save(rdir)
+    return ref
+
+
+class BaselineJob:
+    """The baseline on a thread of its own, started at the end of preflight so it runs while
+    the PR stage and the round 1 reviewer do ([validate] parallel_baseline). The thread only
+    runs the sandbox session and logs; the main thread records the result (`settle`).
+
+    `failed` is set the moment the baseline fails: the reviewer session's cancel event."""
+
+    THREAD_NAME = "revali-baseline"
+
+    def __init__(self, ctx: Context, log: Optional[RunLog]):
+        self.ref = ctx.head_sha  # what preflight saw; later commits of the run do not count
+        self.failed = threading.Event()
+        self.sha = ""
+        self.stop: Optional[Stop] = None
+        self.raised = False  # its failure has been raised into the run already
+        self._settled = False
+        self._thread = threading.Thread(
+            target=self._run, args=(ctx, log), name=self.THREAD_NAME, daemon=True
+        )
+
+    @classmethod
+    def start(cls, ctx: Context, log: Optional[RunLog]) -> "BaselineJob":
+        job = cls(ctx, log)
+        if log:
+            log.stage(
+                "preflight", "baseline started; it runs alongside the PR stage and the review"
+            )
+        job._thread.start()
+        return job
+
+    def _run(self, ctx: Context, log: Optional[RunLog]) -> None:
+        try:
+            self.sha = run_baseline(ctx, self.ref, log)
+        except Stop as stop:
+            self.stop = stop
+            self.failed.set()
+        except Exception as exc:  # a bug in the thread must still end the run, not vanish
+            self.stop = Stop(EXIT_ERROR, "the baseline crashed: %s: %s" % (type(exc).__name__, exc))
+            self.failed.set()
+
+    def finish(self) -> Optional[Stop]:
+        """Wait for the baseline to end; its Stop when it failed, else None."""
+        self._thread.join()
+        return self.stop
+
+    def raise_if_failed(self) -> None:
+        """Without waiting: raise the baseline's Stop when it has already failed."""
+        if self.failed.is_set():
+            self.raised = True
+            raise self.stop
+
+    def settle(self, state: State, rdir: str, log: Optional[RunLog], note: str = "") -> None:
+        """Wait for the baseline (logging that the run is waiting), then raise its Stop, with
+        `note` on a line of its own, or record the commit it passed on, as `baseline` does."""
+        if self._thread.is_alive() and log:
+            log.stage("review", "waiting for the baseline to finish")
+        stop = self.finish()
+        if stop is not None:
+            self.raised = True
+            raise with_note(stop, note)
+        self.record(state, rdir)
+
+    def record(self, state: State, rdir: str) -> None:
+        """Once the baseline has ended: store the commit it passed on, as `baseline` does, so a
+        run that stops later for another reason still has it. A no-op otherwise."""
+        if self._thread.is_alive() or self._settled:
+            return
+        self._settled = True
+        if self.sha:
+            state.baseline_sha = self.sha
+            state.save(rdir)
+
+
+def with_note(stop: Stop, note: str) -> Stop:
+    """`stop` with `note` after its first line (the line run.log and `wait` show first)."""
+    if not note:
+        return stop
+    first, _, rest = stop.message.partition("\n")
+    message = first + "\n" + note + ("\n" + rest if rest else "")
+    return Stop(stop.exit_code, message, cost=stop.cost)
 
 
 def baseline_reusable(ctx: Context, state: State) -> str:

@@ -5,12 +5,22 @@ permissions) into one headless session and returns an EngineResult. Nothing
 outside revali/engines/ knows a CLI flag.
 """
 
+import threading
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from revali import models
+from revali import EXIT_ERROR, models
 from revali.config import EngineCfg
+from revali.preflight import Stop
 from revali.state import RunLog
+
+
+class SessionCancelled(Stop):
+    """A session stopped through EngineRequest.cancel. It reported nothing, so its cost is
+    not known."""
+
+    def __init__(self, role: str):
+        super().__init__(EXIT_ERROR, "%s session stopped before it answered" % role)
 
 
 @dataclass
@@ -34,6 +44,8 @@ class EngineRequest:
     shell_allow: List[str] = field(
         default_factory=list
     )  # command prefixes it may run, e.g. "git diff"
+    cancel: Optional[threading.Event] = None  # set by another thread to stop the session
+    # (the parallel baseline failed); the engine then raises SessionCancelled
 
 
 @dataclass

@@ -64,7 +64,11 @@ schema = ""                      # empty = schemas/diagnose.schema.json
 reuse_baseline = true            # validation skips `test` when every commit since the baseline is
                                  # a reviewer test commit touching only test_dir (the suite it
                                  # would run is the one the baseline ran); false = always run it
-rerun_on_base = true             # when the reviewer's tests fail in validation, run the same files
+parallel_baseline = true         # the baseline starts at the end of preflight and runs while the
+                                 # PR stage and the round 1 reviewer do; when it fails the reviewer
+                                 # is stopped, but the branch may be pushed with a draft PR open.
+                                 # false = baseline inside preflight, before anything is pushed
+rerun_on_base = true            # when the reviewer's tests fail in validation, run the same files
                                  # once more on the base tip so the diagnosis can tell a bug the
                                  # branch introduced from one it inherited; evidence only
 issue_on = true                  # when the diagnosis marks a failure `cause: code` and

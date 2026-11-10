@@ -14,7 +14,12 @@ stated.
   run's own, and stops with exit 1 (stage `error`) otherwise, committing and
   pushing nothing from that point; `merge` holds the same lock while it
   checks out the base branch and pulls
-- `git push -u origin <branch>` and `gh pr create --draft`
+- `git push -u origin <branch>` and `gh pr create --draft`. With `[validate]
+  parallel_baseline` (the default) this happens while the baseline is still
+  running, so a branch whose existing suite fails can be left pushed with its
+  draft PR open; the run still ends with exit 1, "branch is broken before
+  review", and no review round. With `parallel_baseline = false` a failing
+  baseline stops the run before anything is pushed
 - runs `[project] format` on the host over the test files the reviewer
   wrote in each attempt, just before the `lint` line below, and only over
   those files (`{files}`); the formatter rewrites them in place, uncommitted.
