@@ -2,8 +2,10 @@
 open PR fixes a stale title, and `revali merge` checks once more before it merges."""
 
 import os
+from unittest import mock
 
 from revali import EXIT_ERROR, EXIT_OK
+from revali.procs import ProcTimeout
 from tests.helpers import RepoCase, claude_entry, run_cli
 
 TITLE = "Add mul to calc"  # the sample change.md's title
@@ -122,6 +124,92 @@ class AtMerge(TitleCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("warning: no change.md to check the PR title against", out)
         self.assertEqual(self.title_edits(), [])
+
+
+def timing_out_on(module, name, marker):
+    """A stand-in for `module.name` (a procs runner) that raises ProcTimeout for the gh call
+    whose argv holds `marker`, and runs every other command for real."""
+    real = getattr(module, name)
+
+    def fake(cmd, *args, **kwargs):
+        if marker in cmd:
+            raise ProcTimeout("timed out after 120s: gh")
+        return real(cmd, *args, **kwargs)
+
+    return mock.patch.object(module, name, side_effect=fake)
+
+
+class Round1Lows(TitleCase):
+    """PR #56 round 1 F1-F3: every way the title cannot be checked is a warning (or, for a
+    failed edit at merge, the existing refusal), never a traceback."""
+
+    def merged(self):
+        return [a for a in self.gh() if a[:2] == ["pr", "merge"]]
+
+    def test_a_hung_view_at_merge_is_a_warning(self):  # F1
+        from revali import merge
+
+        self.run_ok()
+        with timing_out_on(merge, "run", "title"):
+            code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("warning: could not read the PR title (timed out after 120s: gh)", out)
+        self.assertEqual(len(self.merged()), 1)
+
+    def test_a_hung_edit_at_merge_refuses_the_merge(self):  # F1
+        from revali import pr
+
+        self.run_ok()
+        self.scenario({"pr_title": "Renamed on GitHub"})
+        with timing_out_on(pr, "run_retry", "--title"):
+            code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("not merged", out)
+        self.assertIn("timed out after 120s", out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.merged(), [])
+
+    def test_a_hung_edit_during_a_run_is_a_warning(self):  # F1
+        from revali import pr
+
+        self.scenario(open_pr("Old title"))
+        self.claude(claude_entry())
+        with timing_out_on(pr, "run_retry", "--title"):
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn(
+            "warning: could not update the PR title: timed out after 120s", self.read(REVALI_LOG)
+        )
+
+    def test_an_unreadable_change_md_is_a_warning(self):  # F1
+        self.run_ok()
+        with open(self.change_md(), "wb") as fh:
+            fh.write(b"---\ntitle: \xff\xfe broken\n---\n")
+        code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("warning: change.md could not be read", out)
+        self.assertEqual(len(self.merged()), 1)
+
+    def test_an_empty_title_is_a_warning(self):  # F2
+        self.run_ok()
+        with open(self.change_md(), "r", encoding="utf-8", newline="") as fh:
+            text = fh.read()
+        self.assertIn("title: %s\n" % TITLE, text)
+        with open(self.change_md(), "w", encoding="utf-8", newline="") as fh:
+            fh.write(text.replace("title: %s\n" % TITLE, "title:\n"))
+        self.scenario({"pr_title": "Renamed on GitHub"})
+        code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("warning: change.md has no title to check the PR title against", out)
+        self.assertEqual(self.title_edits(), [])
+
+    def test_no_title_in_gh_answer_says_so(self):  # F3
+        self.run_ok()
+        self.scenario({"pr_title": None})
+        code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("warning: could not read the PR title (no title in gh's answer)", out)
+        self.assertNotIn('"number"', out)
 
 
 class Docs(TitleCase):

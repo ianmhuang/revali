@@ -6,7 +6,7 @@ from typing import Optional
 
 from revali import EXIT_ERROR, changedoc, gitops
 from revali.preflight import Context, Stop, check_tree_unmoved
-from revali.procs import resolve, run, run_retry
+from revali.procs import ProcError, resolve, run, run_retry
 from revali.secretscan import scan_text
 from revali.state import RunLog, State, write_text
 
@@ -96,12 +96,15 @@ def sync_title(
     wanted = (wanted or "").strip()
     if current is None or not wanted or current.strip() == wanted:
         return ""
-    res = run_retry(
-        resolve("gh") + ["pr", "edit", str(number), "--title", wanted],
-        cwd=root,
-        log=_log(log),
-        timeout=120,
-    )
+    try:
+        res = run_retry(
+            resolve("gh") + ["pr", "edit", str(number), "--title", wanted],
+            cwd=root,
+            log=_log(log),
+            timeout=120,
+        )
+    except ProcError as exc:  # a hung or missing gh is a failed edit like any other
+        return str(exc)
     if not res.ok:
         return res.text.strip()[:200] or "gh exited %d" % res.returncode
     if log:
