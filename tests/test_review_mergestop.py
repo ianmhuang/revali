@@ -42,9 +42,8 @@ def live_child(case):
 
 
 def dead_pid():
-    p = subprocess.Popen([sys.executable, "-c", "pass"])
-    p.wait()
-    return p.pid
+    # PR #54 round 2 F3: not a just-exited child's pid, which Windows reuses at once
+    return 2**31 - 1  # above any pid range on Windows and Linux
 
 
 def read_doc(name):

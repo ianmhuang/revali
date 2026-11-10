@@ -5,9 +5,12 @@ the bash-style form. Use via REVALI_WSL_CMD="<python> <this file>".
 
 import os
 import re
-import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import hostbash  # noqa: E402
 
 
 def bash_path(path):
@@ -29,9 +32,9 @@ def main(argv):
         print(bash_path(cmd[-1]))
         return 0
     if cmd[0] == "bash":
-        bash = shutil.which("bash")
+        bash = hostbash.find_bash()
         if not bash:
-            print("no bash on this host", file=sys.stderr)
+            print(hostbash.missing_message(), file=sys.stderr)
             return 1
         env = dict(os.environ)
         # A private HOME per test when REVALI_HOME is set (RepoCase sets it per test), so
