@@ -192,9 +192,10 @@ def _run_cancellable(cmd, cwd, timeout, env, input_text, log, cancel, start) -> 
 
 
 def _stop(proc: subprocess.Popen) -> None:
-    """End a child started by _run_cancellable and reap it, in bounded time: a descendant that
-    outlives the child may hold its stdout / stderr open, so the pipes are given up rather
-    than read to their end."""
+    """End a child started by _run_cancellable and reap it. On POSIX that takes bounded time
+    even when a descendant that outlives the child holds its stdout / stderr open: the pipes
+    are given up rather than read to their end. On Windows the bound comes from the tree kill;
+    a process outside that tree holding the pipes keeps only the daemon reader threads busy."""
     if os.name == "nt":
         kill_tree(proc.pid)
     else:
@@ -210,12 +211,17 @@ def _stop(proc: subprocess.Popen) -> None:
         return
     except subprocess.TimeoutExpired:
         pass
-    for pipe in (proc.stdin, proc.stdout, proc.stderr):
-        if pipe is not None:
-            try:
-                pipe.close()
-            except OSError:
-                pass
+    if os.name != "nt":
+        # POSIX reads the pipes on this thread, so closing them ends the reading. On Windows
+        # communicate() reads them on daemon threads that hold each pipe's lock while they
+        # block; a close from here would wait for that lock, so the pipes are left to those
+        # threads, which end with the last process holding them (PR #55 round 2 F8).
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            if pipe is not None:
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
     try:
         proc.wait(timeout=CANCEL_REAP_S)
     except subprocess.TimeoutExpired:
