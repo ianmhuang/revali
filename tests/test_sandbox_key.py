@@ -13,7 +13,15 @@ import unittest
 from unittest import mock
 
 from revali.config import PlatformCfg
-from revali.runners import RunnerError, SshRunner, WslRunner, sandbox_key, sandbox_scope
+from revali.procs import ExeNotFound, ProcTimeout
+from revali.runners import (
+    RunnerError,
+    SshRunner,
+    WslRunner,
+    clone_source,
+    sandbox_key,
+    sandbox_scope,
+)
 from tests.helpers import FAKE_BIN, RepoCase, _quote, claude_entry, git, run_cli
 from tests.test_review_basererun import BaseRerunCase
 from tests.test_ssh_runner import HAVE_BASH, SshCase, plat
@@ -243,6 +251,29 @@ class WslFromAWorktree(WslStubCase):
             self.assertIn('REF="no-such-ref"', fh.read())
 
 
+class CloneSourceFallback(unittest.TestCase):
+    """PR #58 F1: a host-side git that hangs or is missing leaves the pair unchanged, so the
+    script's own clone decides, instead of an exception the callers do not catch."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="revali-src-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_a_hanging_git(self):
+        def hang(*a, **kw):
+            raise ProcTimeout("timed out after 60s: git")
+
+        with mock.patch("revali.runners.run", hang):
+            self.assertEqual(clone_source(self.tmp, "HEAD"), (self.tmp, "HEAD"))
+
+    def test_a_missing_git(self):
+        def missing(name):
+            raise ExeNotFound("executable not found on PATH: %s" % name)
+
+        with mock.patch("revali.runners.resolve", missing):
+            self.assertEqual(clone_source(self.tmp, "HEAD"), (self.tmp, "HEAD"))
+
+
 class SshNames(SshCase):
     """AC-1, AC-3 on the ssh runner: `my repo` and `my_repo` reduce to one remote name."""
 
@@ -339,6 +370,18 @@ class SshDropped(SshCase):
             self.repo, head, [("setup", "true"), ("test", "true")], {}, logs, "validate-r1"
         )
         self.assertTrue(report.ok)
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_results_that_show_the_script_ended_add_nothing(self):  # PR #58 F2
+        # a clone row: the script wrote it and exited before the connection went away
+        self.drop_after(99)
+        logs = os.path.join(self.tmp, "logs-clone")
+        with self.assertRaises(RunnerError) as ctx:
+            SshRunner(plat()).run(
+                self.repo, "0" * 40, [("test", "true")], {}, logs, "validate-r1", key="0123abcd"
+            )
+        self.assertIn("clone/checkout failed", str(ctx.exception))
+        self.assertNotIn("may still be running", str(ctx.exception))
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_another_exit_code_adds_nothing(self):

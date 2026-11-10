@@ -46,6 +46,10 @@ class RunnerError(Exception):
     pass
 
 
+class SessionEndedEarly(RunnerError):
+    """The results stop before the session's own end: it was stopped from outside."""
+
+
 def _pause(seconds: float) -> None:
     """The wait before a wsl retry; its own name so a test can replace it without also
     catching the sleeps `subprocess` makes while it waits for a child."""
@@ -127,7 +131,8 @@ class Runner:
         checkout's sandbox_key: the wsl and ssh runners clone under
         <sandbox_dir>/<repo>/<scope>-<key>/<label>, so worktrees of one repository, checkouts
         that share a directory name and branches that share a directory name run side by
-        side; without a key <repo>/<scope>/<label>, without both <repo>/<label>."""
+        side; without a key <repo>/<scope>/<label>, without a scope <repo>/<label>
+        (a key without a scope is ignored)."""
         raise NotImplementedError
 
 
@@ -151,17 +156,20 @@ def clone_source(repo_root: str, ref: str, log: Logger = None) -> Tuple[str, str
     worktree was added on Windows (`/mnt/e/<tree>/E:/...`), while the common directory holds
     every ref and object. A clone of it has the primary tree's HEAD, so `ref` is resolved here,
     on the host, to the commit it names in `repo_root`. When either cannot be resolved (no such
-    directory, no such commit) the pair comes back unchanged and the script's clone or checkout
-    fails as it always did, with its log and its cleanup."""
+    directory, no such commit, git missing or hanging) the pair comes back unchanged and the
+    script's clone or checkout fails as it always did, with its log and its cleanup."""
     if not os.path.isdir(repo_root):
         return repo_root, ref
-    git = resolve("git")
-    common = run(git + ["rev-parse", "--git-common-dir"], cwd=repo_root, timeout=SHORT_MARGIN_S)
-    sha = run(
-        git + ["rev-parse", "--verify", "--quiet", "%s^{commit}" % ref],
-        cwd=repo_root,
-        timeout=SHORT_MARGIN_S,
-    )
+    try:
+        git = resolve("git")
+        common = run(git + ["rev-parse", "--git-common-dir"], cwd=repo_root, timeout=SHORT_MARGIN_S)
+        sha = run(
+            git + ["rev-parse", "--verify", "--quiet", "%s^{commit}" % ref],
+            cwd=repo_root,
+            timeout=SHORT_MARGIN_S,
+        )
+    except (ProcTimeout, ExeNotFound):
+        return repo_root, ref
     if not common.ok or not common.stdout.strip() or not sha.ok or not sha.stdout.strip():
         return repo_root, ref
     source = os.path.normpath(os.path.join(repo_root, common.stdout.strip()))
@@ -516,7 +524,7 @@ def report_from_results(
     if not report.steps and expected:
         # a row is written when its step finishes, so no row means the session ended before
         # or while running the first step, or the script could not write its results at all
-        raise RunnerError(
+        raise SessionEndedEarly(
             "the sandbox session ended before `%s` finished (no result for it, nor for any "
             "step); usually %s, but a script that cannot write under its logs directory ends "
             "the same way. Nothing was checked; see %s and %s"
@@ -531,7 +539,7 @@ def report_from_results(
     if done < len(expected) and report.steps[-1].ok:
         # the rows stop after a passing step: the session was stopped from outside during or
         # before the next step, and what did not finish must not read as passed
-        raise RunnerError(
+        raise SessionEndedEarly(
             "the sandbox session ended before `%s` finished (no result for it; the last result "
             "is `%s` passing); %s. Nothing after `%s` was checked; see %s"
             % (
@@ -836,7 +844,10 @@ class SshRunner(Runner):
                 )
             return report_from_results(logs_dir, label, steps, log)
         except RunnerError as exc:
-            if res is not None and res.returncode == SSH_CONNECTION_LOST:
+            # only when nothing shows the script reached its own end: no results came back, or
+            # they stop early (a clone row or rows after a failure mean it had exited)
+            cut_short = isinstance(exc, SessionEndedEarly) or not os.path.isfile(results_path)
+            if res is not None and res.returncode == SSH_CONNECTION_LOST and cut_short:
                 raise RunnerError(
                     "%s. The ssh connection to %s went away (exit %d), so the script may still "
                     "be running on %s until its steps time out (%d min each)"
