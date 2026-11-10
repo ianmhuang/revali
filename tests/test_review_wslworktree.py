@@ -145,6 +145,16 @@ class FromALinkedWorktree(RepoCase):
         # the worktree is ahead; a session of the primary tree must not pick that commit up
         self.assertEqual(self.head_seen(self.repo, "HEAD", "feature__mul"), self.primary_head)
 
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_a_host_git_that_cannot_be_run_leaves_the_session_to_the_script(self):
+        # round 1 F1: resolving the clone source on the host is a help, not a requirement; with
+        # no usable git there the script clones the checkout itself, which the primary tree and
+        # a sha still allow, instead of the run ending in an error that is not a sandbox error
+        os.environ["REVALI_GIT_CMD"] = _quote(os.path.join(self.tmp, "no-such-git"))
+        self.assertEqual(
+            self.head_seen(self.repo, self.primary_head, "feature__mul"), self.primary_head
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
