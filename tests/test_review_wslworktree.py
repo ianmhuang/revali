@@ -8,16 +8,20 @@ written here. The stand-in's bash reads host paths, so by itself it cannot show 
 the wrapper therefore gives the sandbox the view WSL has: while the sandbox script runs, the
 worktree's `.git` file names a git directory that does not resolve, and it is put back when
 the script ends. Everything the runner does on the host before and after sees the real file.
+
+Also here, from the review rounds: a host git that cannot be run leaves the clone to the script
+and says so in the session's log, and a wsl that cannot be run is a RunnerError.
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
 import unittest
 
 from revali.config import PlatformCfg
-from revali.runners import WslRunner
+from revali.runners import RunnerError, WslRunner
 from tests.helpers import FAKE_BIN, RepoCase, _quote, git
 from tests.test_ssh_runner import HAVE_BASH
 
@@ -94,12 +98,8 @@ class FromALinkedWorktree(RepoCase):
     def sandbox_cannot_resolve_the_worktree(self):
         os.environ["WTSIM_DOTGIT"] = os.path.join(self.wt, ".git")
 
-    def head_seen(self, repo_root, ref, scope):
-        """Run one session of `ref`; the commit its step found checked out."""
-        self.count += 1
-        logs = os.path.join(self.tmp, "wt-logs-%d" % self.count)
-        marker = os.path.join(logs, "head.txt")
-        runner = WslRunner(
+    def runner_(self):
+        return WslRunner(
             PlatformCfg(
                 runner="wsl",
                 distro="Ubuntu",
@@ -107,13 +107,20 @@ class FromALinkedWorktree(RepoCase):
                 sandbox_dir=bash_form(self.sand),
             )
         )
-        report = runner.run(
+
+    def head_seen(self, repo_root, ref, scope, log=None):
+        """Run one session of `ref`; the commit its step found checked out."""
+        self.count += 1
+        logs = os.path.join(self.tmp, "wt-logs-%d" % self.count)
+        marker = os.path.join(logs, "head.txt")
+        report = self.runner_().run(
             repo_root,
             ref,
             [("test", 'git rev-parse HEAD > "%s"' % bash_form(marker))],
             {},
             logs,
             LABEL,
+            log,
             scope=scope,
         )
         self.assertTrue(report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in report.steps])
@@ -154,6 +161,31 @@ class FromALinkedWorktree(RepoCase):
         self.assertEqual(
             self.head_seen(self.repo, self.primary_head, "feature__mul"), self.primary_head
         )
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_a_session_left_to_the_script_says_so_in_its_log(self):
+        # round 2 F5: from a linked worktree such a session fails inside WSL, and the log is
+        # where the reader learns that the host could not name the clone source
+        not_resolved = r"(?i)clone source.*not resolved"
+        lines = []
+        self.head_seen(self.repo, "HEAD", "feature__mul", lines.append)
+        self.assertEqual([ln for ln in lines if re.search(not_resolved, ln)], [], lines)
+        os.environ["REVALI_GIT_CMD"] = _quote(os.path.join(self.tmp, "no-such-git"))
+        lines = []
+        self.head_seen(self.repo, self.primary_head, "feature__mul", lines.append)
+        said = [ln for ln in lines if re.search(not_resolved, ln)]
+        self.assertEqual(len(said), 1, lines)
+
+    def test_a_wsl_that_cannot_be_run_is_a_sandbox_error(self):
+        # round 2 follow-up: the callers turn a RunnerError into "sandbox failed"; any other
+        # exception from the first wsl call (the path translation) would end the run unhandled
+        os.environ["REVALI_WSL_CMD"] = _quote(os.path.join(self.tmp, "no-such-wsl"))
+        logs = os.path.join(self.tmp, "wt-logs-nowsl")
+        with self.assertRaises(RunnerError) as cm:
+            self.runner_().run(
+                self.repo, self.primary_head, [("test", "true")], {}, logs, LABEL, scope="x"
+            )
+        self.assertIn("no-such-wsl", str(cm.exception))  # names what could not be run
 
 
 if __name__ == "__main__":

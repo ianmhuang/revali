@@ -1,13 +1,16 @@
 """Review tests for fix/sandbox-key-collision, AC-7: on the ssh runner, when the ssh call that
-runs the sandbox script ends with exit 255 (the connection went away) and the session is a
-sandbox error, the message adds that the script may still be running on the host until its
-steps time out. A session that is not a sandbox error, another exit code, and a host that was
-never reached (the script never started) get no such sentence.
+runs the sandbox script ends with exit 255 (the connection went away) and no results came back
+or they stop early (no row, rows ending after a passing step, a row cut off while being
+written), the message adds that the script may still be running on the host until its steps
+time out. Results that show the script ended by itself (a clone row, a failing step's row, a
+complete session), another exit code, and a host that was never reached (the script never
+started) get no such sentence.
 
 The real SshRunner runs against the repository's stand-ins for ssh and scp, wrapped by two
 stubs written here. The ssh wrapper lets the script run, then plays the dropped connection:
-it keeps the first rows of the results file on the host, exits with the planned code and, when
-asked, leaves the host unreachable for every later ssh and scp call.
+it keeps the first rows of the results file on the host, appends the start of a row when
+asked, exits with the planned code and, when asked, leaves the host unreachable for every
+later ssh and scp call.
 """
 
 import json
@@ -21,8 +24,9 @@ from tests.test_ssh_runner import HAVE_BASH, SshCase, plat
 
 LABEL = "validate-r1"
 
-# The plan is {"exit": code, "keep": rows kept (absent: all), "stay_gone": bool}; an empty plan
-# lets every call through untouched.
+# The plan is {"exit": code, "keep": rows kept (absent: all), "partial": text written after the
+# kept rows (a row cut off mid-write), "stay_gone": bool}; an empty plan lets every call through
+# untouched.
 SSH_WRAP = r"""import json
 import os
 import sys
@@ -41,15 +45,19 @@ def main(argv):
         plan = json.load(fh)
     if "exit" not in plan or not argv or not argv[-1].startswith("bash "):
         return code
-    if plan.get("keep") is not None:
+    keep, partial = plan.get("keep"), plan.get("partial", "")
+    if keep is not None or partial:
         for root, _dirs, files in os.walk(os.environ["REVALI_FAKE_REMOTE"]):
             for name in files:
                 if name.endswith(".results"):
                     path = os.path.join(root, name)
                     with open(path, "r", encoding="utf-8", newline="") as fh:
                         rows = [line for line in fh if line.strip()]
+                    if keep is not None:
+                        rows = rows[: int(keep)]
                     with open(path, "w", encoding="utf-8", newline="") as fh:
-                        fh.writelines(rows[: int(plan["keep"])])
+                        fh.writelines(rows)
+                        fh.write(partial)
     if plan.get("stay_gone"):
         with open(os.environ["SSHDROP_GONE"], "w", encoding="utf-8", newline="") as fh:
             fh.write("gone\n")
@@ -106,14 +114,20 @@ class DroppedConnection(SshCase):
         with open(os.environ["SSHDROP_PLAN"], "w", encoding="utf-8", newline="") as fh:
             json.dump(plan, fh)
 
-    def session(self, steps=None):
+    def session(self, steps=None, ref=None):
         return SshRunner(plat()).run(
-            self.repo, self.head, steps or self.steps, {}, self.logs, LABEL, scope="feature__mul"
+            self.repo,
+            ref or self.head,
+            steps or self.steps,
+            {},
+            self.logs,
+            LABEL,
+            scope="feature__mul",
         )
 
-    def refused(self):
+    def refused(self, ref=None):
         with self.assertRaises(RunnerError) as cm:
-            self.session()
+            self.session(ref=ref)
         return str(cm.exception)
 
     def assert_says_the_script_may_still_run(self, text):
@@ -142,6 +156,14 @@ class DroppedConnection(SshCase):
         self.assert_says_the_script_may_still_run(text)
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_a_row_cut_off_while_being_written(self):
+        # `setup` arrived whole, `test` only as far as its name: the script was mid-write
+        self.plan(exit=255, keep=1, partial="test\t")
+        text = self.refused()
+        self.assertRegex(text, r"(?i)not a complete result")  # the sandbox error itself
+        self.assert_says_the_script_may_still_run(text)
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_the_logs_cannot_be_fetched_because_the_host_stays_away(self):
         # what a dropped connection usually looks like: the copy back fails as well
         self.plan(exit=255, stay_gone=True)
@@ -165,10 +187,25 @@ class DroppedConnection(SshCase):
         self.assertEqual(report.failed.returncode, 3)
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_a_clone_row_shows_the_script_ended_by_itself(self):
+        # no such commit: the script writes its clone row and exits before the connection goes
+        self.plan(exit=255)
+        text = self.refused(ref="0" * 40)
+        self.assertRegex(text, r"(?i)clone")
+        self.assert_says_nothing_about_a_running_script(text)
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_another_exit_code_adds_nothing(self):
         self.plan(exit=1, keep=1)
         text = self.refused()
         self.assertRegex(text, r"`test`")
+        self.assert_says_nothing_about_a_running_script(text)
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_a_cut_off_row_with_another_exit_code_adds_nothing(self):
+        self.plan(exit=1, keep=1, partial="test\t")
+        text = self.refused()
+        self.assertRegex(text, r"(?i)not a complete result")
         self.assert_says_nothing_about_a_running_script(text)
 
     def test_a_host_that_was_never_reached_adds_nothing(self):
