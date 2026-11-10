@@ -186,6 +186,17 @@ class NoLock(HistoryCase):
         self.user_home('[paths]\nwrite_retry_s = "slow"\n')
         self.assertEqual(history_retry_s(), float(load_defaults()["paths"]["write_retry_s"]))
 
+    def test_a_window_that_never_ends_is_the_default(self):
+        # PR #61 round 2 follow-up: `nan` never compares past a deadline, `inf` never comes
+        from revali.config import load_defaults
+        from revali.state import history_retry_s
+
+        default = float(load_defaults()["paths"]["write_retry_s"])
+        for value in ("nan", "inf", "-1.0"):
+            with self.subTest(value=value):
+                self.user_home("[paths]\nwrite_retry_s = %s\n" % value)
+                self.assertEqual(history_retry_s(), default)
+
     def test_uncontended_append_does_not_look_up_the_window(self):
         with mock.patch("revali.state.history_retry_s", return_value=0.3) as window:
             self.assertEqual(append_history(self.path, {"n": 1}), "")

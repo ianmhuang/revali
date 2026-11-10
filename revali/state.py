@@ -2,6 +2,7 @@
 
 import errno
 import json
+import math
 import os
 import re
 import tempfile
@@ -499,7 +500,9 @@ def history_retry_s() -> float:
     except (ConfigError, OSError):
         return default
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
+        value = float(value)
+        if math.isfinite(value) and value >= 0:  # `nan` or `inf` in TOML would never expire
+            return value
     return default
 
 
