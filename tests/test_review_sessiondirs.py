@@ -199,6 +199,8 @@ class Orphan(SessionCase):
         self.assertRegex(text, r"(?i)may still be running")
         self.assert_names_the_directories(text, self.own_name())
         self.assertEqual(self.remote_leftovers(), [])
+        # a script still running can make them again, so the advice is there in this case too
+        self.assertRegex(text, r"(?i)\bdelete\b[^.]{0,80}\bonce\b[^.]{0,40}\bended\b")
 
 
 if __name__ == "__main__":

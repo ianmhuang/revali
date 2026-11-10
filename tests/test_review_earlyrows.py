@@ -119,7 +119,8 @@ class BrokenRowsOverSsh(SshCase):
 class ScriptLog(RowsCase):
     """AC-6."""
 
-    EARLY = ("", "setup\t0\t0\n")  # no row at all; the rows stop after a passing step
+    # no row at all; the rows stop after a passing step (a cut-off last row has its own test)
+    EARLY = ("", "setup\t0\t0\n")
 
     def test_any_text_is_named_and_quoted_and_an_empty_file_adds_nothing(self):
         for rows in self.EARLY:
@@ -165,6 +166,27 @@ class ScriptLog(RowsCase):
                 self.assertIn(self.script_log, no_string)
                 self.assertIn("Killed", no_string)
                 self.assertNotIn("max_procs", no_string)
+
+    def test_a_cut_off_last_row_names_the_script_log_too(self):
+        # the third way a session ends early: its last row stops while being written
+        rows = "setup\t0\t0\ntest\t"
+        plain = self.refused(rows)
+        self.assertIsInstance(plain, SessionEndedEarly)
+        self.assertNotIn(self.script_log, str(plain))
+        self.assertEqual(str(self.refused(rows, "")), str(plain))
+        self.assertEqual(str(self.refused(rows, "\n  \n")), str(plain))
+        exc = self.refused(rows, "\nKilled by signal 9\nlater trouble\n", 300)
+        self.assertIsInstance(exc, SessionEndedEarly)
+        text = str(exc)
+        self.assertTrue(text.startswith(str(plain)), text)
+        self.assertIn(self.script_log, text)
+        self.assertIn("Killed by signal 9", text)
+        self.assertNotIn("later trouble", text)
+        self.assertNotIn("max_procs", text)
+        both = str(self.refused(rows, FORK_FAIL + "\n", 300))
+        self.assertIn(FORK_FAIL, both)
+        self.assertRegex(both, r"max_procs = 300\b")
+        self.assertNotIn("max_procs", str(self.refused(rows, FORK_FAIL + "\n", 0)))
 
     def test_a_fork_string_on_a_later_line_still_names_max_procs(self):
         # the quote is the first line; the strings are looked for in the whole file
