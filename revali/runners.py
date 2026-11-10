@@ -35,6 +35,8 @@ BUNDLE_TIMEOUT_S = 300
 # what `timeout(1)` returns when a step overruns; the sandbox script and the fake runner
 # both mark that exit as a timeout
 TIMEOUT_EXIT = 124
+# what bash, Python and Node print when fork / clone fails with EAGAIN (RLIMIT_NPROC reached)
+FORK_ERRORS = ("Resource temporarily unavailable", "can't start new thread", "EAGAIN")
 # appended to a wsl failure that matched [validate.<platform>] wsl_transient_errors
 SHUTDOWN_HINT = (
     "the WSL service did not answer; `wsl --shutdown` restarts WSL, which stops every running "
@@ -362,8 +364,11 @@ LABEL="__LABEL__"
 REF="__REF__"
 SCOPE="__SCOPE__"
 STEP_TIMEOUT=__TIMEOUT__
+MAX_PROCS=__MAX_PROCS__
 RES="$LOGS/$LABEL.results"
 : > "$RES"
+# from here on the script's own errors (a fork it could not make) go where revali reads them
+exec 2>"$LOGS/$LABEL-script.log"
 cleanup() {
     rm -rf "$SB"
     rmdir "$(dirname "$SB")" 2>/dev/null
@@ -378,12 +383,20 @@ if ! (cd "$SB/repo" && git checkout -q --detach "$REF") >> "$LOGS/$LABEL-clone.l
     printf "clone\t1\t0\n" >> "$RES"; cleanup; exit 0
 fi
 if [ -d "$EXTRA" ]; then cp -r "$EXTRA/." "$SB/repo/"; fi
-ulimit -u 512 -f 4000000 2>/dev/null
+# one ulimit per option: bash skips the options after one it cannot set (a host hard limit)
+ulimit -f 4000000 2>/dev/null
+__PROC_LIMIT__
+hint_limit() {
+    # the result row is written first: this needs a process, and the user may still have none
+    grep -q __FORK_PATTERNS__ "$1" 2>/dev/null || return 0
+    printf "\nrevali: this log shows a failed attempt to start a process or thread (or another EAGAIN). If the process limit caused it: max_procs = %s counts every process and thread of this user in this WSL distro or on this ssh host, other sandboxes and the user's own programs included; raise [validate.<platform>] max_procs, or set it to 0 for no limit.\n" "$MAX_PROCS" >> "$1"
+}
 run_step() {
-    local name="$1" rc to
-    (cd "$SB/repo" && timeout "${STEP_TIMEOUT}s" bash "$CMDS/$LABEL-$name.cmd") > "$LOGS/$LABEL-$name.log" 2>&1
+    local name="$1" rc to log="$LOGS/$LABEL-$1.log"
+    (cd "$SB/repo" && timeout "${STEP_TIMEOUT}s" bash "$CMDS/$LABEL-$name.cmd") > "$log" 2>&1
     rc=$?; to=0; if [ "$rc" -eq __TIMEOUT_EXIT__ ]; then to=1; fi
     printf "%s\t%s\t%s\n" "$name" "$rc" "$to" >> "$RES"
+    if [ "$rc" -ne 0 ] && [ "$to" -eq 0 ] && [ "$MAX_PROCS" -gt 0 ]; then hint_limit "$log"; fi
     [ "$rc" -eq 0 ]
 }
 __STEPS__
@@ -430,10 +443,14 @@ def render_script(
     timeout_s: int,
     cmds: str = "",
     scope: str = "",
+    max_procs: int = 0,
 ) -> str:
     """The sandbox script with its placeholders filled; `source` is what git clone reads
     (a repository path or a bundle file); `logs`, `extra` and `cmds` (where the per-step
-    .cmd files sit, default `logs`) are paths on the executing side."""
+    .cmd files sit, default `logs`) are paths on the executing side. `max_procs` > 0 sets
+    `ulimit -u` (the runners pass [validate.<platform>] max_procs; 0 sets none)."""
+    max_procs = max(0, int(max_procs))
+    proc_limit = "ulimit -u %d 2>/dev/null" % max_procs if max_procs else ""
     step_lines = []
     for name, cmd in steps:
         if cmd.strip():
@@ -451,6 +468,9 @@ def render_script(
         ("__TIMEOUT__", str(int(timeout_s))),
         ("__STEPS__", "\n".join(step_lines)),
         ("__SCOPE__", scope),
+        ("__MAX_PROCS__", str(max_procs)),
+        ("__PROC_LIMIT__", proc_limit),
+        ("__FORK_PATTERNS__", " ".join("-e %s" % shlex.quote(p) for p in FORK_ERRORS)),
     ):
         text = text.replace(key, value)
     return text
@@ -460,7 +480,7 @@ def stage_inputs(
     logs_dir: str, label: str, steps: List[Tuple[str, str]], extra_files: Dict[str, str]
 ) -> Tuple[List[Tuple[str, str]], str]:
     """Write one .cmd file per non-empty step and the extra files under logs_dir; drop a
-    stale results file. Returns (non-empty steps, extra dir)."""
+    stale results file and script log. Returns (non-empty steps, extra dir)."""
     os.makedirs(logs_dir, exist_ok=True)
     steps = [(n, c) for n, c in steps if c.strip()]
     extra_dir = os.path.join(logs_dir, "%s-extra" % label)
@@ -470,9 +490,11 @@ def stage_inputs(
         write_text(os.path.join(extra_dir, rel), content)
     for name, cmd in steps:
         write_text(os.path.join(logs_dir, "%s-%s.cmd" % (label, name)), cmd + "\n")
-    results_path = os.path.join(logs_dir, "%s.results" % label)
-    if os.path.isfile(results_path):
-        os.remove(results_path)
+    for stale in ("%s.results" % label, "%s-script.log" % label):
+        # an earlier session's file must not be read as this session's
+        path = os.path.join(logs_dir, stale)
+        if os.path.isfile(path):
+            os.remove(path)
     return steps, extra_dir
 
 
@@ -482,10 +504,39 @@ OUTSIDE_STOP = (
 )
 
 
+def script_fork_hint(logs_dir: str, label: str, max_procs: int) -> str:
+    """A sentence for a session that ended early when the script's own stderr
+    (<label>-script.log) shows it could not fork while a process limit was set; else ""."""
+    if max_procs <= 0:
+        return ""
+    path = os.path.join(logs_dir, "%s-script.log" % label)
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return ""
+    if not any(p in text for p in FORK_ERRORS):
+        return ""
+    # a substring match, so it names a likely cause, not a certain one
+    return (
+        ". The sandbox script's own errors (%s) show a failed attempt to start a process; if "
+        "the process limit caused it, max_procs = %d counts every process and thread of this "
+        "user in the WSL distro or on the ssh host, other sandboxes and the user's own programs "
+        "included: raise [validate.<platform>] max_procs, or set it to 0 for no limit"
+        % (path, max_procs)
+    )
+
+
 def report_from_results(
-    logs_dir: str, label: str, steps: List[Tuple[str, str]], log: Logger = None
+    logs_dir: str,
+    label: str,
+    steps: List[Tuple[str, str]],
+    log: Logger = None,
+    max_procs: int = 0,
 ) -> RunReport:
-    """Build the report from <label>.results and the per-step logs the script wrote."""
+    """Build the report from <label>.results and the per-step logs the script wrote.
+    `max_procs` is the process limit the script ran under, for the message when it ended
+    early because it could not fork."""
     results_path = os.path.join(logs_dir, "%s.results" % label)
     rows = []
     if os.path.isfile(results_path):
@@ -540,12 +591,13 @@ def report_from_results(
         raise SessionEndedEarly(
             "the sandbox session ended before `%s` finished (no result for it, nor for any "
             "step); usually %s, but a script that cannot write under its logs directory ends "
-            "the same way. Nothing was checked; see %s and %s"
+            "the same way. Nothing was checked; see %s and %s%s"
             % (
                 expected[0],
                 OUTSIDE_STOP,
                 os.path.join(logs_dir, "%s-%s.log" % (label, expected[0])),
                 os.path.join(logs_dir, "%s-clone.log" % label),
+                script_fork_hint(logs_dir, label, max_procs),
             )
         )
     done = len(report.steps)
@@ -554,13 +606,14 @@ def report_from_results(
         # before the next step, and what did not finish must not read as passed
         raise SessionEndedEarly(
             "the sandbox session ended before `%s` finished (no result for it; the last result "
-            "is `%s` passing); %s. Nothing after `%s` was checked; see %s"
+            "is `%s` passing); %s. Nothing after `%s` was checked; see %s%s"
             % (
                 expected[done],
                 report.steps[-1].name,
                 OUTSIDE_STOP,
                 report.steps[-1].name,
                 results_path,
+                script_fork_hint(logs_dir, label, max_procs),
             )
         )
     return report
@@ -647,7 +700,16 @@ class WslRunner(Runner):
         scope: str = "",
     ) -> str:
         return render_script(
-            host_repo_wsl, logs_wsl, extra_wsl, ref, steps, label, sandbox, timeout_s, scope=scope
+            host_repo_wsl,
+            logs_wsl,
+            extra_wsl,
+            ref,
+            steps,
+            label,
+            sandbox,
+            timeout_s,
+            scope=scope,
+            max_procs=self.plat.max_procs,
         )
 
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope="", key=""):
@@ -691,7 +753,7 @@ class WslRunner(Runner):
                 "wsl could not start the sandbox script (exit %d): %s"
                 % (res.returncode, self.failure(res, 400))
             )
-        return report_from_results(logs_dir, label, steps, log)
+        return report_from_results(logs_dir, label, steps, log, max_procs=self.plat.max_procs)
 
 
 class SshRunner(Runner):
@@ -761,6 +823,7 @@ class SshRunner(Runner):
             timeout_s,
             cmds=os.path.dirname(bundle),
             scope=scope,
+            max_procs=self.plat.max_procs,
         )
 
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope="", key=""):
@@ -858,7 +921,7 @@ class SshRunner(Runner):
                     "the sandbox script on %s could not start (exit %d): %s"
                     % (self.host, res.returncode, res.text.strip()[:400])
                 )
-            return report_from_results(logs_dir, label, steps, log)
+            return report_from_results(logs_dir, label, steps, log, max_procs=self.plat.max_procs)
         except RunnerError as exc:
             # only when nothing shows the script reached its own end: no results came back, or
             # they stop early or mid-row (SessionEndedEarly); a clone row or a failing step's

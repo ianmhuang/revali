@@ -93,6 +93,10 @@ wsl_retry_wait_s = 30                # pause before each retry; the service time
                                      # 2026-11-09 came in windows of about 30 s
 wsl_transient_errors = ["Wsl/Service/WSAETIMEDOUT"]  # substrings of wsl.exe's output (NULs
                                      # removed: it prints its own errors in UTF-16)
+max_procs = 4096                     # wsl and ssh: `ulimit -u` in the sandbox, 0 = no limit. It counts
+                                     # every process and thread of the user in the distro or on the
+                                     # host, other sandboxes included; the four projects measured on
+                                     # 2026-11-10 peaked at 36-116 each
 sandbox_dir = "~/.revali/sandbox"   # inside the WSL distro or on the ssh host; ~ is that user's home
 setup = ""
 build = ""

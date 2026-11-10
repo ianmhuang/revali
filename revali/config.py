@@ -106,6 +106,7 @@ class PlatformCfg:
     wsl_retries: int = 0  # wsl only: retries of a call that failed with a transient error
     wsl_retry_wait_s: float = 0.0
     wsl_transient_errors: List[str] = field(default_factory=list)
+    max_procs: int = 0  # wsl and ssh: `ulimit -u` in the sandbox (a per-user total); 0 = none
     sandbox_dir: str = ""
     setup: str = ""
     build: str = ""
@@ -419,6 +420,8 @@ def parse_project_config(
             problems.append("validate.%s.wsl_retries must be >= 0" % name)
         if plat.wsl_retry_wait_s < 0:
             problems.append("validate.%s.wsl_retry_wait_s must be >= 0" % name)
+        if plat.max_procs < 0:
+            problems.append("validate.%s.max_procs must be >= 0 (0 = no limit)" % name)
         if not all(isinstance(p, str) and p.strip() for p in plat.wsl_transient_errors):
             problems.append("validate.%s.wsl_transient_errors must list non-empty strings" % name)
     for role, cfg in (("review", review), ("validate", validate)):
