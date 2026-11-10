@@ -158,8 +158,17 @@ def clone_source(repo_root: str, ref: str, log: Logger = None) -> Tuple[str, str
     on the host, to the commit it names in `repo_root`. When either cannot be resolved (no such
     directory, no such commit, git missing or hanging) the pair comes back unchanged and the
     script's clone or checkout fails as it always did, with its log and its cleanup."""
-    if not os.path.isdir(repo_root):
+
+    def unchanged(reason: str) -> Tuple[str, str]:
+        if log:
+            log(
+                "[sandbox] clone source not resolved on the host (%s); cloning %s as is, ref %s"
+                % (reason, repo_root, ref)
+            )
         return repo_root, ref
+
+    if not os.path.isdir(repo_root):
+        return unchanged("no such directory")
     try:
         git = resolve("git")
         common = run(git + ["rev-parse", "--git-common-dir"], cwd=repo_root, timeout=SHORT_MARGIN_S)
@@ -168,10 +177,14 @@ def clone_source(repo_root: str, ref: str, log: Logger = None) -> Tuple[str, str
             cwd=repo_root,
             timeout=SHORT_MARGIN_S,
         )
-    except (ProcTimeout, ExeNotFound):
-        return repo_root, ref
-    if not common.ok or not common.stdout.strip() or not sha.ok or not sha.stdout.strip():
-        return repo_root, ref
+    except (ProcTimeout, ExeNotFound) as exc:
+        return unchanged(str(exc))
+    if not common.ok or not common.stdout.strip():
+        return unchanged(
+            "git rev-parse --git-common-dir: %s" % (common.text.strip()[:200] or "no output")
+        )
+    if not sha.ok or not sha.stdout.strip():
+        return unchanged("no commit `%s`" % ref)
     source = os.path.normpath(os.path.join(repo_root, common.stdout.strip()))
     if log:
         log("[sandbox] clone source %s, %s = %s" % (source, ref, sha.stdout.strip()[:10]))
@@ -486,7 +499,7 @@ def report_from_results(
         if len(row) != 3 or not re.fullmatch(r"-?\d+", row[1]) or row[2] not in ("0", "1"):
             # the script writes name, exit code and timeout flag in one printf; anything else
             # was cut off while being written and must not read as a pass
-            raise RunnerError(
+            raise SessionEndedEarly(
                 "row %d of the sandbox results is not a complete result (`%s`); the session "
                 "was stopped while writing it; see %s" % (index + 1, "\\t".join(row), results_path)
             )
@@ -613,7 +626,10 @@ class WslRunner(Runner):
         return res
 
     def wslpath(self, host_path: str, log: Logger = None) -> str:
-        res = self._wsl(["wslpath", "-a", host_path], timeout=60, log=log)
+        try:
+            res = self._wsl(["wslpath", "-a", host_path], timeout=60, log=log)
+        except (ProcTimeout, ExeNotFound) as exc:
+            raise RunnerError("wslpath failed for %s: %s" % (host_path, exc)) from exc
         if not res.ok or not res.stdout.strip():
             raise RunnerError("wslpath failed for %s: %s" % (host_path, self.failure(res)))
         return res.stdout.strip()
@@ -845,7 +861,8 @@ class SshRunner(Runner):
             return report_from_results(logs_dir, label, steps, log)
         except RunnerError as exc:
             # only when nothing shows the script reached its own end: no results came back, or
-            # they stop early (a clone row or rows after a failure mean it had exited)
+            # they stop early or mid-row (SessionEndedEarly); a clone row or a failing step's
+            # row means it had exited, and rows that do not match the steps prove neither
             cut_short = isinstance(exc, SessionEndedEarly) or not os.path.isfile(results_path)
             if res is not None and res.returncode == SSH_CONNECTION_LOST and cut_short:
                 raise RunnerError(

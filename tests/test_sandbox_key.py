@@ -16,9 +16,11 @@ from revali.config import PlatformCfg
 from revali.procs import ExeNotFound, ProcTimeout
 from revali.runners import (
     RunnerError,
+    SessionEndedEarly,
     SshRunner,
     WslRunner,
     clone_source,
+    report_from_results,
     sandbox_key,
     sandbox_scope,
 )
@@ -272,6 +274,52 @@ class CloneSourceFallback(unittest.TestCase):
 
         with mock.patch("revali.runners.resolve", missing):
             self.assertEqual(clone_source(self.tmp, "HEAD"), (self.tmp, "HEAD"))
+
+    def test_every_fallback_says_so_in_the_log(self):  # PR #58 F5
+        def hang(*a, **kw):
+            raise ProcTimeout("timed out after 60s: git")
+
+        lines = []
+        clone_source(os.path.join(self.tmp, "missing"), "HEAD", lines.append)
+        with mock.patch("revali.runners.run", hang):
+            clone_source(self.tmp, "HEAD", lines.append)
+        clone_source(self.tmp, "HEAD", lines.append)  # not a repository
+        self.assertEqual(len(lines), 3, lines)
+        for line in lines:
+            self.assertIn("clone source not resolved on the host", line)
+        self.assertIn("no such directory", lines[0])
+        self.assertIn("timed out", lines[1])
+
+    def test_a_hanging_wslpath_is_a_runner_error(self):  # PR #58 round 2 follow-up
+        def hang(*a, **kw):
+            raise ProcTimeout("timed out after 60s: wsl")
+
+        r = WslRunner(PlatformCfg(runner="wsl", distro="Ubuntu"))
+        with mock.patch.object(WslRunner, "_wsl", hang):
+            with self.assertRaises(RunnerError) as ctx:
+                r.wslpath("E:/x")
+        self.assertIn("wslpath failed", str(ctx.exception))
+
+
+class CutOffRow(unittest.TestCase):
+    """PR #58 F3: a row cut off while being written means the session did not end by itself."""
+
+    def test_is_a_session_that_ended_early(self):
+        logs = tempfile.mkdtemp(prefix="revali-cut-")
+        self.addCleanup(shutil.rmtree, logs, True)
+        with open(os.path.join(logs, "v.results"), "w", encoding="utf-8", newline="") as fh:
+            fh.write("setup\t0\t0\ntest\t")
+        with self.assertRaises(SessionEndedEarly):
+            report_from_results(logs, "v", [("setup", "s"), ("test", "t")])
+
+    def test_a_mismatched_row_is_not(self):
+        logs = tempfile.mkdtemp(prefix="revali-cut-")
+        self.addCleanup(shutil.rmtree, logs, True)
+        with open(os.path.join(logs, "v.results"), "w", encoding="utf-8", newline="") as fh:
+            fh.write("deploy\t0\t0\n")
+        with self.assertRaises(RunnerError) as ctx:
+            report_from_results(logs, "v", [("setup", "s"), ("test", "t")])
+        self.assertNotIsInstance(ctx.exception, SessionEndedEarly)
 
 
 class SshNames(SshCase):

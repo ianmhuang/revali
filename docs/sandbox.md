@@ -75,7 +75,8 @@ records it as unavailable. Rows that do not match the session's steps (an
 unknown, repeated or out-of-order step) and a row cut off while being
 written are refused the same way. On the ssh runner, when the ssh call
 that runs the script ends with exit 255 (the connection went away) and
-no results came back or they stop early, the message adds that the script may
+no results came back or they stop early (a row cut off while being
+written included), the message adds that the script may
 still be running on the host until its steps time out: revali has no
 connection left to stop it.
 `runner = "local"` uses a git worktree on the host with no isolation.
