@@ -151,6 +151,15 @@ class ReuseAnOpenIssue(IssueCase):
         self.assertEqual([argv[2] for argv in comments], ["17"])  # AC-4
         self.assertIn("commented on issue #17", out)
         self.assertEqual(self.gh("issue", "create"), [])
+        # the comment names the merged PR; revali did not open #17, so it does not say it did
+        bodies = [
+            call.get("body", "")
+            for call in self.fake_calls("gh")
+            if call["argv"][:2] == ["issue", "comment"]
+        ]
+        self.assertEqual(len(bodies), 1)
+        self.assertIn("Fixed by PR #7", bodies[0])
+        self.assertNotIn("when the issue was opened", bodies[0])
         self.assertEqual(self.issues_opened(), 0)  # AC-8: a reused issue is not an opened one
 
 
@@ -212,6 +221,48 @@ class ListingFails(IssueCase):
 
     def test_output_is_json_but_not_a_list(self):
         self.opened_as_before({"issue_list_raw": json.dumps(listed(17, ONE_TITLE))})
+
+
+class EntriesThatAreNotIssues(IssueCase):
+    """A JSON list whose entries are not all usable issues: an entry without a positive
+    integer number or without a text title is not an open issue with the title (AC-5), and
+    it neither stops the listing nor the run (AC-6: the validation result stands)."""
+
+    BROKEN = [
+        "text",
+        None,
+        5,
+        {"title": ONE_TITLE, "url": URL % 1},  # no number
+        {"number": "n/a", "title": ONE_TITLE, "url": URL % 2},
+        {"number": True, "title": ONE_TITLE, "url": URL % 3},
+        {"number": 0, "title": ONE_TITLE, "url": URL % 4},
+        {"number": [17], "title": ONE_TITLE, "url": URL % 5},
+        {"number": 19, "title": [ONE_TITLE], "url": URL % 19},
+        {"number": 21, "url": URL % 21},  # no title
+    ]
+
+    def test_they_are_passed_over_and_the_issue_behind_them_is_reused(self):
+        self.scenario({"issue_list_raw": json.dumps(self.BROKEN + [listed(17, ONE_TITLE)])})
+        out = self.fail_round()
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.gh("issue", "create"), [])
+        self.assertIn("issue: #17 (already open) %s" % (URL % 17), out)
+        state = State.load(self.rdir())
+        self.assertEqual([i["number"] for i in state.issues], [17])
+        self.assertIs(state.issues[0].get("found"), True)
+
+    def test_alone_they_match_nothing_and_the_issue_is_opened(self):
+        self.scenario({"issue_list_raw": json.dumps(self.BROKEN)})
+        out = self.fail_round()
+        self.assertNotIn("Traceback", out)
+        creates = self.gh("issue", "create")
+        self.assertEqual(len(creates), 1, out)
+        self.assertEqual(creates[0][creates[0].index("--title") + 1], ONE_TITLE)
+        self.assertIn("issue: #41 %s" % (URL % 41), out)
+        state = State.load(self.rdir())
+        self.assertEqual([i["number"] for i in state.issues], [41])
+        self.assertFalse(state.issues[0].get("found", False))
+        self.assertEqual(state.validations[0]["result"], "FAIL")  # the verdict stands
 
 
 class OpenedCount(IssueCase):
