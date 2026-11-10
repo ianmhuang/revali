@@ -1,6 +1,8 @@
 """Per-branch state under <state_dir>/<branch>/: state.json, lock, logs, history append."""
 
+import errno
 import json
+import math
 import os
 import re
 import tempfile
@@ -444,14 +446,120 @@ class RunLog:
 # ---- history ----------------------------------------------------------------
 
 
-def append_history(path: str, record: dict) -> None:
+# what a non-blocking lock attempt raises when another process holds the lock: flock gives
+# EWOULDBLOCK (BlockingIOError), msvcrt.locking EACCES (or EDEADLOCK); anything else is a lock
+# that will never be had on this file
+_LOCK_HELD_ERRNOS = {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK, errno.EDEADLK}
+
+
+def _try_os_lock(fd: int) -> Optional[bool]:
+    """One non-blocking attempt at an exclusive OS lock on `fd` (byte 0 on Windows, the whole
+    file elsewhere); the OS drops it when the process ends. True: locked; False: another
+    process holds it; None: locking failed for another reason (no lock support, say)."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError as exc:
+        if isinstance(exc, BlockingIOError) or exc.errno in _LOCK_HELD_ERRNOS:
+            return False
+        return None
+
+
+def _os_unlock(fd: int) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass  # closing the descriptor releases it as well
+
+
+def history_retry_s() -> float:
+    """The history lock's window: `[paths] write_retry_s` of the user layer
+    (`~/.revali/config.toml`) over defaults.toml. The history file is a user-level file, so no
+    repository's config applies to it; a user file that does not load gives the default."""
+    from revali.config import ConfigError, load_defaults, load_user_config
+
+    default = float(load_defaults()["paths"]["write_retry_s"])
+    try:
+        value = load_user_config().sections.get("paths", {}).get("write_retry_s")
+    except (ConfigError, OSError):
+        return default
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        value = float(value)
+        if math.isfinite(value) and value >= 0:  # `nan` or `inf` in TOML would never expire
+            return value
+    return default
+
+
+def _lock_history(lock: str, retry_s: Optional[float]) -> "typing.Tuple[Optional[int], str]":
+    """(descriptor of `lock` with the OS lock held, "") or (None, why the row goes unlocked):
+    the lock file cannot be opened, locking is not supported there, or another process holds
+    the lock past the window (`retry_s`, else `history_retry_s()`, looked up on the first
+    refusal only)."""
+    try:
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as exc:
+        return None, "the lock file %s cannot be opened (%s)" % (lock, exc)
+    deadline = None
+    pause = 0.01
+    while True:
+        got = _try_os_lock(fd)
+        if got:
+            return fd, ""
+        if got is None:
+            os.close(fd)
+            return None, "the lock file %s cannot be locked here" % lock
+        if deadline is None:
+            try:
+                window = history_retry_s() if retry_s is None else retry_s
+            except Exception as exc:  # a broken defaults.toml: the row still goes in
+                os.close(fd)
+                return None, "no lock window (%s)" % exc
+            deadline = time.monotonic() + window
+        left = deadline - time.monotonic()
+        if left <= 0:
+            os.close(fd)
+            return None, "another process held %s for longer than %ss" % (lock, window)
+        time.sleep(min(pause, left))  # the last attempt lands on the deadline, not past it
+        pause = min(pause * 2, 0.1)
+
+
+def append_history(path: str, record: dict, retry_s: Optional[float] = None) -> str:
+    """Append one row. Writers in other processes (other projects, other worktrees) are kept
+    apart by an OS lock on `<path>.lock`, never on the history file, so readers are not
+    blocked: without it Windows lost up to a quarter of the rows of 4 concurrent writers.
+    A lock that cannot be had is skipped rather than the row dropped; the return value says
+    why ("" when the row was written under the lock)."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     record = dict(record)
     record.setdefault("at", now_iso())
     record.setdefault("revali_version", VERSION)
     record.setdefault("prompt_version", PROMPT_VERSION)
-    with open(path, "a", encoding="utf-8", newline="\n") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    fd, unlocked = _lock_history(path + ".lock", retry_s)
+    try:
+        with open(path, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(line)
+    finally:
+        if fd is not None:
+            _os_unlock(fd)
+            os.close(fd)
+    return unlocked
 
 
 def read_history(path: str) -> List[dict]:

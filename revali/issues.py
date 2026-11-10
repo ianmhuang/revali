@@ -30,7 +30,8 @@ FIX_REF = re.compile(r"\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s+#(\d+)\b", 
 class IssueRef:
     number: int
     url: str
-    existing: bool = False  # opened by an earlier validation of this branch
+    existing: bool = False  # opened by an earlier validation of this branch, or an open issue
+    # with the same title found outside the branch (`found` in the state)
     also: Tuple[int, ...] = ()  # older issues that, with this one, name the failing tests
 
     def line(self) -> str:

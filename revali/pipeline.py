@@ -315,7 +315,7 @@ def _record_history(state: State, exit_code: int, log: Optional[RunLog] = None) 
     except ConfigError:
         path = history_path(None)
     try:
-        append_history(
+        unlocked = append_history(
             path,
             {
                 "repo": state.repo,
@@ -335,7 +335,9 @@ def _record_history(state: State, exit_code: int, log: Optional[RunLog] = None) 
             },
         )
     except OSError:
-        pass
+        return
+    if unlocked and log is not None:
+        log.detail("history row appended without its lock: %s" % unlocked)
 
 
 def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
