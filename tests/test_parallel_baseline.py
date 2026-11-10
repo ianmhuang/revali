@@ -337,6 +337,22 @@ class CancellableRun(unittest.TestCase):
         time.sleep(4)
         self.assertFalse(os.path.exists(late))
 
+    def test_a_descendant_holding_the_pipes_does_not_hang_the_cancel(self):
+        # PR #55 round 1 F2: the grandchild inherits stdout / stderr and outlives a child
+        # that is stopped (POSIX stops the child only); the cancel must still return. The
+        # grandchild ends on its own after 40 s, so nothing is killed by pid here.
+        script = (
+            "import subprocess, sys, time\n"
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(40)'])\n"
+            "time.sleep(60)\n"
+        )
+        cancel = threading.Event()
+        threading.Timer(1.0, cancel.set).start()
+        t0 = time.monotonic()
+        with self.assertRaises(procs.ProcCancelled):
+            procs.run([sys.executable, "-c", script], cancel=cancel)
+        self.assertLess(time.monotonic() - t0, 25)
+
     def test_without_cancel_output_and_input_are_as_before(self):
         cancel = threading.Event()
         res = procs.run(

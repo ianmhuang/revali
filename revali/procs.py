@@ -129,8 +129,12 @@ def run(
     return res
 
 
-CANCEL_POLL_S = 0.25  # how often a cancellable command looks at its event
-CANCEL_GRACE_S = 5.0  # how long a stopped command gets to exit before it is killed outright
+# Fixed margins of the cancel mechanism, not tunables (like the margins in runners.py): how
+# often a cancellable command looks at its event, how long a stopped command gets to exit
+# before it is killed outright, and how long revali then waits for its pipes to close.
+CANCEL_POLL_S = 0.25
+CANCEL_GRACE_S = 5.0
+CANCEL_REAP_S = 5.0
 
 
 def _run_cancellable(cmd, cwd, timeout, env, input_text, log, cancel, start) -> Result:
@@ -188,16 +192,34 @@ def _run_cancellable(cmd, cwd, timeout, env, input_text, log, cancel, start) -> 
 
 
 def _stop(proc: subprocess.Popen) -> None:
-    """End a child started by _run_cancellable and reap it."""
+    """End a child started by _run_cancellable and reap it, in bounded time: a descendant that
+    outlives the child may hold its stdout / stderr open, so the pipes are given up rather
+    than read to their end."""
     if os.name == "nt":
         kill_tree(proc.pid)
     else:
         proc.terminate()
     try:
         proc.communicate(timeout=CANCEL_GRACE_S)
+        return
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()
+        pass
+    proc.kill()
+    try:
+        proc.communicate(timeout=CANCEL_REAP_S)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    for pipe in (proc.stdin, proc.stdout, proc.stderr):
+        if pipe is not None:
+            try:
+                pipe.close()
+            except OSError:
+                pass
+    try:
+        proc.wait(timeout=CANCEL_REAP_S)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def run_retry(cmd: list, retries: int = 1, wait: float = 3.0, **kw) -> Result:

@@ -136,6 +136,9 @@ class TheTimingLine(TimingCase):
         preflight time includes the baseline it ran, the review time the smoke run, and the
         validate time the validation run; a stage clock started after its session would be
         shorter than the session itself."""
+        # PR #55 round 1 F1: preflight holds the baseline only with it inside preflight; with
+        # parallel_baseline, the default, it overlaps the pr and review stages instead
+        self.sequential_baseline()
         self.use_real_local_runner()
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])

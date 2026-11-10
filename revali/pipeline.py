@@ -495,8 +495,10 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         job.finish()  # never leave a sandbox session running behind the run
         try:
             job.record(state, rdir)  # a passed baseline is kept whatever ended the run
-        except OSError:
-            pass  # the state file is busy; the run's own outcome matters more than this sha
+        except OSError as exc:
+            # the state file is busy; the run's own outcome matters more than this sha, and
+            # validation reruns the suite without it
+            log.detail("the passed baseline could not be recorded: %s" % exc)
 
 
 def _baseline_note(stop: Stop) -> str:
