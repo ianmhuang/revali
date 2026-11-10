@@ -421,8 +421,19 @@ def report_from_results(
             rows = [line.rstrip("\n").split("\t") for line in fh if line.strip()]
     report = RunReport(label=label)
     cmds = dict(steps)
-    for row in rows:
+    # the script runs the steps that have a command, in order, and stops at the first failure
+    expected = [name for name, cmd in steps if cmd.strip()]
+    for index, row in enumerate(rows):
         name, rc, to = (row + ["0", "0"])[:3]
+        if name != "clone" and (
+            index >= len(expected)
+            or name != expected[index]
+            or (report.steps and not report.steps[-1].ok)
+        ):
+            raise RunnerError(
+                "the sandbox results do not match the session's steps (row %d is `%s`, the "
+                "steps were %s); see %s" % (index + 1, name, ", ".join(expected), results_path)
+            )
         log_path = os.path.join(logs_dir, "%s-%s.log" % (label, name))
         text = ""
         if os.path.isfile(log_path):
@@ -448,6 +459,16 @@ def report_from_results(
         raise RunnerError(
             "the sandbox script produced no results; see %s"
             % os.path.join(logs_dir, "%s-clone.log" % label)
+        )
+    done = len(report.steps)
+    if done < len(expected) and report.steps[-1].ok:
+        # the rows stop after a passing step: the session was stopped from outside before the
+        # rest ran, and what did not run must not read as passed
+        raise RunnerError(
+            "the sandbox session ended before `%s` ran (the last result is `%s` passing); it "
+            "was stopped from outside: `wsl --shutdown`, the WSL VM or the ssh connection went "
+            "away, or the script was killed for memory. Nothing after `%s` was checked; see %s"
+            % (expected[done], report.steps[-1].name, report.steps[-1].name, results_path)
         )
     return report
 
