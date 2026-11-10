@@ -3,8 +3,9 @@
 a note with git's error and the merge still succeeds (AC-2), the first error before the second
 when the two differ (round 1, F1); a pull that times out or cannot be started is a failed
 attempt, not a traceback (AC-3), and neither is a git that cannot be started elsewhere in the
-follow-up (round 1, F2); a failed checkout of the base means no pull and a note of its own
-(AC-4); worktree mode runs what it ran before (AC-5).
+follow-up (round 1, F2), where a failure in the branch step alone leaves no note to pull
+(round 2, F3); a failed checkout of the base means no pull and a note of its own (AC-4);
+worktree mode runs what it ran before (AC-5).
 
 Black-box through `revali merge` with the fake gh, which merges nothing and leaves the tree on
 feature/mul, so revali checks out main itself and then pulls. Non-zero exits come from a
@@ -286,19 +287,20 @@ class PullThatCannotRun(PullCase):
 
 
 class FollowUpThatCannotRun(PullCase):
-    """AC-3's "instead of a traceback", for the git calls around the pull (round 1, F2)."""
+    """AC-3's "instead of a traceback", for the git calls around the pull (round 1, F2), each
+    step saying what it could not do (round 2, F3)."""
 
-    def test_git_gone_after_the_pr_merged_is_a_note_and_the_merge_is_recorded(self):
-        rdir = self.ready()
+    def merged_with_git_gone(self, rdir, gone):
+        """`revali merge` where, once gh has merged the PR, the git calls `gone(argv)` picks
+        cannot be started; every other command runs for real. Returns the output of a merge
+        that ended as one (exit 0, MERGED, history row, archived)."""
         real = subprocess.run
         merged = []
         refused = []
 
         def fake(cmd, *args, **kw):
             argv = [str(c) for c in cmd] if isinstance(cmd, (list, tuple)) else [str(cmd)]
-            # once gh has merged the PR, git cannot be started to ask which branch the tree
-            # is on: the first thing the local follow-up does
-            if merged and "--abbrev-ref" in argv:
+            if merged and gone(argv):
                 refused.append(argv)
                 raise FileNotFoundError(2, "No such file or directory", argv[0])
             res = real(cmd, *args, **kw)
@@ -306,13 +308,39 @@ class FollowUpThatCannotRun(PullCase):
                 merged.append(argv)
             return res
 
-        patcher = mock.patch("subprocess.run", side_effect=fake)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        out = self.merged(rdir)  # no exception, exit 0, MERGED, history row, archived
+        with mock.patch("subprocess.run", side_effect=fake):
+            out = self.merged(rdir)
         self.assertTrue(merged and refused, out)
-        line = self.line_with(out, "note:")
+        return out
+
+    def test_git_gone_after_the_pr_merged_is_a_note_and_the_merge_is_recorded(self):
+        rdir = self.ready()
+        # git cannot be started to ask which branch the tree is on: the first thing the local
+        # follow-up does, and what the branch step asks again
+        out = self.merged_with_git_gone(rdir, lambda argv: "--abbrev-ref" in argv)
+        line = self.line_with(out, "note:")  # one note, for the tree that was not updated
         self.assertIn("No such file or directory", line)
+        self.assertIn("pull", line)
+        # the branch step reports for itself, in the `local:` line
+        local = self.line_with(out, "local:")
+        self.assertIn("feature/mul", local)
+        self.assertIn("No such file or directory", local)
+
+    def test_only_the_branch_step_cannot_run_and_no_note_sends_the_user_to_pull(self):
+        tip = self.advance_origin()
+        rdir = self.ready()
+        # the checkout and the pull work; git cannot be started to look the merged branch up
+        out = self.merged_with_git_gone(
+            rdir, lambda argv: "--verify" in argv and "feature/mul" in argv
+        )
+        # the tree is on the base and up to date, so nothing tells the user to pull
+        self.assertNotIn("note:", out)
+        self.assertEqual(gitops.current_branch(self.repo), "main")
+        self.assertEqual(self.local_main(), tip)
+        # and the output still says what became of the local branch: it could not be told
+        local = self.line_with(out, "local:")
+        self.assertIn("feature/mul", local)
+        self.assertIn("No such file or directory", local)
 
 
 class FailedCheckout(PullCase):
