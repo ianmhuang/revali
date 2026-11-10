@@ -290,9 +290,30 @@ class FollowUpStops(PrimaryTreeCase):
 
         with mock.patch("revali.gitops.current_branch", side_effect=current_branch):
             out = self.merged()
-        line = self.line_with(out, "note: the local follow-up stopped")
+        line = self.line_with(out, "note: updating the tree stopped")
         self.assertIn("index broken", line)
         self.assertIn("run `git pull` there", line)
+        # PR #64 F3: the branch step says what it could not do, in the `local:` line
+        local = self.line_with(out, "local:")
+        self.assertIn("could not tell whether branch feature/mul was removed", local)
+        self.assertEqual(len(self.notes(out)), 1, out)
+
+    def test_only_the_branch_step_fails(self):
+        # PR #64 F3: the tree was updated, so no note sends the user to pull again
+        real = gitops.rev_parse
+
+        def rev_parse(ref, cwd):
+            if self.gh_calls("pr", "merge") and ref == "feature/mul":
+                raise gitops.GitError("git rev-parse failed: index broken")
+            return real(ref, cwd)
+
+        with mock.patch("revali.gitops.rev_parse", side_effect=rev_parse):
+            out = self.merged()
+        self.assertEqual(self.notes(out), [], out)
+        local = self.line_with(out, "local:")
+        self.assertIn("could not tell whether branch feature/mul was removed", local)
+        self.assertIn("index broken", local)
+        self.assertEqual(gitops.current_branch(self.repo), "main")
 
     def test_a_spawn_error_other_than_a_missing_file(self):
         GitStandIn(self, "pull", [PermissionError(13, "Access is denied")] * 2)
@@ -312,6 +333,7 @@ class Docs(unittest.TestCase):
         self.assertNotIn("which is not retried", text)
         self.assertIn("and from the primary tree its `git pull --prune`", text)
         self.assertIn("both errors when the two attempts differ", text)
+        self.assertIn("could not tell whether the branch was removed", text)
 
     def test_side_effects_md(self):
         text = self.read("side-effects.md")

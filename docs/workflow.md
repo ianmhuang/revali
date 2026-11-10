@@ -65,7 +65,9 @@ gh did not and runs `git pull --prune`, once more after a short pause when
 it fails. A checkout or pull that still fails is a `note:` line with git's
 error (both errors when the two attempts differ, since a first attempt that
 stopped in a conflict makes the second fail for that reason) and what to
-run; the PR is merged, so the exit code stays 0.
+run; when git cannot be run at all there, the note says updating the tree
+stopped, and the `local:` line says it could not tell whether the branch
+was removed. The PR is merged, so the exit code stays 0.
 
 ## Running
 
