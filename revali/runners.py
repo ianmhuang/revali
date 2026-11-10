@@ -410,6 +410,12 @@ def stage_inputs(
     return steps, extra_dir
 
 
+OUTSIDE_STOP = (
+    "it was stopped from outside: `wsl --shutdown`, the WSL VM or the ssh connection went "
+    "away, or the script was killed for memory"
+)
+
+
 def report_from_results(
     logs_dir: str, label: str, steps: List[Tuple[str, str]], log: Logger = None
 ) -> RunReport:
@@ -421,8 +427,26 @@ def report_from_results(
             rows = [line.rstrip("\n").split("\t") for line in fh if line.strip()]
     report = RunReport(label=label)
     cmds = dict(steps)
-    for row in rows:
-        name, rc, to = (row + ["0", "0"])[:3]
+    # the script runs the steps that have a command, in order, and stops at the first failure
+    expected = [name for name, cmd in steps if cmd.strip()]
+    for index, row in enumerate(rows):
+        if len(row) != 3 or not re.fullmatch(r"-?\d+", row[1]) or row[2] not in ("0", "1"):
+            # the script writes name, exit code and timeout flag in one printf; anything else
+            # was cut off while being written and must not read as a pass
+            raise RunnerError(
+                "row %d of the sandbox results is not a complete result (`%s`); the session "
+                "was stopped while writing it; see %s" % (index + 1, "\\t".join(row), results_path)
+            )
+        name, rc, to = row
+        if name != "clone" and (
+            index >= len(expected)
+            or name != expected[index]
+            or (report.steps and not report.steps[-1].ok)
+        ):
+            raise RunnerError(
+                "the sandbox results do not match the session's steps (row %d is `%s`, the "
+                "steps were %s); see %s" % (index + 1, name, ", ".join(expected), results_path)
+            )
         log_path = os.path.join(logs_dir, "%s-%s.log" % (label, name))
         text = ""
         if os.path.isfile(log_path):
@@ -444,10 +468,34 @@ def report_from_results(
                 "[%s] %s -> exit %d%s"
                 % (label, name, step.returncode, ", timed out" if step.timed_out else "")
             )
-    if not report.steps and steps:
+    if not report.steps and expected:
+        # a row is written when its step finishes, so no row means the session ended before
+        # or while running the first step, or the script could not write its results at all
         raise RunnerError(
-            "the sandbox script produced no results; see %s"
-            % os.path.join(logs_dir, "%s-clone.log" % label)
+            "the sandbox session ended before `%s` finished (no result for it, nor for any "
+            "step); usually %s, but a script that cannot write under its logs directory ends "
+            "the same way. Nothing was checked; see %s and %s"
+            % (
+                expected[0],
+                OUTSIDE_STOP,
+                os.path.join(logs_dir, "%s-%s.log" % (label, expected[0])),
+                os.path.join(logs_dir, "%s-clone.log" % label),
+            )
+        )
+    done = len(report.steps)
+    if done < len(expected) and report.steps[-1].ok:
+        # the rows stop after a passing step: the session was stopped from outside during or
+        # before the next step, and what did not finish must not read as passed
+        raise RunnerError(
+            "the sandbox session ended before `%s` finished (no result for it; the last result "
+            "is `%s` passing); %s. Nothing after `%s` was checked; see %s"
+            % (
+                expected[done],
+                report.steps[-1].name,
+                OUTSIDE_STOP,
+                report.steps[-1].name,
+                results_path,
+            )
         )
     return report
 
