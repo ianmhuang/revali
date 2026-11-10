@@ -85,9 +85,17 @@ def dirty_paths(cwd: str, ignore_prefixes: Tuple[str, ...]) -> List[str]:
     return out
 
 
-def fetch(remote: str, ref: str, cwd: str, log: Logger = None) -> bool:
-    res = _git(["fetch", "--quiet", remote, ref], cwd, log, timeout=300)
-    return res.ok
+def fetch(remote: str, ref: str, cwd: str, log: Logger = None, prune: bool = False) -> Result:
+    """`git fetch`, tried once more when it fails: worktrees of one repository share
+    refs/remotes/, and of two fetches of the same ref at the same moment one fails ("cannot
+    lock ref", "incorrect old value provided") after the other has moved the ref."""
+    args = ["fetch", "--quiet"] + (["--prune"] if prune else []) + [remote, ref]
+    return run_retry(resolve("git") + args, retries=1, cwd=cwd, log=log, timeout=300)
+
+
+def first_line(text: str) -> str:
+    """The first non-empty line of a command's output, stripped; for one-line notes."""
+    return next((ln.strip() for ln in (text or "").splitlines() if ln.strip()), "")
 
 
 def has_remote(remote: str, cwd: str) -> bool:
@@ -378,6 +386,25 @@ def gh_labels(cwd: str, log: Logger = None) -> List[str]:
     except ValueError as exc:
         raise GhError("gh label list returned invalid JSON: %s" % exc) from exc
     return [str(i.get("name", "")) for i in items if isinstance(i, dict)]
+
+
+def gh_open_issues(cwd: str, log: Logger = None, limit: int = 200) -> List[dict]:
+    """The repository's open issues, newest first: {number, title, url}. A plain listing, not
+    `--search`: GitHub's search index lags, so an issue opened a moment ago may be missing."""
+    res = _gh(
+        ["issue", "list", "--state", "open", "--limit", str(limit), "--json", "number,title,url"],
+        cwd,
+        log,
+    )
+    if not res.ok:
+        raise GhError("gh issue list failed: %s" % first_line(res.text))
+    try:
+        items = json.loads(res.stdout or "[]")
+    except ValueError as exc:
+        raise GhError("gh issue list returned invalid JSON: %s" % exc) from exc
+    if not isinstance(items, list):
+        raise GhError("gh issue list returned %s, not a list" % type(items).__name__)
+    return [i for i in items if isinstance(i, dict)]
 
 
 def gh_issue_create(

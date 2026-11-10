@@ -338,12 +338,7 @@ def _worktree_follow_up(root: str, branch: str, base: str, elsewhere: str, log: 
         log.stage(
             "merge", "note: could not delete origin/%s: %s" % (branch, res.text.strip()[:200])
         )
-    res = run(
-        resolve("git") + ["fetch", "--quiet", "--prune", "origin", base],
-        cwd=root,
-        log=log.detail,
-        timeout=300,
-    )
+    res = gitops.fetch("origin", base, root, log.detail, prune=True)
     if not res.ok:
         log.stage("merge", "note: git fetch failed: %s" % res.text.strip()[:200])
     else:

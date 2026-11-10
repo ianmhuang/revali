@@ -218,11 +218,13 @@ def check_base(ctx: Context) -> None:
     root = ctx.repo_root
     ref = ctx.base
     if gitops.has_remote("origin", root):
-        if gitops.fetch("origin", ctx.base, root, ctx.detail):
+        res = gitops.fetch("origin", ctx.base, root, ctx.detail)
+        if res.ok:
             ref = "origin/%s" % ctx.base
         else:
             ctx.notes.append(
-                "could not fetch origin/%s; comparing against local %s" % (ctx.base, ctx.base)
+                "could not fetch origin/%s (tried twice: %s); comparing against local %s"
+                % (ctx.base, gitops.first_line(res.text) or "exit %d" % res.returncode, ctx.base)
             )
     if gitops.rev_parse(ref, root) is None:
         raise Stop(EXIT_ERROR, "base branch '%s' does not exist" % ref)

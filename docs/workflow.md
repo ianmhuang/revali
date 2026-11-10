@@ -83,7 +83,14 @@ review round, `tests: commit` or `tests: archive`: the mode its rounds run
 in, fixed for the branch (`[review] tests` in
 [docs/configuration.md](configuration.md)).
 
-A run goes preflight, PR, review, validate. On the first pass of a branch
+A run goes preflight, PR, review, validate. Preflight runs `git fetch
+origin <base>` and compares the branch against `origin/<base>`; a fetch
+that fails is tried once more after a short pause, since worktrees of one
+repository share `refs/remotes/` and of two fetches of the same ref at the
+same moment one fails after the other has moved the ref (`revali merge`
+retries its fetch of the base the same way). When both attempts fail,
+preflight prints a note with git's error and compares against the local
+`<base>`, which may be behind the remote. On the first pass of a branch
 (no review round yet, not a dry run, not `kind: docs`) preflight ends with
 the baseline: the existing suite on the commit preflight checked, in the
 sandbox. With `[validate] parallel_baseline` (the default) the baseline only

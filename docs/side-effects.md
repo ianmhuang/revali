@@ -100,8 +100,16 @@ stated.
   the diagnosis text and the suggested fix are withheld from the body. The
   body passes the same credential scan as a comment. A second validation
   whose base-introduced failures an issue of this branch already names
-  opens nothing. A failing `gh` call here is a warning in the log; the
-  validation result and exit code stand
+  opens nothing. Before `gh issue create`, `gh issue list --state open
+  --limit 200 --json number,title,url`: when an open issue has exactly
+  that title (another branch or worktree hit the same bug first), it is
+  reused and nothing is opened; the log says it was opened outside this
+  branch, the branch state records it so later validations and `Fixes #n`
+  at merge treat it like one revali opened, and `stats` does not count it
+  as opened. Two runs listing before either has opened its issue still
+  open two. A failing `gh` call here is a warning in the log (a failed
+  listing opens the issue as before); the validation result and exit
+  code stand
 - once `revali merge` has merged the PR, for every such issue that a commit
   in `<base sha>..HEAD` references with `Fixes #n`, `Closes #n` or
   `Resolves #n`: one

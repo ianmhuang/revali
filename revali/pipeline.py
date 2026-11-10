@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION, gitops
 from revali.config import ConfigError, archive_root, history_path, load_user_config, paths_for
+from revali.issues import opened_count
 from revali.preflight import Stop, check_tree_unmoved, dirty_tree_problem, locate, preflight
 from revali.procs import ProcError, kill_tree, pid_alive, python_exe, spawn_detached
 from revali.state import (
@@ -329,7 +330,7 @@ def _record_history(state: State, exit_code: int, log: Optional[RunLog] = None) 
                 "models": state.models_used,
                 "fallback": state.fallback,
                 "pr": state.pr_number,
-                "issues": len(state.issues),
+                "issues": opened_count(state),  # not the open ones reused (found)
                 **timing,
             },
         )
