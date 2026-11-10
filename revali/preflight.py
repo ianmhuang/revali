@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
 
 from revali import EXIT_ACTION, EXIT_ERROR, V1_KINDS, changedoc, gitops
+from revali.build import build
 from revali.config import (
     Config,
     ConfigError,
@@ -324,7 +325,7 @@ def preflight(
     """
     ctx = locate(cwd, base_override, log)
     ctx.dry_run = dry_run
-    ctx.say("repo %s, branch %s" % (ctx.repo_root, ctx.branch))
+    ctx.say("repo %s, branch %s, revali %s" % (ctx.repo_root, ctx.branch, build()))
     if before_tree is not None:
         before_tree(ctx)
     check_tree(ctx, tolerate)

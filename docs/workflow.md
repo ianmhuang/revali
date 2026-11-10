@@ -67,7 +67,13 @@ there.
 `run`, `wait` and `status` print one identity line first,
 `repo: <working tree root>  branch: <branch>`, so several sessions running
 revali in different checkouts can tell their output apart; every message
-that reports a live or dead run carries its pid. On Windows the detached
+that reports a live or dead run carries its pid. Which revali ran is in the
+run's own records: preflight's first line, `repo <root>, branch <branch>,
+revali <build>` (in `logs/revali.log`, and in `logs/run.log` for a detached
+run), the `started revali run` line, and the history row's `revali_build`.
+The build is the version plus `git describe --tags --always --dirty` of the
+checkout revali was loaded from, e.g. `0.3.0 (v0.3.0-27-g4fbdb4e)`, or the
+version alone when that is not a git checkout. On Windows the detached
 run starts every subprocess (git, gh, claude, wsl, the `lint` line and the
 `local` runner's steps) with `CREATE_NO_WINDOW`, so no console windows
 appear while it works. `run` checks the working tree before it detaches:

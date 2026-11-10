@@ -204,18 +204,29 @@ def _checked(path: str, name: str, hint, value):
 def write_retry_s(path: str) -> float:
     """[paths] write_retry_s for the repository that holds `path`: the layered config of the
     repository whose `.git` entry is found walking up from the file (so the user and project
-    files can change it), the defaults.toml value for a file outside any repository. Imported
-    lazily: config does not know state."""
+    files can change it), the defaults.toml value for a file outside any repository or when the
+    configured value is `nan`, `inf` or negative. Imported lazily: config does not know state."""
     from revali.config import load_defaults, paths_for
 
+    default = float(load_defaults()["paths"]["write_retry_s"])
     directory = os.path.dirname(os.path.abspath(path))
     while True:
         if os.path.exists(os.path.join(directory, ".git")):
-            return float(paths_for(directory).write_retry_s)
+            return _usable_window(paths_for(directory).write_retry_s, default)
         parent = os.path.dirname(directory)
         if parent == directory:
-            return float(load_defaults()["paths"]["write_retry_s"])
+            return default
         directory = parent
+
+
+def _usable_window(value, default: float) -> float:
+    """`value` as a retry window in seconds, `default` when it is not a finite number >= 0:
+    `nan` never compares past a deadline and `inf` never comes."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        value = float(value)
+        if math.isfinite(value) and value >= 0:
+            return value
+    return default
 
 
 def _until_permitted(attempt, path: str, retry_s: Optional[float]):
@@ -499,11 +510,7 @@ def history_retry_s() -> float:
         value = load_user_config().sections.get("paths", {}).get("write_retry_s")
     except (ConfigError, OSError):
         return default
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        value = float(value)
-        if math.isfinite(value) and value >= 0:  # `nan` or `inf` in TOML would never expire
-            return value
-    return default
+    return _usable_window(value, default)
 
 
 def _lock_history(lock: str, retry_s: Optional[float]) -> "typing.Tuple[Optional[int], str]":
