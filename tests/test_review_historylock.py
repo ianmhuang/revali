@@ -5,8 +5,10 @@ every (writer, i) once. AC-2: the lock is an OS lock on `<history file>.lock` ne
 history file, taken around the append and released after it; the history file is not locked,
 so a reader is not blocked. AC-3: a holder that died, or a `.lock` file left on disk, does
 not block the next writer. AC-4: a lock held past the window means the row is appended
-without it, not dropped. AC-5: a lock file that cannot be opened means an append as before;
-an error writing the row is still an OSError, which `stop` ignores.
+without it, not dropped; the window is `[paths] write_retry_s` of the user file over
+defaults.toml, and no repository's revali.toml sets it. AC-5: a lock file that cannot be
+opened means an append as before; an error writing the row is still an OSError, which `stop`
+ignores.
 
 The lock is held from outside by a process that takes it the way AC-2 names it
 (`msvcrt.locking` on Windows, `fcntl.flock` elsewhere), not through revali.
@@ -235,19 +237,65 @@ class HeldPastTheWindow(HistoryCase):
         self.assertLess(time.monotonic() - started, 3)
         self.assertEqual(self.values(), [1])
 
-    def test_the_window_defaults_to_write_retry_s(self):
-        configured = float(load_defaults()["paths"]["write_retry_s"])
-        home = os.path.join(self.tmp, "empty home")  # no user file: the shipped default
+    def user_home(self, config_text=None):
+        """A private user directory, with `config_text` as its config.toml when given."""
+        home = os.path.join(self.tmp, "user home")
         os.makedirs(home)
+        if config_text is not None:
+            user_file = os.path.join(home, "config.toml")
+            with open(user_file, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(config_text)
         patcher = mock.patch.dict(os.environ, {"REVALI_HOME": home})
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_the_window_defaults_to_write_retry_s(self):
+        configured = float(load_defaults()["paths"]["write_retry_s"])
+        self.user_home()  # no user file: the shipped default
         self.hold(self.path)
         started = time.monotonic()
         append_history(self.path, {"n": 1})
         took = time.monotonic() - started
         self.assertGreaterEqual(took, configured * 0.9)
         self.assertLess(took, configured + 5)
+        self.assertEqual(self.values(), [1])
+
+    def test_the_user_file_raises_the_window(self):
+        # round 1 F1: `[paths] write_retry_s` of the user file is the window; a value above
+        # the shipped one shows as a wait longer than the default would give
+        configured = float(load_defaults()["paths"]["write_retry_s"])
+        raised = configured + 1.5
+        self.user_home("[paths]\nwrite_retry_s = %s\n" % raised)
+        holder, released = self.hold(self.path)
+        started = time.monotonic()
+        append_history(self.path, {"n": 1})
+        took = time.monotonic() - started
+        self.assertGreaterEqual(took, raised * 0.95)
+        self.assertLess(took, raised + 10)
+        self.assertIsNone(holder.poll())
+        self.assertFalse(os.path.exists(released))
+        self.assertEqual(self.values(), [1])
+
+    def test_the_user_file_lowers_the_window(self):
+        # AC-4: never slower than the window, so a lowered key ends the wait before the
+        # shipped default would
+        configured = float(load_defaults()["paths"]["write_retry_s"])
+        lowered = configured / 4
+        self.user_home("[paths]\nwrite_retry_s = %s\n" % lowered)
+        self.hold(self.path)
+        started = time.monotonic()
+        append_history(self.path, {"n": 1})
+        took = time.monotonic() - started
+        self.assertGreaterEqual(took, lowered * 0.9)
+        self.assertLess(took, configured * 0.9)
+        self.assertEqual(self.values(), [1])
+
+    def test_a_user_file_that_does_not_load_keeps_the_row(self):
+        self.user_home("[paths\nwrite_retry_s = 0.2\n")  # not TOML
+        self.hold(self.path)
+        started = time.monotonic()
+        append_history(self.path, {"n": 1})
+        self.assertLess(time.monotonic() - started, 30)
         self.assertEqual(self.values(), [1])
 
 
@@ -346,6 +394,25 @@ class ThroughTheCommands(Holders, RepoCase):
         self.assertIsNone(holder.poll())
         self.assertFalse(os.path.exists(released))
         self.assertEqual(self.stages(), ["stopped"])  # AC-4: appended, not dropped
+
+    def test_a_project_file_does_not_set_the_window(self):
+        # round 1 F1: the history file is per user, so the revali.toml of a repository that
+        # happens to hold it has no say; the user file's window applies
+        self.write("revali.toml", self.read("revali.toml") + "\n[paths]\nwrite_retry_s = 120.0\n")
+        user_file = os.path.join(self.home, "config.toml")
+        with open(user_file, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("[paths]\nwrite_retry_s = 0.5\n")
+        history = os.path.join(self.repo, "kept in the checkout", "history.jsonl")
+        os.makedirs(os.path.dirname(history))
+        holder, released = self.hold(history)
+        started = time.monotonic()
+        append_history(history, {"n": 1})
+        took = time.monotonic() - started
+        self.assertGreaterEqual(took, 0.45)
+        self.assertLess(took, 60)  # half the project file's 120 s
+        self.assertIsNone(holder.poll())
+        self.assertFalse(os.path.exists(released))
+        self.assertEqual([row["n"] for row in read_history(history)], [1])
 
     def test_stop_keeps_its_row_when_the_lock_file_cannot_be_opened(self):
         os.makedirs(history_path() + ".lock")
