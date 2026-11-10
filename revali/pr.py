@@ -6,7 +6,7 @@ from typing import Optional
 
 from revali import EXIT_ERROR, changedoc, gitops
 from revali.preflight import Context, Stop, check_tree_unmoved
-from revali.procs import resolve, run, run_retry
+from revali.procs import ProcError, resolve, run, run_retry
 from revali.secretscan import scan_text
 from revali.state import RunLog, State, write_text
 
@@ -73,9 +73,43 @@ def ensure_pr(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> N
         number, url = int(pr.get("number", 0)), pr.get("url", "")
         if log:
             log.stage("pr", "reusing open PR #%d" % number)
+        problem = sync_title(root, number, pr.get("title"), ctx.doc.title, log, "pr")
+        if problem and log:
+            log.stage("pr", "warning: could not update the PR title: %s" % problem)
     state.pr_number = number
     state.pr_url = url
     state.save(rdir)
+
+
+def sync_title(
+    root: str,
+    number: int,
+    current: Optional[str],
+    wanted: str,
+    log: Optional[RunLog],
+    stage: str,
+) -> str:
+    """Give PR `number` the title `wanted` (change.md's) when gh reported a different one. A
+    squash merge takes the PR title as the commit subject, so a stale one would land on the
+    base branch. Returns gh's message when the edit failed, "" otherwise (also when there was
+    nothing to do: equal titles, or no title reported)."""
+    wanted = (wanted or "").strip()
+    if current is None or not wanted or current.strip() == wanted:
+        return ""
+    try:
+        res = run_retry(
+            resolve("gh") + ["pr", "edit", str(number), "--title", wanted],
+            cwd=root,
+            log=_log(log),
+            timeout=120,
+        )
+    except ProcError as exc:  # a hung or missing gh is a failed edit like any other
+        return str(exc)
+    if not res.ok:
+        return res.text.strip()[:200] or "gh exited %d" % res.returncode
+    if log:
+        log.stage(stage, "PR title updated: '%s' -> '%s'" % (current.strip(), wanted))
+    return ""
 
 
 def create_draft(ctx: Context, rdir: str, log: Optional[RunLog]):

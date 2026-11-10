@@ -20,6 +20,11 @@ stated.
   draft PR open; the run still ends with exit 1, "branch is broken before
   review", and no review round. With `parallel_baseline = false` a failing
   baseline stops the run before anything is pushed
+- when a run reuses an open PR whose title differs from change.md's `title`,
+  `gh pr edit <n> --title <title>`, since a squash merge takes the PR title as
+  the commit subject on the base branch; a failure is a warning in the log and
+  the run goes on. A title changed on GitHub by hand is overwritten the same
+  way: change.md is the source
 - runs `[project] format` on the host over the test files the reviewer
   wrote in each attempt, just before the `lint` line below, and only over
   those files (`{files}`); the formatter rewrites them in place, uncommitted.
@@ -104,6 +109,10 @@ stated.
   cause and suggested fix recorded when the issue was opened (the fix text
   withheld on a repository that is not private). Closing the issue is left
   to GitHub's handling of those keywords
+- before `revali merge` waits for CI (next item): `gh pr view <n> --json title`, and
+  `gh pr edit <n> --title <title>` when the title differs from change.md's;
+  when that edit fails nothing is merged (exit 1). A title that cannot be read,
+  or a missing change.md, is a warning and the merge goes on
 - on `revali merge` (human-started, refused unless the last run ended READY
   TO MERGE and HEAD has not moved): waits for CI checks if the PR has any,
   then `gh pr merge --<method> --delete-branch`, which also deletes the

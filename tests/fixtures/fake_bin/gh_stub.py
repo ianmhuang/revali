@@ -21,6 +21,9 @@ DEFAULT = {
     "prs_open": [],
     "prs_all": [],
     "pr_create": {"number": 7, "url": "https://github.example/me/sample/pull/7"},
+    "pr_title": "Add mul to calc",  # the sample change.md title; `pr view` reports it
+    "pr_view_exit": 0,
+    "title_edit_exit": 0,  # `pr edit --title` only; a body edit always succeeds
     "checks": [],
     "merge_exit": 0,
     "comment_exit": 0,
@@ -88,7 +91,10 @@ def main(argv):
         print(sc["pr_create"]["url"])
         return 0
     if argv[:2] == ["pr", "view"]:
-        print(json.dumps(sc["pr_create"]))
+        if int(sc["pr_view_exit"]):
+            print("gh_stub: pr view failed", file=sys.stderr)
+            return int(sc["pr_view_exit"])
+        print(json.dumps(dict(sc["pr_create"], title=sc["pr_title"])))
         return 0
     if argv[:2] == ["pr", "comment"]:
         return int(sc["comment_exit"])
@@ -111,6 +117,9 @@ def main(argv):
         print(json.dumps(checks))
         return 0
     if argv[:2] == ["pr", "edit"]:
+        if "--title" in argv and int(sc["title_edit_exit"]):
+            print("gh_stub: pr edit --title failed", file=sys.stderr)
+            return int(sc["title_edit_exit"])
         return 0
     if argv[:2] == ["pr", "ready"]:
         return 0
