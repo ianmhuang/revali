@@ -8,15 +8,60 @@ way a test needs (a transient failure, a timeout, a failed checkout), the one co
 answered by a stand-in and every other command runs for real."""
 
 import os
+import subprocess
 import unittest
 from unittest import mock
 
 from revali import EXIT_OK, gitops, procs
 from revali.config import history_path
 from revali.procs import ExeNotFound, ProcTimeout, Result
-from revali.state import read_history
-from tests.helpers import ROOT, git, run_cli
-from tests.test_review_mergestop import MergeCase
+from revali.state import State, read_history
+from tests.helpers import ROOT, RepoCase, git, run_cli
+
+
+class MergeCase(RepoCase):
+    """self.repo is the primary tree on feature/mul, main pushed to a bare origin."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ["REVALI_POLL_SECONDS"] = "0.01"
+
+    def ready(self, root):
+        rdir = os.path.join(root, ".revali", "feature__mul")
+        State(
+            repo="owner/repo",
+            branch="feature/mul",
+            base="main",
+            stage="ready_to_merge",
+            message="validation 1 passed",
+            last_exit=EXIT_OK,
+            pr_number=7,
+            head_sha=gitops.rev_parse("HEAD", root),
+            test_files=["tests/test_review_mul.py"],
+        ).save(rdir)
+        git(["push", "-q", "-u", "origin", "feature/mul"], root)
+        return rdir
+
+    def add_worktree(self, branch, name):
+        path = os.path.join(self.tmp, name)
+        git(["worktree", "add", "--quiet", path, branch], self.repo)
+
+        def drop():
+            os.chdir(self.repo)
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", path], cwd=self.repo, capture_output=True
+            )
+
+        self.addCleanup(drop)
+        return path
+
+    def gh_calls(self, *head):
+        return [c["argv"] for c in self.fake_calls("gh") if c["argv"][: len(head)] == list(head)]
+
+    def line_with(self, out, needle):
+        lines = [line for line in out.splitlines() if needle in line]
+        self.assertEqual(len(lines), 1, "expected one line with %r in:\n%s" % (needle, out))
+        return lines[0]
 
 
 def is_git(cmd, sub):
@@ -24,7 +69,7 @@ def is_git(cmd, sub):
 
 
 class GitStandIn:
-    """Wraps `procs.run` (used by `run_retry`) and `merge.run`: records every git command and
+    """Wraps `procs.run` and `merge.run`: records every git command and
     answers the n-th call of one subcommand from `answers` (a Result, or an exception to
     raise); anything else runs for real."""
 
@@ -102,7 +147,8 @@ class PullFails(PrimaryTreeCase):
         out = self.merged(rdir)
         line = self.line_with(out, "note: git pull --prune failed")
         self.assertIn("no-such-origin", line)  # git's own words name the remote
-        self.assertIn("run `git pull` there", line)
+        self.assertIn("run `git pull` again", line)
+        self.assertNotIn("then:", line)  # the same error twice is named once
         self.assertIn(gitops.repo_root(self.repo).replace("\\", "/"), line.replace("\\", "/"))
         self.assertEqual(gitops.current_branch(self.repo), "main")
 
@@ -176,33 +222,82 @@ class WorktreeModeUnchanged(MergeCase):
         self.line_with(out, "worktree: detached at the merged main")
 
 
-class RunRetry(unittest.TestCase):
-    """`procs.run_retry(retry_errors=True)`, which the pull goes through."""
+class FirstErrorKept(PrimaryTreeCase):
+    """PR #64 F1: the first attempt's error is the cause when the second fails for another
+    reason."""
 
-    def test_an_error_then_success(self):
-        ok = Result(cmd=["x"], returncode=0, stdout="", stderr="", duration=0.0)
-        calls = []
+    def test_both_errors_when_they_differ(self):
+        GitStandIn(
+            self,
+            "pull",
+            [
+                failed("pull", "CONFLICT (content): Merge conflict in src/calc.py"),
+                failed("pull", "error: Pulling is not possible because you have unmerged files."),
+            ],
+        )
+        out = self.merged()
+        line = self.line_with(out, "note: git pull --prune failed")
+        first = line.index("CONFLICT (content)")
+        self.assertLess(first, line.index("then: error: Pulling is not possible"))
+        self.assertIn("`git status`", line)
 
-        def fake(cmd, **_kw):
-            calls.append(cmd)
-            if len(calls) == 1:
-                raise ProcTimeout("t")
-            return ok
+    def test_a_real_conflict(self):
+        # local main has a commit origin's main conflicts with; `pull.rebase false` makes the
+        # pull merge (newer git refuses divergent branches without a setting, before merging)
+        rdir = self.ready(self.repo)
+        other = os.path.join(self.tmp, "second clone")
+        git(["clone", "-q", "-b", "main", self.info["remote"], other], self.tmp)
+        for where, text in ((other, "origin\n"), (self.repo, "local\n")):
+            if where == self.repo:
+                git(["checkout", "-q", "main"], where)
+            with open(os.path.join(where, "clash.txt"), "w", encoding="utf-8") as fh:
+                fh.write(text)
+            git(["add", "clash.txt"], where)
+            git(
+                [
+                    "-c",
+                    "user.email=t@example.invalid",
+                    "-c",
+                    "user.name=T",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "clash",
+                ],
+                where,
+            )
+        git(["push", "-q", "origin", "main"], other)
+        git(["checkout", "-q", "feature/mul"], self.repo)
+        git(["config", "pull.rebase", "false"], self.repo)
+        out = self.merged(rdir)
+        line = self.line_with(out, "note: git pull --prune failed")
+        self.assertIn("then:", line)  # the second attempt failed for another reason
 
-        with mock.patch("revali.procs.run", side_effect=fake):
-            self.assertIs(procs.run_retry(["x"], wait=0, retry_errors=True), ok)
-        self.assertEqual(len(calls), 2)
 
-    def test_the_last_error_is_raised(self):
-        with mock.patch("revali.procs.run", side_effect=[ProcTimeout("a"), ExeNotFound("b")]):
-            with self.assertRaises(ExeNotFound):
-                procs.run_retry(["x"], wait=0, retry_errors=True)
+class FollowUpStops(PrimaryTreeCase):
+    """PR #64 F2: git failing anywhere in the primary tree's follow-up is a note, not a
+    traceback after the PR merged."""
 
-    def test_without_retry_errors_an_error_is_raised_at_once(self):
-        with mock.patch("revali.procs.run", side_effect=[ProcTimeout("a")]) as run:
-            with self.assertRaises(ProcTimeout):
-                procs.run_retry(["x"], wait=0)
-        self.assertEqual(run.call_count, 1)
+    def test_current_branch_fails_after_the_merge(self):
+        real = gitops.current_branch
+
+        def current_branch(cwd):
+            if self.gh_calls("pr", "merge"):
+                raise gitops.GitError("git rev-parse --abbrev-ref HEAD failed: index broken")
+            return real(cwd)
+
+        with mock.patch("revali.gitops.current_branch", side_effect=current_branch):
+            out = self.merged()
+        line = self.line_with(out, "note: the local follow-up stopped")
+        self.assertIn("index broken", line)
+        self.assertIn("run `git pull` there", line)
+
+    def test_a_spawn_error_other_than_a_missing_file(self):
+        GitStandIn(self, "pull", [PermissionError(13, "Access is denied")] * 2)
+        out = self.merged()
+        self.assertIn("Access is denied", self.line_with(out, "note: git pull --prune failed"))
 
 
 class Docs(unittest.TestCase):
@@ -215,7 +310,8 @@ class Docs(unittest.TestCase):
     def test_workflow_md(self):
         text = self.read("workflow.md")
         self.assertNotIn("which is not retried", text)
-        self.assertIn("from the primary tree its `git pull --prune` is retried the same way", text)
+        self.assertIn("and from the primary tree its `git pull --prune`", text)
+        self.assertIn("both errors when the two attempts differ", text)
 
     def test_side_effects_md(self):
         text = self.read("side-effects.md")

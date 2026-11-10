@@ -10,7 +10,7 @@ from typing import List, Optional
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops, issues
 from revali.config import ConfigError, load_project_config
 from revali.preflight import Stop
-from revali.procs import ProcError, resolve, run, run_retry
+from revali.procs import RETRY_WAIT_S, ProcError, resolve, run, run_retry
 from revali.state import RunLog, State, safe_branch
 
 POLL_ENV = "REVALI_POLL_SECONDS"
@@ -225,13 +225,24 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
         _worktree_follow_up(root, branch, base, elsewhere, log)
         return EXIT_OK
     # Local follow-up: gh usually switches to the base branch and deletes the local branch itself.
-    note = _update_base(root, base, log)
-    removed, why = _delete_local_branch(root, branch, log, when=gitops.current_branch(root) == base)
-    log.stage(
-        "merge",
-        "local: on %s, branch %s %s%s"
-        % (gitops.current_branch(root), branch, "removed" if removed else "kept", why),
-    )
+    note = ""
+    try:
+        note = _update_base(root, base, log)
+        removed, why = _delete_local_branch(
+            root, branch, log, when=gitops.current_branch(root) == base
+        )
+        log.stage(
+            "merge",
+            "local: on %s, branch %s %s%s"
+            % (gitops.current_branch(root), branch, "removed" if removed else "kept", why),
+        )
+    except (ProcError, gitops.GitError, OSError) as exc:
+        # git itself failing here must not hide that the PR merged (history row, archive)
+        log.stage(
+            "merge",
+            "note: the local follow-up stopped: %s; look at %s with `git status`, check out "
+            "%s and run `git pull` there" % (_one_line(str(exc)), root, base),
+        )
     if note:
         # the PR is merged either way, so this is a note and the exit code stays 0
         log.stage("merge", "note: " + note)
@@ -252,22 +263,32 @@ def _update_base(root: str, base: str, log: RunLog) -> str:
                 "out %s there and run `git pull`"
                 % (base, reason, root, gitops.current_branch(root), base)
             )
-    reason = _git_failure(
-        lambda: run_retry(
-            resolve("git") + ["pull", "--quiet", "--prune"],
-            retries=1,
-            retry_errors=True,
-            cwd=root,
-            log=log.detail,
-            timeout=300,
+
+    def pull():
+        return run(
+            resolve("git") + ["pull", "--quiet", "--prune"], cwd=root, log=log.detail, timeout=300
         )
-    )
-    if not reason:
+
+    first = _git_failure(pull)
+    if not first:
         return ""
+    time.sleep(RETRY_WAIT_S)
+    second = _git_failure(pull)
+    if not second:
+        return ""
+    # a first attempt that failed past its fetch (a conflict in the merge or rebase) leaves the
+    # tree mid-way, and the second then fails for that reason: the first error is the cause
+    reason = first if second == first else "%s; then: %s" % (first, second)
     return (
-        "git pull --prune failed twice: %s; %s is not up to date with origin/%s: run "
-        "`git pull` there" % (reason, root, base)
+        "git pull --prune failed twice: %s; %s is not up to date with origin/%s: look at "
+        "`git status` there and run `git pull` again" % (reason, root, base)
     )
+
+
+def _one_line(text: str) -> str:
+    """git's errors run over several lines; the merge output gets one, at most 200
+    characters."""
+    return " ".join(text.split())[:200]
 
 
 def _git_failure(call) -> str:
@@ -275,13 +296,13 @@ def _git_failure(call) -> str:
     could not run) on one line, cut to 200 characters."""
     try:
         res = call()
-    except ProcError as exc:
+    except (ProcError, OSError) as exc:  # OSError: a spawn error other than a missing file
         text = str(exc)
     else:
         if res.ok:
             return ""
         text = res.text or "exit %d" % res.returncode
-    return " ".join(text.split())[:200] or "failed"
+    return _one_line(text) or "failed"
 
 
 def _delete_local_branch(root: str, branch: str, log: RunLog, when: bool) -> tuple:
