@@ -266,6 +266,9 @@ class LocalRunner(Runner):
         os.makedirs(logs_dir, exist_ok=True)
         tmp = tempfile.mkdtemp(prefix="revali-%s-" % label)
         wt = os.path.join(tmp, "wt")
+        # prune works on the whole repository: its failure line names both
+        pruned = "%s from the worktree list of %s" % (wt, repo_root)
+        git = None
         try:
             git = resolve("git")
             res = run(
@@ -277,8 +280,11 @@ class LocalRunner(Runner):
             if not res.ok:
                 raise RunnerError("git worktree add failed: %s" % res.text.strip())
         except BaseException:
-            # no worktree yet: only the temp dir to remove
+            # an add that failed or timed out midway may have registered the worktree: the
+            # temp dir goes first, then the prune drops that entry
             remove_dir(tmp, label, log)
+            if git is not None:
+                _cleanup_git(git, ["prune"], repo_root, 60, pruned, label, log)
             raise
         report = RunReport(label=label)
         try:
@@ -328,9 +334,7 @@ class LocalRunner(Runner):
             # dropped from the repository's list as well
             _cleanup_git(git, ["remove", "--force", wt], repo_root, 120, wt, label, log)
             remove_dir(tmp, label, log)
-            # prune works on the whole repository: name both
-            about = "%s from the worktree list of %s" % (wt, repo_root)
-            _cleanup_git(git, ["prune"], repo_root, 60, about, label, log)
+            _cleanup_git(git, ["prune"], repo_root, 60, pruned, label, log)
         return report
 
 
@@ -555,7 +559,9 @@ def stage_inputs(
     os.makedirs(logs_dir, exist_ok=True)
     steps = [(n, c) for n, c in steps if c.strip()]
     extra_dir = os.path.join(logs_dir, "%s-extra" % label)
-    shutil.rmtree(extra_dir, ignore_errors=True)
+    # an earlier session's directory that cannot go is reused: its files would travel with
+    # this session's, so the log names it
+    remove_dir(extra_dir, label, log)
     os.makedirs(extra_dir, exist_ok=True)
     try:
         for rel, content in (extra_files or {}).items():

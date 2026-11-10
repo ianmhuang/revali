@@ -124,14 +124,18 @@ class LocalCleanupCase(RepoCase):
         real = runners.run
         pending = dict(answers)
         self.worktrees = []
+        self.subs = []  # every `git worktree` subcommand, in order
 
         def run(cmd, *a, **kw):
             argv = [str(c) for c in cmd]
             if "worktree" in argv:
                 sub = argv[argv.index("worktree") + 1]
+                self.subs.append(sub)
                 if sub == "add":
                     self.worktrees.append(argv[-2])
                 answer = pending.pop(sub, None)
+                if callable(answer):
+                    answer = answer(real, cmd, *a, **kw)
                 if isinstance(answer, BaseException):
                     raise answer
                 if answer is not None:
@@ -254,6 +258,66 @@ class LocalTempDir(LocalCleanupCase):
                     self.session([("test", "exit 0")], {"add": exc}, lines)
                 self.assert_temp_dir_gone()
                 self.assertEqual([ln for ln in lines if "could not" in ln], [])
+                self.assertEqual(self.subs, ["add", "prune"])
+
+    def test_a_worktree_registered_before_the_add_timed_out_is_pruned(self):
+        # PR #66 round 2 follow-up: git can register the worktree and then not finish
+        def add_then_time_out(real, cmd, *a, **kw):
+            res = real(cmd, *a, **kw)
+            self.assertTrue(res.ok, res.text)
+            return ProcTimeout("timed out after 300s: git")
+
+        with self.assertRaises(ProcTimeout):
+            self.session([("test", "exit 0")], {"add": add_then_time_out}, [])
+        self.assert_temp_dir_gone()
+        listed = git(["worktree", "list", "--porcelain"], self.repo)
+        self.assertNotIn(os.path.basename(os.path.dirname(self.worktrees[0])), listed)
+
+    def test_no_prune_without_git(self):
+        lines = []
+        with self.assertRaises(ExeNotFound):
+            self.session(
+                [("test", "exit 0")],
+                {},
+                lines,
+                resolve=mock.Mock(side_effect=ExeNotFound("executable not found: git")),
+            )
+        self.assertEqual(self.subs, [])
+        self.assertEqual([ln for ln in lines if "could not" in ln], [])
+
+
+class StaleExtraDir(unittest.TestCase):
+    """PR #66 round 2 follow-up: an earlier session's `<label>-extra` that cannot be removed
+    before staging is named, since its files would travel with this session's."""
+
+    def setUp(self):
+        self.logs = tempfile.mkdtemp(prefix="revali-stale-")
+        self.addCleanup(shutil.rmtree, self.logs, True)
+        self.extra = os.path.join(self.logs, LABEL + "-extra")
+        os.makedirs(os.path.join(self.extra, "t"))
+        with open(os.path.join(self.extra, "t", "old.py"), "w", encoding="utf-8") as fh:
+            fh.write("old\n")
+
+    def stage(self):
+        from revali.runners import stage_inputs
+
+        lines = []
+        steps, extra = stage_inputs(
+            self.logs, LABEL, [("test", "true")], {"t/x.py": "x\n"}, lines.append
+        )
+        self.assertEqual(extra, self.extra)
+        self.assertEqual(steps, [("test", "true")])
+        return lines
+
+    def test_named_when_it_stays(self):
+        with rmtree_keeping(LABEL + "-extra"):
+            lines = self.stage()
+        self.assertEqual(len(problems(lines, self.extra)), 1, lines)
+
+    def test_removed_quietly_otherwise(self):
+        lines = self.stage()
+        self.assertEqual(lines, [])
+        self.assertFalse(os.path.exists(os.path.join(self.extra, "t", "old.py")))
 
 
 class RemoveDirReason(unittest.TestCase):
