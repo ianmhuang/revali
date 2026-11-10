@@ -4,7 +4,8 @@ a note with git's error and the merge still succeeds (AC-2), the first error bef
 when the two differ (round 1, F1); a pull that times out or cannot be started is a failed
 attempt, not a traceback (AC-3), and neither is a git that cannot be started elsewhere in the
 follow-up (round 1, F2), where a failure in the branch step alone leaves no note to pull
-(round 2, F3); a failed checkout of the base means no pull and a note of its own (AC-4);
+(round 2, F3) and a failure after the branch was deleted does not lose the deletion's result
+(round 3, F4); a failed checkout of the base means no pull and a note of its own (AC-4);
 worktree mode runs what it ran before (AC-5).
 
 Black-box through `revali merge` with the fake gh, which merges nothing and leaves the tree on
@@ -288,12 +289,13 @@ class PullThatCannotRun(PullCase):
 
 class FollowUpThatCannotRun(PullCase):
     """AC-3's "instead of a traceback", for the git calls around the pull (round 1, F2), each
-    step saying what it could not do (round 2, F3)."""
+    step saying what it could not do (round 2, F3) and keeping what it did do (round 3, F4)."""
 
-    def merged_with_git_gone(self, rdir, gone):
+    def merged_with_git_gone(self, rdir, gone, must_refuse=True):
         """`revali merge` where, once gh has merged the PR, the git calls `gone(argv)` picks
         cannot be started; every other command runs for real. Returns the output of a merge
-        that ended as one (exit 0, MERGED, history row, archived)."""
+        that ended as one (exit 0, MERGED, history row, archived). `must_refuse=False` is for
+        a call the merge need not make at all."""
         real = subprocess.run
         merged = []
         refused = []
@@ -310,7 +312,9 @@ class FollowUpThatCannotRun(PullCase):
 
         with mock.patch("subprocess.run", side_effect=fake):
             out = self.merged(rdir)
-        self.assertTrue(merged and refused, out)
+        self.assertTrue(merged, out)
+        if must_refuse:
+            self.assertTrue(refused, out)
         return out
 
     def test_git_gone_after_the_pr_merged_is_a_note_and_the_merge_is_recorded(self):
@@ -341,6 +345,28 @@ class FollowUpThatCannotRun(PullCase):
         local = self.line_with(out, "local:")
         self.assertIn("feature/mul", local)
         self.assertIn("No such file or directory", local)
+
+    def test_git_gone_once_the_branch_is_deleted_does_not_lose_the_deletion(self):
+        # round 3, F4: the tree is updated and `git branch -D` has run; from then on git
+        # cannot be started to ask which branch the tree is on. The output must still say
+        # what the deletion did, whether or not the merge asks that question again.
+        tip = self.advance_origin()
+        rdir = self.ready()
+        deleted = []
+
+        def gone(argv):
+            if "branch" in argv and "-D" in argv:
+                deleted.append(argv)
+                return False
+            return bool(deleted) and "--abbrev-ref" in argv
+
+        out = self.merged_with_git_gone(rdir, gone, must_refuse=False)
+        self.assertTrue(deleted, out)  # the deletion did run
+        self.assertIn("branch feature/mul removed", self.line_with(out, "local: on main"))
+        self.assertNotIn("could not tell", out)
+        self.assertNotIn("note:", out)
+        self.assertEqual(self.local_main(), tip)
+        self.assertIsNone(gitops.rev_parse("feature/mul", self.repo))
 
 
 class FailedCheckout(PullCase):
