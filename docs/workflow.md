@@ -44,15 +44,18 @@ state and locks, so runs in different worktrees are independent. A second
 `run` in the same checkout, whatever branch it is on, is refused by
 `tree.lock` with the running branch and pid; `wait --branch <b>` waits for
 that run and `stop` stops it, from any branch or a detached HEAD. Sandbox
-clones are keyed `<repo>/<branch>/<label>` on the WSL distro or the ssh
-host, so validations of different branches never share a directory.
+clones are keyed `<repo>/<branch>-<key>/<label>` on the WSL distro or the ssh
+host, where `<key>` comes from the checkout's path and the exact branch
+name (earlier revali versions used `<repo>/<branch>/<label>`), so validations
+of different branches, and of different repositories whose directories
+share a name, never share a directory.
 `merge` from a linked worktree merges the PR, deletes the remote branch,
 detaches the worktree at the merged base and drops the local branch; the
 worktree itself stays until you run `git worktree remove <path>` from the
 primary tree, where `git pull` brings in the merge. `merge` in the primary
 tree while a linked worktree holds the base branch is refused. Two clones
 with the same branch checked out are not a supported layout: they would
-share the PR and the sandbox directory.
+share the PR.
 Worktree mode in `merge` (no `--delete-branch`, detach, drop the local branch
 by hand) applies only when the base branch is checked out in another
 worktree; a linked worktree whose base is checked out nowhere else merges

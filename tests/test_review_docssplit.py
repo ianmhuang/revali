@@ -202,7 +202,7 @@ class MovedTextIsVerbatim(unittest.TestCase):
         (
             "workflow.md",
             "Two clones with the same branch checked out are not a supported layout: they would "
-            "share the PR and the sandbox directory.",
+            "share the PR.",  # fix/sandbox-key-collision: the sandbox directory is keyed now
         ),
         (
             "workflow.md",
