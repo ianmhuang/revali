@@ -14,6 +14,9 @@ stated.
   run's own, and stops with exit 1 (stage `error`) otherwise, committing and
   pushing nothing from that point; `merge` holds the same lock while it
   checks out the base branch and pulls
+- in preflight, `git fetch origin <base>` (tried once more when it fails),
+  which updates `refs/remotes/origin/<base>`, shared by every worktree of
+  the repository, and `FETCH_HEAD`
 - `git push -u origin <branch>` and `gh pr create --draft`. With `[validate]
   parallel_baseline` (the default) this happens while the baseline is still
   running, so a branch whose existing suite fails can be left pushed with its
@@ -114,8 +117,10 @@ stated.
   in `<base sha>..HEAD` references with `Fixes #n`, `Closes #n` or
   `Resolves #n`: one
   `gh issue comment` naming the merged PR, the commit, and the diagnosis
-  cause and suggested fix recorded when the issue was opened (the fix text
-  withheld on a repository that is not private). Closing the issue is left
+  cause and suggested fix recorded when the issue was opened (for an issue
+  reused because it was open already, the ones recorded when this PR hit
+  the failure; the fix text withheld on a repository that is not private).
+  Closing the issue is left
   to GitHub's handling of those keywords
 - before `revali merge` waits for CI (next item): `gh pr view <n> --json title`, and
   `gh pr edit <n> --title <title>` when the title differs from change.md's;

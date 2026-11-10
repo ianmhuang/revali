@@ -404,7 +404,15 @@ def gh_open_issues(cwd: str, log: Logger = None, limit: int = 200) -> List[dict]
         raise GhError("gh issue list returned invalid JSON: %s" % exc) from exc
     if not isinstance(items, list):
         raise GhError("gh issue list returned %s, not a list" % type(items).__name__)
-    return [i for i in items if isinstance(i, dict)]
+    # only items a caller can use without converting: a positive int number, a str title
+    return [
+        {"number": i["number"], "title": i["title"], "url": str(i.get("url", ""))}
+        for i in items
+        if isinstance(i, dict)
+        and type(i.get("number")) is int
+        and i["number"] > 0
+        and isinstance(i.get("title"), str)
+    ]
 
 
 def gh_issue_create(

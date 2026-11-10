@@ -203,7 +203,7 @@ def open_elsewhere(ctx: Context, wanted: str, log: Optional[RunLog]) -> Optional
             log.stage("validate", "warning: could not list the open issues: %s" % exc)
         return None
     for item in items:
-        if str(item.get("title", "")) == wanted and int(item.get("number", 0) or 0) > 0:
+        if item["title"] == wanted:  # gh_open_issues keeps only well-formed items
             return item
     return None
 
@@ -364,8 +364,14 @@ def merge_comment(issue: dict, pr_number: int, base: str, sha: str, subject: str
     lines = [
         "Fixed by PR #%d, merged into `%s` (commit %s: %s)." % (pr_number, base, sha[:10], subject),
         "",
-        "revali's diagnosis when the issue was opened: cause **%s**." % (issue.get("cause") or "?"),
     ]
+    # an issue reused under `found` was opened by someone else: the diagnosis is this PR's
+    when = (
+        "when PR #%d hit the failure" % pr_number
+        if issue.get("found")
+        else "when the issue was opened"
+    )
+    lines.append("revali's diagnosis %s: cause **%s**." % (when, issue.get("cause") or "?"))
     if issue.get("withhold"):
         lines += ["", "Suggested fix at the time: " + WITHHELD]
     elif issue.get("recommendation"):

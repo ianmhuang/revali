@@ -201,6 +201,10 @@ class OpenElsewhere(ti.IssueCase):
         self.assertEqual(code, EXIT_OK, out)
         comments = self.gh_calls("issue", "comment")
         self.assertEqual([c["argv"][2] for c in comments], ["17"])
+        # PR #60 F2: revali did not open #17, so the diagnosis is named as this PR's
+        body = comments[0]["body"]
+        self.assertIn("revali's diagnosis when PR #7 hit the failure: cause **code**", body)
+        self.assertNotIn("when the issue was opened", body)
         code, out = run_cli(["stats"])
         self.assertIn("issues opened: 0", out)
 
@@ -223,6 +227,25 @@ class OpenElsewhere(ti.IssueCase):
         self.assertIn("issue: #41 %s" % ISSUE_URL, out)
         self.assertFalse(State.load(self.rdir()).issues[0].get("found", False))
 
+    def test_malformed_items_are_skipped(self):
+        # PR #60 F1: a number that is not a positive int, or a title that is not a string,
+        # is not a match and stops nothing; the issue is opened as before
+        self.scenario(
+            {
+                "issues": [
+                    {"number": "n/a", "title": SAME_TITLE, "url": OTHER_URL},
+                    {"number": True, "title": SAME_TITLE, "url": OTHER_URL},
+                    {"number": [17], "title": SAME_TITLE, "url": OTHER_URL},
+                    {"number": 0, "title": SAME_TITLE, "url": OTHER_URL},
+                    {"number": 18, "title": [SAME_TITLE], "url": OTHER_URL},
+                ]
+            }
+        )
+        out = self.fail_run()
+        self.assertEqual(len(self.gh("issue", "create")), 1, out)
+        self.assertIn("issue: #41 %s" % ISSUE_URL, out)
+        self.assertNotIn("Traceback", out)
+
     def list_fails(self, scenario):
         # AC-6
         self.scenario(scenario)
@@ -239,6 +262,21 @@ class OpenElsewhere(ti.IssueCase):
 
     def test_list_not_a_list_opens_as_before(self):
         self.list_fails({"issue_list_raw": json.dumps({"number": 17})})
+
+
+class MergeCommentWording(unittest.TestCase):
+    """PR #60 F2, both cases of `merge_comment`."""
+
+    def test_opened_and_found(self):
+        from revali.issues import merge_comment
+
+        issue = {"cause": "code", "recommendation": "return a * b"}
+        opened = merge_comment(issue, 7, "main", "a" * 40, "fix")
+        found = merge_comment(dict(issue, found=True), 7, "main", "a" * 40, "fix")
+        self.assertIn("revali's diagnosis when the issue was opened: cause **code**", opened)
+        self.assertIn("revali's diagnosis when PR #7 hit the failure: cause **code**", found)
+        for text in (opened, found):
+            self.assertIn("Suggested fix at the time: return a * b", text)
 
 
 class StateVersion(unittest.TestCase):
