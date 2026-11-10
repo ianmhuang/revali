@@ -8,8 +8,8 @@ the run with exit 1 and "branch is broken before review": no reviewer when it fa
 cost kept when the reviewer answered first (AC-6). A run that ends for another reason waits
 for the baseline, and when the baseline failed too its failure is reported with the other
 reason on the line below (AC-7). Stopping the reviewer takes bounded time even when a
-descendant of the session keeps its pipes open (AC-5, as amended after round 1).
-`parallel_baseline = false` keeps the old order, and a dry run, a
+descendant of the session keeps its pipes open (AC-5, as amended after round 1), an orphaned
+one included (round 2 F8). `parallel_baseline = false` keeps the old order, and a dry run, a
 second pass and a docs change run no baseline (AC-8). The history row keeps the baseline out
 of `stage_s.preflight` (AC-9).
 
@@ -392,6 +392,19 @@ SESSION = (
     "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]])\n"
     "time.sleep(60)\n"
 )
+# The same, with the helper started through a process that exits at once: the helper is then
+# an orphan, which a kill of the session's process tree (Windows) does not reach either. The
+# session writes `orphaned` once that process in between is gone.
+MIDDLE = (
+    "import subprocess, sys\n"
+    "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]])\n"
+)
+ORPHANING_SESSION = (
+    "import subprocess, sys, time\n"
+    "subprocess.run([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]])\n"
+    "open(sys.argv[5], 'w').close()\n"
+    "time.sleep(60)\n"
+)
 
 
 class StoppingTheSessionIsBounded(unittest.TestCase):
@@ -402,29 +415,48 @@ class StoppingTheSessionIsBounded(unittest.TestCase):
             with open(release, "w", encoding="utf-8") as fh:
                 fh.write("go\n")
 
-    def test_a_descendant_holding_the_pipes_delays_the_stop_by_seconds_not_its_lifetime(self):
+    def stop_took(self, orphan):
+        """Seconds between "the baseline failed" and the cancelled session's `run` returning,
+        with a descendant of the session alive and holding its pipes throughout."""
         tmp = tempfile.mkdtemp(prefix="revali-cancel-")
         self.addCleanup(shutil.rmtree, tmp, True)
         up = os.path.join(tmp, "descendant-up")
         release = os.path.join(tmp, "release")
+        orphaned = os.path.join(tmp, "orphaned")
         self.addCleanup(self.let_go, release)  # runs before the rmtree above
+        if orphan:
+            cmd = [sys.executable, "-c", ORPHANING_SESSION, MIDDLE, DESCENDANT, up, release]
+            cmd.append(orphaned)
+            markers = [up, orphaned]
+        else:
+            cmd = [sys.executable, "-c", SESSION, DESCENDANT, up, release]
+            markers = [up]
         cancel = threading.Event()
         fired = []
 
         def fire():  # "the baseline failed", once the descendant exists
             deadline = time.monotonic() + 20
-            while time.monotonic() < deadline and not os.path.exists(up):
+            while time.monotonic() < deadline and not all(os.path.exists(m) for m in markers):
                 time.sleep(0.05)
             fired.append(time.monotonic())
             cancel.set()
 
         threading.Thread(target=fire, daemon=True).start()
         with self.assertRaises(procs.ProcCancelled):
-            procs.run([sys.executable, "-c", SESSION, DESCENDANT, up, release], cancel=cancel)
+            procs.run(cmd, cancel=cancel)
         returned = time.monotonic()
-        self.assertTrue(os.path.exists(up), "the descendant never started")
+        for marker in markers:
+            self.assertTrue(os.path.exists(marker), "never happened: %s" % marker)
+        return returned - fired[0]
+
+    def test_a_descendant_holding_the_pipes_delays_the_stop_by_seconds_not_its_lifetime(self):
         # AC-5: the pipes are given up after at most about 15 s; the descendant lives 45 s
-        self.assertLess(returned - fired[0], 20.0)
+        self.assertLess(self.stop_took(orphan=False), 20.0)
+
+    def test_an_orphaned_descendant_holding_the_pipes_does_not_delay_it_longer(self):
+        # PR #55 round 2 F8: no kill of the session's tree reaches this descendant on either
+        # platform, so the stop has to return without the pipes ever closing
+        self.assertLess(self.stop_took(orphan=True), 20.0)
 
 
 class TheOldOrder(ParallelCase):
