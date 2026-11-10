@@ -221,6 +221,22 @@ class FakeRunner(Runner):
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope=""):
         sc = self._scenario()
         os.makedirs(logs_dir, exist_ok=True)
+        t0 = time.time()
+        # "block_until": {"<label>": "<path>"} holds the session until that file exists (up to
+        # "block_timeout_s"), then "delay_after_block_s": {"<label>": s} more: lets a test prove
+        # two things overlap without relying on sleeps
+        held = False
+        marker = (sc.get("block_until") or {}).get(label)
+        if marker:
+            deadline = time.monotonic() + float(sc.get("block_timeout_s", 30))
+            while time.monotonic() < deadline:
+                if os.path.exists(marker):
+                    held = True
+                    break
+                time.sleep(0.05)
+        delay = float((sc.get("delay_after_block_s") or {}).get(label, 0))
+        if delay:
+            time.sleep(delay)
         log_file = os.environ.get("REVALI_FAKE_LOG")
         if log_file:
             with open(log_file, "a", encoding="utf-8") as fh:
@@ -234,6 +250,10 @@ class FakeRunner(Runner):
                             "steps": [n for n, c in steps if c.strip()],
                             "cmds": {n: c for n, c in steps if c.strip()},
                             "extra_files": sorted(extra_files or {}),
+                            "t0": t0,
+                            "t1": time.time(),
+                            "held": held,
+                            "finished": True,
                         }
                     )
                     + "\n"

@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -24,6 +25,10 @@ class ProcTimeout(ProcError):
 
 class ExeNotFound(ProcError):
     pass
+
+
+class ProcCancelled(ProcError):
+    """The `cancel` event of `run` was set while the command ran; the command was stopped."""
 
 
 @dataclass
@@ -85,11 +90,15 @@ def run(
     env: Optional[dict] = None,
     input_text: Optional[str] = None,
     log: Optional[Callable[[str], None]] = None,
+    cancel: Optional[threading.Event] = None,
 ) -> Result:
-    """Run a command to completion. Never raises on non-zero exit; raises on timeout."""
+    """Run a command to completion. Never raises on non-zero exit; raises on timeout, and with
+    `cancel`, ProcCancelled once another thread sets it (the command is stopped first)."""
     start = time.monotonic()
     if log:
         log("$ " + " ".join(shlex.quote(str(c)) for c in cmd))
+    if cancel is not None:
+        return _run_cancellable(cmd, cwd, timeout, env, input_text, log, cancel, start)
     try:
         proc = subprocess.run(
             [str(c) for c in cmd],
@@ -118,6 +127,105 @@ def run(
     if log:
         log("  -> exit %d in %.1fs" % (res.returncode, res.duration))
     return res
+
+
+# Fixed margins of the cancel mechanism, not tunables (like the margins in runners.py): how
+# often a cancellable command looks at its event, how long a stopped command gets to exit
+# before it is killed outright, and how long revali then waits for its pipes to close.
+CANCEL_POLL_S = 0.25
+CANCEL_GRACE_S = 5.0
+CANCEL_REAP_S = 5.0
+
+
+def _run_cancellable(cmd, cwd, timeout, env, input_text, log, cancel, start) -> Result:
+    """`run` for a command another thread may stop. The child is not put in a session of its
+    own, so `revali stop` (which kills the run's process group on POSIX) still reaches it. For
+    the same reason a cancel ends the child itself on POSIX, and the whole tree on Windows
+    (taskkill /T)."""
+    if cancel.is_set():
+        raise ProcCancelled("cancelled before it started: %s" % cmd[0])
+    try:
+        proc = subprocess.Popen(
+            [str(c) for c in cmd],
+            cwd=cwd,
+            env=child_env(env),
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            **_no_window(),
+        )
+    except FileNotFoundError as exc:
+        raise ExeNotFound("cannot execute %s: %s" % (cmd[0], exc)) from exc
+    deadline = None if timeout is None else start + timeout
+    pending_input = input_text
+    while True:
+        wait = CANCEL_POLL_S
+        if deadline is not None:
+            wait = max(0.0, min(wait, deadline - time.monotonic()))
+        try:
+            # the input goes with the first call; a retried communicate() keeps feeding it
+            stdout, stderr = proc.communicate(input=pending_input, timeout=wait)
+            break
+        except subprocess.TimeoutExpired:
+            pending_input = None
+        if cancel.is_set():
+            _stop(proc)
+            if log:
+                log("  -> cancelled after %.1fs" % (time.monotonic() - start))
+            raise ProcCancelled("cancelled: %s" % cmd[0])
+        if deadline is not None and time.monotonic() >= deadline:
+            _stop(proc)
+            raise ProcTimeout("timed out after %ss: %s" % (timeout, cmd[0]))
+    res = Result(
+        cmd=list(cmd),
+        returncode=proc.returncode,
+        stdout=stdout or "",
+        stderr=stderr or "",
+        duration=time.monotonic() - start,
+    )
+    if log:
+        log("  -> exit %d in %.1fs" % (res.returncode, res.duration))
+    return res
+
+
+def _stop(proc: subprocess.Popen) -> None:
+    """End a child started by _run_cancellable and reap it. On POSIX that takes bounded time
+    even when a descendant that outlives the child holds its stdout / stderr open: the pipes
+    are given up rather than read to their end. On Windows the bound comes from the tree kill;
+    a process outside that tree holding the pipes keeps only the daemon reader threads busy."""
+    if os.name == "nt":
+        kill_tree(proc.pid)
+    else:
+        proc.terminate()
+    try:
+        proc.communicate(timeout=CANCEL_GRACE_S)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    proc.kill()
+    try:
+        proc.communicate(timeout=CANCEL_REAP_S)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    if os.name != "nt":
+        # POSIX reads the pipes on this thread, so closing them ends the reading. On Windows
+        # communicate() reads them on daemon threads that hold each pipe's lock while they
+        # block; a close from here would wait for that lock, so the pipes are left to those
+        # threads, which end with the last process holding them (PR #55 round 2 F8).
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            if pipe is not None:
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
+    try:
+        proc.wait(timeout=CANCEL_REAP_S)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def run_retry(cmd: list, retries: int = 1, wait: float = 3.0, **kw) -> Result:

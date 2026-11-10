@@ -12,6 +12,7 @@ Use via REVALI_CLAUDE_CMD="<python> <this file>".
 import json
 import os
 import sys
+import time
 
 
 def scenario_path():
@@ -39,6 +40,9 @@ def next_entry():
 
 def main(argv):
     entry = next_entry()
+    if entry.get("touch"):  # "the session has started": its start time, for ordering checks
+        with open(entry["touch"], "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(time.time()))
     prompt = sys.stdin.read() if not sys.stdin.isatty() else ""
     log = os.environ.get("REVALI_FAKE_LOG")
     if log:
@@ -56,6 +60,11 @@ def main(argv):
         path = os.path.join(os.getcwd(), rel)
         if os.path.isfile(path):
             os.remove(path)
+    if entry.get("sleep"):  # a long session; a stopped one never reaches done_marker
+        time.sleep(float(entry["sleep"]))
+    if entry.get("done_marker"):
+        with open(entry["done_marker"], "w", encoding="utf-8") as fh:
+            fh.write("answered\n")
     if "raw_stdout" in entry:
         sys.stdout.write(entry["raw_stdout"])
         return int(entry.get("exit", 0))

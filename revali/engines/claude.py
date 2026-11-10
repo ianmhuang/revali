@@ -4,9 +4,9 @@ import json
 from typing import List, Optional
 
 from revali import EXIT_ERROR
-from revali.engines.base import Engine, EngineRequest, EngineResult
+from revali.engines.base import Engine, EngineRequest, EngineResult, SessionCancelled
 from revali.preflight import Stop
-from revali.procs import ExeNotFound, ProcTimeout, resolve, run
+from revali.procs import ExeNotFound, ProcCancelled, ProcTimeout, resolve, run
 from revali.state import RunLog, write_text
 
 READ_ONLY_TOOLS = "Read,Grep,Glob"
@@ -101,7 +101,10 @@ class ClaudeEngine(Engine):
                 timeout=request.timeout_s,
                 input_text=request.prompt,
                 log=log.detail if log else None,
+                cancel=request.cancel,
             )
+        except ProcCancelled as exc:
+            raise SessionCancelled(role) from exc
         except ProcTimeout as exc:
             raise Stop(
                 EXIT_ERROR,

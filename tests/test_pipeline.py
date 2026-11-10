@@ -208,6 +208,9 @@ class ApprovePath(RepoCase):
         self.assertEqual(list(rows[0]["sandbox_s"]), ["baseline"])
 
     def test_preflight_time_covers_the_baseline_even_when_it_fails(self):
+        # with parallel_baseline (the default) preflight no longer holds the baseline; that
+        # case is tests/test_parallel_baseline.HistoryTiming
+        self.sequential_baseline()
         self.runner_scenario({"default": 0, "results": {"baseline": {"test": 1}}})
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])

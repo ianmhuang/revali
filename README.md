@@ -43,7 +43,7 @@ sequenceDiagram
     U->>D: /revali
     loop until APPROVE + PASS (max 2 fix cycles)
         D->>R: revali run
-        R->>R: preflight: clean tree, own repo, base, diff size, secrets, lint, baseline
+        R->>R: preflight: clean tree, own repo, base, diff size, secrets, lint, baseline start
         R->>G: push, draft PR
         R->>B: diff, change.md, checklist, previous round
         B-->>R: verdict, findings, acceptance tests
@@ -125,9 +125,9 @@ python <path-to>/revali.py status | stop | reset | clean <branch> | stats | vers
 python <path-to>/revali.py --version        # same line as `version`
 ```
 
-What a run does, in order: preflight (including the existing suite in the
-sandbox as a baseline), push + draft PR, reviewer round (`claude -p` with the
-diff, change.md, and the checklist; writes tests into `test_dir`; the script
+What a run does, in order: preflight (ending with the existing suite in the sandbox
+as a baseline, by default running on alongside the next two steps), push + draft PR,
+reviewer round (`claude -p` with the diff, change.md, and the checklist; writes tests into `test_dir`; the script
 checks AC coverage, runs `lint` over them, smoke-runs them, commits or archives them), validation
 (the new tests in the sandbox, plus the existing suite unless nothing but
 the reviewer's test commits changed since the baseline ran it; on failure

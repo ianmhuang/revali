@@ -114,6 +114,9 @@ class TheTimingLine(TimingCase):
     def test_a_run_that_stops_in_preflight_exit_1_still_names_preflight(self):
         """The baseline fails: the run ends with exit 1 inside preflight. Preflight ran (for
         as long as the baseline took), so the timing line and the row name it."""
+        # feature/parallel-baseline (Ian's call): only with the baseline inside preflight does a
+        # failing one end the run there; with parallel_baseline, the default, it ends later
+        self.sequential_baseline()
         self.runner_scenario({"default": 0, "results": {"baseline": {"test": 1}}})
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ERROR, out)
@@ -133,6 +136,9 @@ class TheTimingLine(TimingCase):
         preflight time includes the baseline it ran, the review time the smoke run, and the
         validate time the validation run; a stage clock started after its session would be
         shorter than the session itself."""
+        # PR #55 round 1 F1: preflight holds the baseline only with it inside preflight; with
+        # parallel_baseline, the default, it overlaps the pr and review stages instead
+        self.sequential_baseline()
         self.use_real_local_runner()
         self.claude(claude_entry())
         code, out = run_cli(["run", "--foreground"])

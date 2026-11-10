@@ -124,6 +124,7 @@ class ValidateCfg:
     prompt: str = ""
     schema: str = ""
     reuse_baseline: bool = False  # skip `test` when only reviewer test commits followed it
+    parallel_baseline: bool = False  # run the baseline alongside the PR stage and round 1 review
     rerun_on_base: bool = False  # on a new_test FAIL, rerun the reviewer's files on the base tip
     issue_on: bool = False  # open a GitHub issue when a failure is diagnosed as a pre-existing bug
     issue_assignee: str = ""  # "author" (the PR author's gh login) or "" (nobody)

@@ -167,6 +167,17 @@ class RepoCase(unittest.TestCase):
         git(["add", "-A"], self.repo)
         git(["commit", "-q", "-m", message], self.repo)
 
+    def sequential_baseline(self):
+        """`[validate] parallel_baseline = false`, committed: the baseline runs inside preflight
+        as before feature/parallel-baseline, for tests that pin that order."""
+        toml = self.read("revali.toml")
+        assert "[validate]\n" in toml, toml
+        self.write(
+            "revali.toml",
+            toml.replace("[validate]\n", "[validate]\nparallel_baseline = false\n", 1),
+        )
+        self.commit_all("baseline inside preflight")
+
     def change_md(self):
         return os.path.join(self.repo, ".revali", "feature__mul", "change.md")
 

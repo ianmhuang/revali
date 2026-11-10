@@ -80,6 +80,21 @@ review round, `tests: commit` or `tests: archive`: the mode its rounds run
 in, fixed for the branch (`[review] tests` in
 [docs/configuration.md](configuration.md)).
 
+A run goes preflight, PR, review, validate. On the first pass of a branch
+(no review round yet, not a dry run, not `kind: docs`) preflight ends with
+the baseline: the existing suite on the commit preflight checked, in the
+sandbox. With `[validate] parallel_baseline` (the default) the baseline only
+starts there and runs on while the PR stage and the round 1 reviewer run;
+revali acts on the reviewer's answer (smoke run, test commit, push, PR
+comment) only once the baseline has passed, and `logs/revali.log` says when
+it is waiting for it. A baseline that fails stops the reviewer session, or
+discards its answer when it came first, and the run ends with exit 1 and
+"branch is broken before review" as it always did, with a line saying what
+became of the reviewer. A run that ends for any other reason while the
+baseline runs waits for it before exiting, so no sandbox session is left
+behind. `parallel_baseline = false` runs the baseline inside preflight,
+before anything is pushed or paid for.
+
 A working tree runs one pipeline at a time: `run` takes `.revali/tree.lock`
 next to the branch lock, and a second `run` in the same checkout, on any
 branch, is refused with the running branch and pid. `wait --branch <b>`
