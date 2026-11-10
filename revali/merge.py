@@ -225,16 +225,63 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
         _worktree_follow_up(root, branch, base, elsewhere, log)
         return EXIT_OK
     # Local follow-up: gh usually switches to the base branch and deletes the local branch itself.
-    if gitops.current_branch(root) != base:
-        run(resolve("git") + ["checkout", "--quiet", base], cwd=root, log=log.detail)
-    run(resolve("git") + ["pull", "--quiet", "--prune"], cwd=root, log=log.detail, timeout=300)
+    note = _update_base(root, base, log)
     removed, why = _delete_local_branch(root, branch, log, when=gitops.current_branch(root) == base)
     log.stage(
         "merge",
         "local: on %s, branch %s %s%s"
         % (gitops.current_branch(root), branch, "removed" if removed else "kept", why),
     )
+    if note:
+        # the PR is merged either way, so this is a note and the exit code stays 0
+        log.stage("merge", "note: " + note)
     return EXIT_OK
+
+
+def _update_base(root: str, base: str, log: RunLog) -> str:
+    """Check out `base` if gh left the tree elsewhere, then `git pull --prune`, tried twice
+    (worktrees share refs/remotes/, and a fetch elsewhere can make one attempt fail). Returns
+    "" when the tree is up to date, else what went wrong and what to run."""
+    if gitops.current_branch(root) != base:
+        reason = _git_failure(
+            lambda: run(resolve("git") + ["checkout", "--quiet", base], cwd=root, log=log.detail)
+        )
+        if reason:
+            return (
+                "git checkout %s failed: %s; %s is still on %s and not up to date: check "
+                "out %s there and run `git pull`"
+                % (base, reason, root, gitops.current_branch(root), base)
+            )
+    reason = _git_failure(
+        lambda: run_retry(
+            resolve("git") + ["pull", "--quiet", "--prune"],
+            retries=1,
+            retry_errors=True,
+            cwd=root,
+            log=log.detail,
+            timeout=300,
+        )
+    )
+    if not reason:
+        return ""
+    return (
+        "git pull --prune failed twice: %s; %s is not up to date with origin/%s: run "
+        "`git pull` there" % (reason, root, base)
+    )
+
+
+def _git_failure(call) -> str:
+    """ "" when `call()` returns a Result that is ok; otherwise git's error (or the reason it
+    could not run) on one line, cut to 200 characters."""
+    try:
+        res = call()
+    except ProcError as exc:
+        text = str(exc)
+    else:
+        if res.ok:
+            return ""
+        text = res.text or "exit %d" % res.returncode
+    return " ".join(text.split())[:200] or "failed"
 
 
 def _delete_local_branch(root: str, branch: str, log: RunLog, when: bool) -> tuple:

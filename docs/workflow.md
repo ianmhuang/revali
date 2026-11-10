@@ -96,7 +96,8 @@ that fails is tried once more after a short pause, since worktrees of one
 repository share `refs/remotes/` and of two fetches of the same ref at the
 same moment one fails after the other has moved the ref (`revali merge`
 from a linked worktree retries its fetch of the base the same way; from the
-primary tree it runs `git pull --prune`, which is not retried). When both attempts fail,
+primary tree its `git pull --prune` is retried the same way, and a pull that
+still fails is a note: the PR is merged and the exit code stays 0). When both attempts fail,
 preflight prints a note with git's error and compares against the local
 `<base>`, which may be behind the remote. On the first pass of a branch
 (no review round yet, not a dry run, not `kind: docs`) preflight ends with
