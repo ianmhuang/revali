@@ -135,6 +135,30 @@ class NothingToFixAtMergeTests(MergeCase):
         self.assertEqual(self.title_edits(), [])
         self.assertEqual(len(self.merges()), 1)
 
+    def test_an_undecodable_change_md_is_a_warning_and_the_merge_goes_on(self):
+        # round 1 F1: a change.md that is there but cannot be read is the same position as a
+        # missing one: nothing to compare the PR title with
+        self.ready()
+        with open(self.change_md(), "wb") as fh:
+            fh.write(b"---\ntitle: \xff\xfe broken\n---\n")
+        self.scenario({"pr_title": "Renamed on GitHub"})
+        code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertTrue(self.warnings(out, "change.md"), out)
+        self.assertEqual(self.title_edits(), [])
+        self.assertEqual(len(self.merges()), 1)
+
+    def test_a_change_md_without_a_title_is_a_warning_and_the_merge_goes_on(self):
+        # round 1 F2: an emptied title is reported, like a missing change.md
+        self.ready()
+        self.retitle("")
+        self.scenario({"pr_title": "Renamed on GitHub"})
+        code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertTrue(self.warnings(out, "title"), out)
+        self.assertEqual(self.title_edits(), [])
+        self.assertEqual(len(self.merges()), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
