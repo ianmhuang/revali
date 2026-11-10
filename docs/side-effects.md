@@ -17,6 +17,14 @@ stated.
 - in preflight, `git fetch origin <base>` (tried once more when it fails),
   which updates `refs/remotes/origin/<base>`, shared by every worktree of
   the repository, and `FETCH_HEAD`
+- outside your repository, in the checkout revali itself runs from (when it
+  runs from a git checkout): `git describe --tags --always --dirty` once per
+  `run`, `preflight`, `merge` or `stop` process, for the build named in the
+  logs and the history row. The refresh behind `--dirty` takes that
+  checkout's `.git/index.lock` for a moment and may write its index back
+  (stat data only, no content changes); a `git add`, `commit` or `pull` you
+  run in that checkout at the same moment can fail with `index.lock: File
+  exists` and works when repeated
 - `git push -u origin <branch>` and `gh pr create --draft`. With `[validate]
   parallel_baseline` (the default) this happens while the baseline is still
   running, so a branch whose existing suite fails can be left pushed with its

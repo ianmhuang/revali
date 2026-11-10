@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
-from revali.procs import ExeNotFound, Result, resolve, run, run_retry
+from revali.procs import ExeNotFound, ProcError, Result, resolve, run, run_retry
 
 
 class GitError(Exception):
@@ -40,6 +40,19 @@ def repo_root(cwd: str) -> Optional[str]:
     if not res.ok:
         return None
     return os.path.normpath(res.stdout.strip())
+
+
+def describe(cwd: str) -> str:
+    """`git describe --tags --always --dirty` of the checkout at `cwd`; "" when git is missing,
+    times out or fails. Several projects' runs describe the one revali checkout at the same
+    moment: the index refresh behind --dirty writes the index back only when it gets the lock
+    and does not fail when another process holds it (git 2.55; GIT_OPTIONAL_LOCKS=0 does not
+    stop that write; docs/side-effects.md lists it)."""
+    try:
+        res = _git(["describe", "--tags", "--always", "--dirty"], cwd)
+    except (ProcError, OSError):
+        return ""
+    return res.stdout.strip() if res.ok else ""
 
 
 def current_branch(cwd: str) -> str:
