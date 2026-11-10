@@ -17,7 +17,10 @@ deletes the clone and the `<branch>-<key>` and `<repo>` directories once
 empty. Earlier revali versions used `<repo>/<branch>/<label>`; a session
 that was killed may have left such a directory behind. revali does not
 remove directories of the old layout; delete them by hand when no run is
-in progress. A
+in progress. The clone is made from the repository's common git directory,
+with the commit resolved on the host first, so a linked worktree added on
+Windows (whose `.git` file names a Windows path that git inside WSL cannot
+read) validates like the primary tree. A
 `new_test` command may contain `{files}`: it is replaced by the reviewer's
 test files (paths relative to the repository root, space separated, quoted
 when they contain whitespace), this round's files in the smoke run and every

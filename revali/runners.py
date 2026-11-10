@@ -144,6 +144,32 @@ def sandbox_key(repo_root: str, branch: str) -> str:
     return hashlib.sha1(("%s\n%s" % (where, branch)).encode("utf-8")).hexdigest()[:8]
 
 
+def clone_source(repo_root: str, ref: str, log: Logger = None) -> Tuple[str, str]:
+    """(directory to clone from, commit sha) for a sandbox session of `ref` in `repo_root`.
+    The directory is the repository's common git directory: a linked worktree's `.git` file
+    names its own git directory by a host path, which git inside WSL cannot resolve when the
+    worktree was added on Windows (`/mnt/e/<tree>/E:/...`), while the common directory holds
+    every ref and object. A clone of it has the primary tree's HEAD, so `ref` is resolved here,
+    on the host, to the commit it names in `repo_root`. When either cannot be resolved (no such
+    directory, no such commit) the pair comes back unchanged and the script's clone or checkout
+    fails as it always did, with its log and its cleanup."""
+    if not os.path.isdir(repo_root):
+        return repo_root, ref
+    git = resolve("git")
+    common = run(git + ["rev-parse", "--git-common-dir"], cwd=repo_root, timeout=SHORT_MARGIN_S)
+    sha = run(
+        git + ["rev-parse", "--verify", "--quiet", "%s^{commit}" % ref],
+        cwd=repo_root,
+        timeout=SHORT_MARGIN_S,
+    )
+    if not common.ok or not common.stdout.strip() or not sha.ok or not sha.stdout.strip():
+        return repo_root, ref
+    source = os.path.normpath(os.path.join(repo_root, common.stdout.strip()))
+    if log:
+        log("[sandbox] clone source %s, %s = %s" % (source, ref, sha.stdout.strip()[:10]))
+    return source, sha.stdout.strip()
+
+
 def sandbox_scope(scope: str, key: str) -> str:
     """The branch level of the sandbox directory: `<scope>-<key>`, or `<scope>` alone."""
     return "%s-%s" % (scope, key) if scope and key else scope
@@ -602,13 +628,14 @@ class WslRunner(Runner):
 
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope="", key=""):
         scope = sandbox_scope(scope, key)
+        source, ref = clone_source(repo_root, ref, log)
         steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files)
         repo_name = os.path.basename(os.path.normpath(repo_root)) or "repo"
         root, _ = sandbox_root(self.plat)
         sandbox = sandbox_dir(root, repo_name, scope, label)
         timeout_s = self.plat.command_timeout_min * 60
         script = self.script(
-            self.wslpath(repo_root, log),
+            self.wslpath(source, log),
             self.wslpath(logs_dir, log),
             self.wslpath(extra_dir, log),
             ref,

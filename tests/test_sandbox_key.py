@@ -100,8 +100,8 @@ class WslLayout(unittest.TestCase):
         self.assertEqual(seen["scope"], "feature__mul")
 
 
-class WslTwoCheckouts(RepoCase):
-    """AC-1, AC-4 end to end: the script runs under the host's bash through the wsl stub."""
+class WslStubCase(RepoCase):
+    """The wsl runner end to end: the script runs under the host's bash through the stub."""
 
     runner = "wsl"
 
@@ -147,6 +147,10 @@ class WslTwoCheckouts(RepoCase):
             fh.write("x")
         return os.path.join(path, "busy")
 
+
+class WslTwoCheckouts(WslStubCase):
+    """AC-1, AC-4."""
+
     @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_two_checkouts_named_alike_on_one_branch_do_not_share(self):  # AC-1
         other = clone_as(self.repo, os.path.join(self.tmp, "elsewhere"), "sample")
@@ -177,6 +181,66 @@ class WslTwoCheckouts(RepoCase):
             self.repo, head, [("test", "true")], {}, logs, "validate-r1", scope="feature__mul"
         )
         self.assertFalse(os.path.exists(busy))
+
+
+class WslFromAWorktree(WslStubCase):
+    """AC-9: a linked worktree's `.git` file names its git directory by a host path, which
+    git inside WSL cannot resolve on Windows (`/mnt/e/.../E:/...`); the runner clones from the
+    common git directory and resolves `HEAD` on the host. The stub's bash can read host paths,
+    so the WSL failure itself is not reproduced here (the PR's own round 1 hit it); these tests
+    pin what the fix does."""
+
+    def setUp(self):
+        super().setUp()
+        self.wt = os.path.join(self.tmp, "wt")
+        git(["worktree", "add", "-q", "-b", "feature/other", self.wt], self.repo)
+        with open(os.path.join(self.wt, "other.txt"), "w", encoding="utf-8", newline="") as fh:
+            fh.write("only in the worktree\n")
+        git(["add", "other.txt"], self.wt)
+        git(["commit", "-q", "-m", "worktree commit"], self.wt)
+
+    def head_seen(self, ref):
+        logs = os.path.join(self.tmp, "logs-wt")
+        marker = os.path.join(logs, "head.txt")
+        report = self.runner_().run(
+            self.wt,
+            ref,
+            [("test", 'git rev-parse HEAD > "%s"' % bash_form(marker))],
+            {},
+            logs,
+            "validate-r1",
+            scope="feature__other",
+            key=sandbox_key(self.wt, "feature/other"),
+        )
+        self.assertTrue(report.ok, [(s.name, s.returncode, s.stdout[-300:]) for s in report.steps])
+        with open(marker, encoding="utf-8") as fh:
+            head = fh.read().strip()
+        with open(os.path.join(logs, "validate-r1.sh"), encoding="utf-8") as fh:
+            host = [ln for ln in fh.read().splitlines() if ln.startswith("HOST=")][0]
+        return head, host
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_head_is_the_worktrees_commit(self):
+        wt_head = git(["rev-parse", "HEAD"], self.wt).strip()
+        self.assertNotEqual(wt_head, git(["rev-parse", "HEAD"], self.repo).strip())
+        head, _ = self.head_seen("HEAD")
+        self.assertEqual(head, wt_head)
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_the_clone_source_is_the_common_git_directory(self):
+        _, host = self.head_seen("HEAD")
+        self.assertTrue(host.rstrip('"').endswith("/.git"), host)
+        self.assertNotIn("/wt", host)
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_an_unknown_ref_still_fails_in_the_script(self):
+        # unresolved on the host, the ref goes to the script as before, whose checkout fails
+        logs = os.path.join(self.tmp, "logs-bad")
+        with self.assertRaises(RunnerError) as ctx:
+            self.runner_().run(self.wt, "no-such-ref", [("test", "true")], {}, logs, "validate-r1")
+        self.assertIn("clone/checkout failed", str(ctx.exception))
+        with open(os.path.join(logs, "validate-r1.sh"), encoding="utf-8") as fh:
+            self.assertIn('REF="no-such-ref"', fh.read())
 
 
 class SshNames(SshCase):
@@ -314,6 +378,8 @@ class Docs(unittest.TestCase):
         self.assertIn("<repo>/<branch>-<key>/<label>", text)
         self.assertIn("old layout", text)
         self.assertIn("by hand", text)
+        self.assertIn("common git directory", text)  # AC-9
+        self.assertIn("linked worktree added on Windows", text)
 
 
 if __name__ == "__main__":
