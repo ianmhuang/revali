@@ -298,6 +298,28 @@ class HeldPastTheWindow(HistoryCase):
         self.assertLess(time.monotonic() - started, 30)
         self.assertEqual(self.values(), [1])
 
+    def endless(self, value):
+        """AC-4 with a `write_retry_s` that would never expire: the wait still ends, after
+        the shipped window. The holder lets go on its own long after that, so a writer that
+        waits for ever ends this test as a failure and not as a hang."""
+        configured = float(load_defaults()["paths"]["write_retry_s"])
+        self.user_home("[paths]\nwrite_retry_s = %s\n" % value)
+        holder, released = self.hold(self.path, seconds=configured + 25)
+        started = time.monotonic()
+        append_history(self.path, {"n": 1})
+        took = time.monotonic() - started
+        self.assertFalse(os.path.exists(released), "waited until the holder let go")
+        self.assertGreaterEqual(took, configured * 0.9)  # it did wait for the lock
+        self.assertLess(took, configured + 10)
+        self.assertIsNone(holder.poll())
+        self.assertEqual(self.values(), [1])  # appended without the lock, not dropped
+
+    def test_an_infinite_window_in_the_user_file_still_ends(self):
+        self.endless("inf")
+
+    def test_a_nan_window_in_the_user_file_still_ends(self):
+        self.endless("nan")
+
 
 class NoLockFile(HistoryCase):
     """AC-5."""
