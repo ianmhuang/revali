@@ -5,6 +5,7 @@ and the pipeline through the CLI; the scripts execute under the host's bash via 
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -151,17 +152,22 @@ class SshScopeTests(SshCase):
         self.assertTrue(report.ok, [(s.name, s.returncode) for s in report.steps])
         calls = self.calls()
         self.assertEqual([c[0] for c in calls], ["ssh", "scp", "ssh", "scp", "ssh"])
-        mkdir = calls[0][1][-1]
-        self.assertIn("sandbox/sample/feature__mul/validate-r1-in", mkdir)
-        self.assertIn("sandbox/sample/feature__mul/validate-r1-logs", mkdir)
-        self.assertEqual(calls[1][1][-1], "box:.revali/sandbox/sample/feature__mul/validate-r1-in/")
-        self.assertEqual(
-            calls[3][1][-2], "box:.revali/sandbox/sample/feature__mul/validate-r1-logs/."
+        # fix/ssh-session-dirs AC-1: the session's directories are `validate-r1-<id>[-in|-logs]`
+        own = re.fullmatch(
+            r"box:\.revali/sandbox/sample/feature__mul/(validate-r1-[0-9a-f]{8})-in/",
+            calls[1][1][-1],
         )
+        self.assertIsNotNone(own, calls[1][1][-1])
+        own = own.group(1)
+        mkdir = calls[0][1][-1]
+        self.assertIn("sandbox/sample/feature__mul/%s-in" % own, mkdir)
+        self.assertIn("sandbox/sample/feature__mul/%s-logs" % own, mkdir)
+        self.assertEqual(calls[1][1][-1], "box:.revali/sandbox/sample/feature__mul/%s-in/" % own)
+        self.assertEqual(calls[3][1][-2], "box:.revali/sandbox/sample/feature__mul/%s-logs/." % own)
         cleanup = calls[4][1][-1]
         rm, _, rmdir = cleanup.partition("&&")
         self.assertTrue(rm.startswith("rm -rf "), cleanup)
-        for name in ("validate-r1-in", "validate-r1-logs", "validate-r1"):
+        for name in (own + "-in", own + "-logs", own):
             self.assertIn("sandbox/sample/feature__mul/%s" % name, rm)
         # the parents go innermost first, and only when empty
         self.assertIn("rmdir --ignore-fail-on-non-empty", rmdir)

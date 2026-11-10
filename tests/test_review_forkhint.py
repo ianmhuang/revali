@@ -310,13 +310,24 @@ class EarlyEndMessage(unittest.TestCase):
                 self.assertNotIn("max_procs", plain)
                 self.assertNotIn(SCRIPT_LOG, plain)
                 self.assertEqual(self.ended_early(rows, "", 300), plain)
-                self.assertEqual(self.ended_early(rows, "Killed\n", 300), plain)
+                # fix/ssh-session-dirs AC-6 (changes this PR's AC-8): a script log that is not
+                # empty is named and quoted whatever it says; max_procs only for a fork string
+                killed = self.ended_early(rows, "Killed\n", 300)
+                self.assertTrue(killed.startswith(plain), killed)
+                self.assertIn(SCRIPT_LOG, killed)
+                self.assertIn("`Killed`", killed)
+                self.assertNotIn("max_procs", killed)
 
     def test_the_message_is_what_it_was_without_a_limit(self):
         for rows in ("", "setup\t0\t0\n"):
             with self.subTest(rows=rows):
                 plain = self.ended_early(rows, None, 300)
-                self.assertEqual(self.ended_early(rows, FORK_FAIL + "\n", 0), plain)
+                # fix/ssh-session-dirs AC-6: named and quoted, but no max_procs without a limit
+                text = self.ended_early(rows, FORK_FAIL + "\n", 0)
+                self.assertTrue(text.startswith(plain), text)
+                self.assertIn(SCRIPT_LOG, text)
+                self.assertIn("`%s`" % FORK_FAIL, text)
+                self.assertNotIn("max_procs", text)
 
     def test_a_session_that_reached_its_end_is_read_as_before(self):
         self.put(SCRIPT_LOG, FORK_FAIL + "\n")

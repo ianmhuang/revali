@@ -28,7 +28,7 @@ from revali.state import (
     write_json_atomic,
 )
 from tests.helpers import RepoCase, claude_entry, git, run_cli
-from tests.test_ssh_runner import HAVE_BASH, SshCase, plat
+from tests.test_ssh_runner import HAVE_BASH, SID, SshCase, plat
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -141,13 +141,15 @@ class SshLayoutTests(SshCase):
         )
         self.assertTrue(report.ok, [(s.name, s.returncode) for s in report.steps])
         calls = self.calls()
-        self.assertTrue(
-            calls[1][1][-1].startswith("box:.revali/sandbox/sample/feature__mul/validate-r1-in"),
-            calls[1][1],
+        # fix/ssh-session-dirs AC-1: the remote names carry the session id
+        self.assertRegex(
+            calls[1][1][-1], r"^box:\.revali/sandbox/sample/feature__mul/validate-r1-%s-in/$" % SID
         )
-        self.assertEqual(
-            calls[3][1][-2:], ["box:.revali/sandbox/sample/feature__mul/validate-r1-logs/.", "."]
+        self.assertRegex(
+            calls[3][1][-2],
+            r"^box:\.revali/sandbox/sample/feature__mul/validate-r1-%s-logs/\.$" % SID,
         )
+        self.assertEqual(calls[3][1][-1], ".")
         self.assertIn("mkdir -p ", calls[0][1][-1])
         self.assertIn("feature__mul", calls[0][1][-1])
         cleanup = calls[4][1][-1]
@@ -168,9 +170,7 @@ class SshLayoutTests(SshCase):
         head = git(["rev-parse", "HEAD"], self.repo).strip()
         r.run(self.repo, head, [("test", "true")], {}, logs, "validate-r1")
         calls = self.calls()
-        self.assertTrue(
-            calls[1][1][-1].startswith("box:.revali/sandbox/sample/validate-r1-in"), calls[1][1]
-        )
+        self.assertRegex(calls[1][1][-1], r"^box:\.revali/sandbox/sample/validate-r1-%s-in/$" % SID)
 
 
 class PipelineScopeTests(RepoCase):

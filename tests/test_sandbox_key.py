@@ -26,7 +26,7 @@ from revali.runners import (
 )
 from tests.helpers import FAKE_BIN, RepoCase, _quote, claude_entry, git, run_cli
 from tests.test_review_basererun import BaseRerunCase
-from tests.test_ssh_runner import HAVE_BASH, SshCase, plat
+from tests.test_ssh_runner import HAVE_BASH, SID, SshCase, plat
 
 WSL_STUB = os.path.join(FAKE_BIN, "wsl_stub.py")
 BRANCH = "feature/mul"
@@ -355,7 +355,8 @@ class SshNames(SshCase):
         with open(busy, "w", encoding="utf-8", newline="") as fh:
             fh.write("x")
         mkdir = self.run_in(a, ka)
-        self.assertIn("sandbox/my_repo/feature__mul-%s/validate-r1-in" % ka, mkdir)
+        # fix/ssh-session-dirs AC-1: the remote names carry the session id
+        self.assertRegex(mkdir, "sandbox/my_repo/feature__mul-%s/validate-r1-%s-in" % (ka, SID))
         self.assertTrue(os.path.isfile(busy))
         self.assertFalse(
             os.path.exists(
