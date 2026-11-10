@@ -1,15 +1,17 @@
 """Acceptance tests for fix/primary-pull-retry: after `revali merge` in the primary tree, a
 `git pull --prune` that fails is run once more after a pause (AC-1); two failures are named in
-a note with git's error and the merge still succeeds (AC-2); a pull that times out or cannot be
-started is a failed attempt, not a traceback (AC-3); a failed checkout of the base means no pull
-and a note of its own (AC-4); worktree mode runs what it ran before (AC-5).
+a note with git's error and the merge still succeeds (AC-2), the first error before the second
+when the two differ (round 1, F1); a pull that times out or cannot be started is a failed
+attempt, not a traceback (AC-3), and neither is a git that cannot be started elsewhere in the
+follow-up (round 1, F2); a failed checkout of the base means no pull and a note of its own
+(AC-4); worktree mode runs what it ran before (AC-5).
 
 Black-box through `revali merge` with the fake gh, which merges nothing and leaves the tree on
 feature/mul, so revali checks out main itself and then pulls. Non-zero exits come from a
 stand-in set through REVALI_GIT_CMD that fails one subcommand and hands everything else to the
 real git. A timeout (300 s in the code) and an executable that cannot start cannot be produced
-that way, so for AC-3 `subprocess.run` raises what the operating system would, for the pull
-only."""
+that way, so for AC-3 `subprocess.run` raises what the operating system would, for the one
+git command only."""
 
 import json
 import os
@@ -26,21 +28,25 @@ from tests.helpers import RepoCase, _quote, git, run_cli
 LOCK_ERROR = "error: cannot lock ref 'refs/remotes/origin/main': is at 3fca889 but expected a0c52e3"
 LONG_ERROR = "fatal: unable to access 'https://git.example.invalid/sample.git/': " + "y" * 300
 CHECKOUT_ERROR = "error: Your local changes to src/calc.py would be overwritten by checkout"
+CONFLICT_ERROR = "CONFLICT (content): Merge conflict in src/calc.py"
+UNMERGED_ERROR = "error: Pulling is not possible because you have unmerged files."
 
-# Every git call is recorded (argv and wall-clock time); the first `fails` calls of one
-# subcommand exit 1 with `stderr`, the rest and every other command go to the real git.
+# Every git call is recorded (argv and wall-clock time); the first len(errors) calls of one
+# subcommand exit 1, the n-th with errors[n] on stderr; the rest and every other command go to
+# the real git.
 STAND_IN = """import json, os, subprocess, sys, time
 args = sys.argv[1:]
 record = %(record)r
 sub = %(sub)r
+errors = %(errors)r
 seen = 0
 if os.path.exists(record):
     with open(record, encoding="utf-8") as fh:
         seen = sum(1 for line in fh if line.strip() and sub in json.loads(line)["argv"])
 with open(record, "a", encoding="utf-8") as fh:
     fh.write(json.dumps({"argv": args, "at": time.time()}) + "\\n")
-if sub in args and seen < %(fails)d:
-    sys.stderr.write(%(stderr)r)
+if sub in args and seen < len(errors):
+    sys.stderr.write(errors[seen])
     sys.exit(1)
 sys.exit(subprocess.call([%(git)r] + args))
 """
@@ -79,7 +85,9 @@ class PullCase(RepoCase):
         return rdir
 
     def stand_in(self, sub, fails, stderr=""):
-        """From now on revali's git fails its first `fails` calls of `sub`."""
+        """From now on revali's git fails its first `fails` calls of `sub`, each with `stderr`;
+        a list of texts as `stderr` gives every failing call its own."""
+        errors = [stderr] * fails if isinstance(stderr, str) else list(stderr)[:fails]
         script = os.path.join(self.tmp, "stand-in git.py")
         with open(script, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(
@@ -87,8 +95,7 @@ class PullCase(RepoCase):
                 % {
                     "record": self.record,
                     "sub": sub,
-                    "fails": fails,
-                    "stderr": stderr,
+                    "errors": errors,
                     "git": shutil.which("git"),
                 }
             )
@@ -195,14 +202,29 @@ class FailedPull(PullCase):
         self.assertIn("no-such-origin", line)  # git names the remote it could not read
         self.assertTrue(same_path_in(line, gitops.repo_root(self.repo)), line)
 
+    def test_two_different_errors_are_both_in_the_note_the_first_one_first(self):
+        # a first attempt that stops in a conflict makes the second fail for that reason; the
+        # note must still carry the cause (round 1, F1)
+        rdir = self.ready()
+        self.stand_in("pull", fails=2, stderr=[CONFLICT_ERROR + "\n", UNMERGED_ERROR + "\n"])
+        out = self.merged(rdir)
+        self.assertEqual(len(self.recorded("pull")), 2, out)
+        line = self.line_with(out, "note: git pull --prune failed")
+        self.assertIn(CONFLICT_ERROR, line)
+        self.assertIn(UNMERGED_ERROR, line)
+        self.assertLess(line.index(CONFLICT_ERROR), line.index(UNMERGED_ERROR))
+        self.assertTrue(same_path_in(line, gitops.repo_root(self.repo)), line)
+        self.assertIn("git pull", line.split(UNMERGED_ERROR, 1)[1])
+
 
 class PullThatCannotRun(PullCase):
     """AC-3"""
 
     def failing_pull(self, errors):
         """revali's `git pull` raises what the operating system would on its first
-        len(errors) attempts ("timeout" or "missing") without running; later attempts and
-        every other command run for real. Returns the list the attempts are recorded in."""
+        len(errors) attempts ("timeout", "missing" or "denied") without running; later
+        attempts and every other command run for real. Returns the list the attempts are
+        recorded in."""
         real = subprocess.run
         pending = list(errors)
         attempts = []
@@ -212,8 +234,11 @@ class PullThatCannotRun(PullCase):
             if "pull" in argv[1:]:
                 attempts.append(argv)
                 if pending:
-                    if pending.pop(0) == "timeout":
+                    kind = pending.pop(0)
+                    if kind == "timeout":
                         raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+                    if kind == "denied":
+                        raise PermissionError(13, "Permission denied", argv[0])
                     raise FileNotFoundError(2, "No such file or directory", argv[0])
             return real(cmd, *args, **kw)
 
@@ -249,6 +274,45 @@ class PullThatCannotRun(PullCase):
         line = self.line_with(out, "note: git pull --prune failed")
         self.assertIn("No such file or directory", line)
         self.assertTrue(same_path_in(line, gitops.repo_root(self.repo)), line)
+
+    def test_a_git_the_system_refuses_to_start_is_the_note_with_the_reason(self):
+        # a spawn error other than a missing file (round 1, F2)
+        rdir = self.ready()
+        attempts = self.failing_pull(["denied", "denied"])
+        out = self.merged(rdir)
+        self.assertEqual(len(attempts), 2, out)
+        line = self.line_with(out, "note: git pull --prune failed")
+        self.assertIn("Permission denied", line)
+
+
+class FollowUpThatCannotRun(PullCase):
+    """AC-3's "instead of a traceback", for the git calls around the pull (round 1, F2)."""
+
+    def test_git_gone_after_the_pr_merged_is_a_note_and_the_merge_is_recorded(self):
+        rdir = self.ready()
+        real = subprocess.run
+        merged = []
+        refused = []
+
+        def fake(cmd, *args, **kw):
+            argv = [str(c) for c in cmd] if isinstance(cmd, (list, tuple)) else [str(cmd)]
+            # once gh has merged the PR, git cannot be started to ask which branch the tree
+            # is on: the first thing the local follow-up does
+            if merged and "--abbrev-ref" in argv:
+                refused.append(argv)
+                raise FileNotFoundError(2, "No such file or directory", argv[0])
+            res = real(cmd, *args, **kw)
+            if "pr" in argv and "merge" in argv:  # the fake gh's `pr merge`
+                merged.append(argv)
+            return res
+
+        patcher = mock.patch("subprocess.run", side_effect=fake)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        out = self.merged(rdir)  # no exception, exit 0, MERGED, history row, archived
+        self.assertTrue(merged and refused, out)
+        line = self.line_with(out, "note:")
+        self.assertIn("No such file or directory", line)
 
 
 class FailedCheckout(PullCase):
