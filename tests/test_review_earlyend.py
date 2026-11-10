@@ -7,6 +7,10 @@ AC-2: a row for every step, and rows that end with a failing step, read as befor
 AC-3: a row that is not the next step the session was given (unknown, repeated, out of
       order) is a RunnerError saying the results do not match the session's steps.
 
+Round 2 adds the two cases the fix round brought in, both sessions stopped from outside that
+must not read as a pass: no row at all (the session ended in its first step) names that
+step and the causes, and a row cut off while it was written is a RunnerError.
+
 `ResultRows` feeds results files to `report_from_results`. The session classes run the real
 WslRunner / SshRunner against the repository's stand-ins for wsl.exe and ssh, wrapped by a
 stub written here that lets the sandbox script run, then drops the end of its results file
@@ -127,12 +131,56 @@ class ResultRows(unittest.TestCase):
             self.report(*rows, steps=steps)
         return str(cm.exception).replace(self.logs, "<logs>")
 
+    def refused_text(self, text, steps=None):
+        """The RunnerError's text for a results file holding exactly `text`."""
+        path = os.path.join(self.logs, LABEL + ".results")
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+        with self.assertRaises(RunnerError) as cm:
+            report_from_results(self.logs, LABEL, list(steps or self.STEPS))
+        return str(cm.exception).replace(self.logs, "<logs>")
+
     def assert_names_the_causes(self, text):
         self.assertIn("wsl --shutdown", text)
         self.assertIn("ssh", text.lower())
         self.assertIn("memory", text.lower())
 
     # --- AC-1 -----------------------------------------------------------------------------
+
+    def test_an_empty_results_file_names_the_first_step_and_the_causes(self):
+        # the session ended during its first step: no row was written yet
+        text = self.refused(steps=[("build", "make"), ("test", "make check")])
+        self.assertIn("build", text)
+        self.assert_names_the_causes(text)
+
+    def test_a_missing_results_file_names_the_first_step_and_the_causes(self):
+        with self.assertRaises(RunnerError) as cm:
+            report_from_results(self.logs, LABEL, [("build", "make"), ("test", "make check")])
+        text = str(cm.exception).replace(self.logs, "<logs>")
+        self.assertIn("build", text)
+        self.assert_names_the_causes(text)
+
+    def test_no_rows_skip_a_first_step_without_a_command(self):
+        text = self.refused(steps=[("setup", ""), ("build", "make"), ("test", "make check")])
+        self.assertIn("build", text)
+        self.assertNotIn("setup", text)
+
+    def test_a_first_row_cut_off_while_it_was_written_is_never_a_pass(self):
+        for torn in ("set", "setup", "setup\t", "setup\t0", "setup\t0\t"):
+            for ending in ("", "\n"):
+                with self.subTest(row=torn + ending):
+                    self.refused_text(torn + ending)
+
+    def test_a_cut_off_row_after_passing_rows_is_never_a_pass(self):
+        for torn in ("bui", "build", "build\t", "build\t0", "build\t0\t"):
+            with self.subTest(row=torn):
+                self.refused_text("setup\t0\t0\n" + torn)
+
+    def test_a_cut_off_last_row_is_never_a_pass(self):
+        whole = "setup\t0\t0\nbuild\t0\t0\ntest\t0\t0\n"
+        for torn in ("new_test", "new_test\t0", "new_test\t0\t"):
+            with self.subTest(row=torn):
+                self.refused_text(whole + torn)
 
     def test_rows_that_stop_after_the_first_step_name_the_second(self):
         text = self.refused(("setup", 0, 0))
@@ -270,6 +318,13 @@ class _Sessions:
         lose_rows(self, {LABEL: 1})
         text = self.died()
         self.assertRegex(text, r"\btest\b")
+        self.assertIn("wsl --shutdown", text)
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_a_session_that_lost_every_row_is_an_error_naming_the_first_step(self):
+        lose_rows(self, {LABEL: 0})
+        text = self.died()
+        self.assertIn("setup", text)
         self.assertIn("wsl --shutdown", text)
 
     # --- AC-2 -----------------------------------------------------------------------------

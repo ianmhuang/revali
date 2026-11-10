@@ -82,6 +82,12 @@ class Run(WslCase):
         self.assert_sandbox_error(code, out)
 
     @unittest.skipUnless(HAVE_BASH, "needs bash")
+    def test_a_validation_that_lost_every_row_is_exit_1_not_pass(self):
+        lose_rows(self, {"validate-r1": 0})
+        code, out = self.run_it()
+        self.assert_sandbox_error(code, out)
+
+    @unittest.skipUnless(HAVE_BASH, "needs bash")
     def test_a_baseline_that_ended_after_setup_is_exit_1(self):
         lose_rows(self, {"baseline": 1})
         code, out = self.run_it()
