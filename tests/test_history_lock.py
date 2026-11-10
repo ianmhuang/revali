@@ -4,6 +4,7 @@ Measured before the change: 4 processes appending 200 rows each to one file at t
 moment lost 91 to 226 of the 800 rows on Windows (none on Linux ext4).
 """
 
+import errno
 import json
 import os
 import subprocess
@@ -33,7 +34,8 @@ for i in range(%(rows)d):
 """
 
 # a holder: takes the OS lock on <history>.lock the way AC-2 names it, writes the ready file,
-# then holds it until killed (or for `seconds`)
+# then holds it until killed (or for `seconds`, after which it writes `<ready>.released` while it
+# still holds the lock, so a test can tell a release apart from the process ending)
 HOLDER = """import os, sys, time
 lock, ready, seconds = sys.argv[1], sys.argv[2], float(sys.argv[3])
 fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
@@ -46,6 +48,7 @@ else:
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 open(ready, "w").close()
 time.sleep(seconds)
+open(ready + ".released", "w").close()
 """
 
 
@@ -118,11 +121,15 @@ class LockFile(HistoryCase):
         self.assertLess(time.monotonic() - started, 1.0)
 
     def test_a_writer_waits_for_the_holder(self):
-        holder = self.hold_lock(seconds=1.0)
+        self.hold_lock(seconds=1.0)
         started = time.monotonic()
-        append_history(self.path, {"n": 1}, retry_s=30)
+        self.assertEqual(append_history(self.path, {"n": 1}, retry_s=30), "")
         took = time.monotonic() - started
-        self.assertIsNotNone(holder.poll(), "appended while the holder still held the lock")
+        # PR #61 F6: the holder writes the marker before it lets go, so it exists here
+        self.assertTrue(
+            os.path.exists(os.path.join(self.tmp, "ready.released")),
+            "appended while the holder still held the lock",
+        )
         self.assertLess(took, 20)
         self.assertEqual([r["n"] for r in read_history(self.path)], [1])
 
@@ -149,22 +156,122 @@ class NoLock(HistoryCase):
         self.assertLess(took, 5)
         self.assertEqual([r["n"] for r in read_history(self.path)], [1])
 
-    def test_default_window_is_write_retry_s(self):
+    def user_home(self, config_text=None):
+        home = os.path.join(self.tmp, "home")
+        os.makedirs(home, exist_ok=True)
+        if config_text is not None:
+            with open(os.path.join(home, "config.toml"), "w", encoding="utf-8") as fh:
+                fh.write(config_text)
+        patcher = mock.patch.dict(os.environ, {"REVALI_HOME": home})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_window_from_the_user_file(self):
+        # PR #61 F1: the user layer's [paths] write_retry_s, looked up for real (no mock);
+        # 0.4 s is well under the shipped 2 s, so the default would show
+        self.user_home("[paths]\nwrite_retry_s = 0.4\n")
         self.hold_lock()
-        with mock.patch("revali.state.write_retry_s", return_value=0.3) as window:
-            append_history(self.path, {"n": 1})
-        window.assert_called()
+        started = time.monotonic()
+        why = append_history(self.path, {"n": 1})
+        took = time.monotonic() - started
+        self.assertGreaterEqual(took, 0.4)
+        self.assertLess(took, 1.5)
+        self.assertIn("longer than 0.4s", why)
         self.assertEqual([r["n"] for r in read_history(self.path)], [1])
 
+    def test_window_from_a_user_file_that_does_not_load_is_the_default(self):
+        from revali.config import load_defaults
+        from revali.state import history_retry_s
+
+        self.user_home('[paths]\nwrite_retry_s = "slow"\n')
+        self.assertEqual(history_retry_s(), float(load_defaults()["paths"]["write_retry_s"]))
+
     def test_uncontended_append_does_not_look_up_the_window(self):
-        with mock.patch("revali.state.write_retry_s", return_value=0.3) as window:
-            append_history(self.path, {"n": 1})
+        with mock.patch("revali.state.history_retry_s", return_value=0.3) as window:
+            self.assertEqual(append_history(self.path, {"n": 1}), "")
         window.assert_not_called()
+
+    def test_the_wait_ends_on_the_deadline(self):
+        # PR #61 F2: on a fake clock the pauses add up to the window exactly, none past it
+        clock = [100.0]
+        slept = []
+
+        def sleep(seconds):
+            slept.append(seconds)
+            clock[0] += seconds
+
+        with (
+            mock.patch("revali.state._try_os_lock", return_value=False),
+            mock.patch("revali.state.time.monotonic", side_effect=lambda: clock[0]),
+            mock.patch("revali.state.time.sleep", side_effect=sleep),
+        ):
+            why = append_history(self.path, {"n": 1}, retry_s=0.5)
+        self.assertAlmostEqual(sum(slept), 0.5, places=9)
+        self.assertLessEqual(max(slept), 0.1)
+        self.assertIn("longer than", why)
+        self.assertEqual([r["n"] for r in read_history(self.path)], [1])
+
+    def test_locking_unsupported_appends_at_once(self):
+        # PR #61 F3: an error that is not contention does not wait out the window
+        with (
+            mock.patch("revali.state._try_os_lock", return_value=None),
+            mock.patch("revali.state.history_retry_s", return_value=30) as window,
+        ):
+            started = time.monotonic()
+            why = append_history(self.path, {"n": 1})
+        self.assertLess(time.monotonic() - started, 1.0)
+        window.assert_not_called()
+        self.assertIn("cannot be locked", why)
+        self.assertEqual([r["n"] for r in read_history(self.path)], [1])
+
+    def test_try_lock_tells_contention_from_other_errors(self):
+        from revali import state
+
+        lock = os.path.join(self.tmp, "x.lock")
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+        self.addCleanup(os.close, fd)
+        target = "msvcrt.locking" if os.name == "nt" else "fcntl.flock"
+        __import__(target.split(".")[0])
+        for exc, expected in (
+            (BlockingIOError(errno.EWOULDBLOCK, "busy"), False),
+            (PermissionError(errno.EACCES, "held"), False),
+            (OSError(errno.ENOLCK, "no locks"), None),
+            (OSError(errno.EOPNOTSUPP, "not supported"), None),
+        ):
+            with self.subTest(exc=exc), mock.patch(target, side_effect=exc):
+                self.assertIs(state._try_os_lock(fd), expected)
+
+    def test_a_failing_window_lookup_still_appends_and_closes_the_lock(self):
+        # PR #61 F4
+        with (
+            mock.patch("revali.state._try_os_lock", return_value=False),
+            mock.patch("revali.state.history_retry_s", side_effect=RuntimeError("broken defaults")),
+        ):
+            why = append_history(self.path, {"n": 1})
+        self.assertIn("no lock window", why)
+        self.assertEqual([r["n"] for r in read_history(self.path)], [1])
+        os.remove(self.path + ".lock")  # Windows refuses this while a descriptor is open
 
     def test_lock_file_that_cannot_be_opened(self):
         os.makedirs(self.path + ".lock")  # a directory where the lock file would be
-        append_history(self.path, {"n": 1})
+        why = append_history(self.path, {"n": 1})
+        self.assertIn("cannot be opened", why)
         self.assertEqual([r["n"] for r in read_history(self.path)], [1])
+
+    def test_an_unlocked_row_is_noted_in_the_branch_log(self):
+        # PR #61 follow-up 1: `_record_history` says so in revali.log
+        from revali.pipeline import _record_history
+        from revali.state import RunLog, State
+
+        self.user_home()
+        os.makedirs(os.path.join(self.tmp, "home", "history.jsonl.lock"))
+        rdir = os.path.join(self.tmp, "rdir")
+        log = RunLog(rdir, quiet=True, logs_dir="logs")
+        _record_history(State(repo="o/r", branch="b", base="main", stage="error"), 1, log)
+        with open(os.path.join(rdir, "logs", "revali.log"), encoding="utf-8") as fh:
+            self.assertIn("history row appended without its lock", fh.read())
+        rows = read_history(os.path.join(self.tmp, "home", "history.jsonl"))
+        self.assertEqual([r["branch"] for r in rows], ["b"])
 
     def test_an_unwritable_history_still_raises(self):
         os.makedirs(self.path)  # the history path is a directory
