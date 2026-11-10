@@ -228,7 +228,10 @@ def _stop(proc: subprocess.Popen) -> None:
         pass
 
 
-def run_retry(cmd: list, retries: int = 1, wait: float = 3.0, **kw) -> Result:
+RETRY_WAIT_S = 3.0  # the pause before a retry of a command that failed
+
+
+def run_retry(cmd: list, retries: int = 1, wait: float = RETRY_WAIT_S, **kw) -> Result:
     """Retry a command once (by default) on non-zero exit; for transient gh/api failures."""
     res = run(cmd, **kw)
     attempt = 0

@@ -60,7 +60,17 @@ Worktree mode in `merge` (no `--delete-branch`, detach, drop the local branch
 by hand) applies only when the base branch is checked out in another
 worktree; a linked worktree whose base is checked out nowhere else merges
 like the primary tree, with `--delete-branch`, and gh checks out the base
-there.
+there. After a merge outside worktree mode, revali checks out the base if
+gh did not and runs `git pull --prune`, once more after a short pause when
+it fails. A checkout or pull that still fails is a `note:` line with git's
+error (both errors when the two attempts differ, since a first attempt that
+stopped in a conflict makes the second fail for that reason) and what to
+run. Any other git failure while updating the tree is a note saying
+updating the tree stopped. When git cannot be run while deleting the
+local branch, the `local:` line says it could not tell whether the branch
+was removed; a `git branch -D` that runs and fails leaves the branch, and
+the line says it was kept, with git's error. The PR is merged, so the
+exit code stays 0.
 
 ## Running
 
@@ -95,8 +105,8 @@ origin <base>` and compares the branch against `origin/<base>`; a fetch
 that fails is tried once more after a short pause, since worktrees of one
 repository share `refs/remotes/` and of two fetches of the same ref at the
 same moment one fails after the other has moved the ref (`revali merge`
-from a linked worktree retries its fetch of the base the same way; from the
-primary tree it runs `git pull --prune`, which is not retried). When both attempts fail,
+from a linked worktree retries its fetch of the base the same way, and from
+the primary tree its `git pull --prune`). When both attempts fail,
 preflight prints a note with git's error and compares against the local
 `<base>`, which may be behind the remote. On the first pass of a branch
 (no review round yet, not a dry run, not `kind: docs`) preflight ends with

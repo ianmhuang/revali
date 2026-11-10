@@ -137,7 +137,11 @@ stated.
 - on `revali merge` (human-started, refused unless the last run ended READY
   TO MERGE and HEAD has not moved): waits for CI checks if the PR has any,
   then `gh pr merge --<method> --delete-branch`, which also deletes the
-  local branch and checks out the base branch; then `git pull --prune`, and
+  local branch and checks out the base branch; then `git pull --prune`, tried
+  twice (revali checks out the base first when gh did not, and does not pull
+  when that checkout fails); a pull or checkout that fails is printed as a
+  note with git's error, saying the tree is not up to date, and the merge
+  still ends with exit 0; then
   the branch's state directory is moved to `[paths] archive_dir`
   (`~/.revali/archive/<owner>__<repo>/<pr>-<branch>/` by default; a name
   already taken gets a timestamp suffix; a move that fails leaves the
