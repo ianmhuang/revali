@@ -10,7 +10,7 @@ from typing import List, Optional
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops, issues
 from revali.config import ConfigError, load_project_config
 from revali.preflight import Stop
-from revali.procs import RETRY_WAIT_S, ProcError, resolve, run, run_retry
+from revali.procs import RETRY_WAIT_S, ProcError, one_line, resolve, run, run_retry
 from revali.state import RunLog, State, safe_branch
 
 POLL_ENV = "REVALI_POLL_SECONDS"
@@ -232,7 +232,7 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
     except GIT_FAILURES as exc:
         note = (
             "updating the tree stopped: %s; look at %s with `git status`, check out %s and "
-            "run `git pull` there" % (_one_line(str(exc)), root, base)
+            "run `git pull` there" % (one_line(str(exc)), root, base)
         )
     try:
         on = gitops.current_branch(root)  # `git branch -D` does not move HEAD
@@ -241,7 +241,7 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
     except GIT_FAILURES as exc:
         local = "could not tell whether branch %s was removed: %s" % (
             branch,
-            _one_line(str(exc)),
+            one_line(str(exc)),
         )
     log.stage("merge", "local: " + local)
     if note:
@@ -289,12 +289,6 @@ def _update_base(root: str, base: str, log: RunLog) -> str:
     )
 
 
-def _one_line(text: str) -> str:
-    """git's errors run over several lines; the merge output gets one, at most 200
-    characters."""
-    return " ".join(text.split())[:200]
-
-
 def _git_failure(call) -> str:
     """ "" when `call()` returns a Result that is ok; otherwise git's error (or the reason it
     could not run) on one line, cut to 200 characters."""
@@ -306,13 +300,14 @@ def _git_failure(call) -> str:
         if res.ok:
             return ""
         text = res.text or "exit %d" % res.returncode
-    return _one_line(text) or "failed"
+    return one_line(text) or "failed"
 
 
 def _delete_local_branch(root: str, branch: str, log: RunLog, when: bool) -> tuple:
     """`git branch -D <branch>` when `when` holds and the branch still exists. (removed, why):
-    `why` is empty on success or when there was nothing to delete, and names git's error
-    otherwise, so the log line says why a branch is still there."""
+    `why` is empty on success or when there was nothing to delete, and names git's error on
+    one line otherwise, so the log line says why a branch is still there. git that cannot be
+    run raises (GIT_FAILURES); the caller says it could not tell."""
     if not gitops.rev_parse(branch, root):
         return True, ""
     if not when:
@@ -320,7 +315,7 @@ def _delete_local_branch(root: str, branch: str, log: RunLog, when: bool) -> tup
     res = run(resolve("git") + ["branch", "-D", branch], cwd=root, log=log.detail)
     if res.ok:
         return True, ""
-    return False, " (git branch -D failed: %s)" % res.text.strip()[:200]
+    return False, " (git branch -D failed: %s)" % one_line(res.text)
 
 
 def check_title(state: State, rdir: str, root: str, log: RunLog) -> None:
@@ -399,38 +394,52 @@ def pr_merged(pr_number: int, cwd: str, log: Optional[RunLog]) -> bool:
 
 def _worktree_follow_up(root: str, branch: str, base: str, elsewhere: str, log: RunLog) -> None:
     """After the PR merged from a linked worktree: delete the remote branch, detach this
-    worktree at the merged base, drop the local branch, and say what is left to the user."""
-    res = run(
-        resolve("git") + ["push", "--quiet", "origin", "--delete", branch],
-        cwd=root,
-        log=log.detail,
-        timeout=300,
-    )
-    if not res.ok:
-        log.stage(
-            "merge", "note: could not delete origin/%s: %s" % (branch, res.text.strip()[:200])
-        )
-    res = gitops.fetch("origin", base, root, log.detail, prune=True)
-    if not res.ok:
-        log.stage("merge", "note: git fetch failed: %s" % res.text.strip()[:200])
-    else:
-        res = run(
-            resolve("git") + ["checkout", "--quiet", "--detach", "FETCH_HEAD"],
+    worktree at the merged base, drop the local branch, and say what is left to the user.
+    The PR is merged whatever happens here, so git failing or not running is a note or part
+    of the `worktree:` line, never an exception."""
+    reason = _git_failure(
+        lambda: run(
+            resolve("git") + ["push", "--quiet", "origin", "--delete", branch],
             cwd=root,
             log=log.detail,
+            timeout=300,
         )
-        if not res.ok:
-            log.stage("merge", "note: git checkout --detach failed: %s" % res.text.strip()[:200])
-    removed, why = _delete_local_branch(
-        root, branch, log, when=gitops.current_branch(root) == "HEAD"
     )
-    now = gitops.current_branch(root)
-    where = "detached at the merged %s" % base if now == "HEAD" else "still on %s" % now
+    if reason:
+        log.stage("merge", "note: could not delete origin/%s: %s" % (branch, reason))
+    reason = _git_failure(lambda: gitops.fetch("origin", base, root, log.detail, prune=True))
+    if reason:
+        log.stage("merge", "note: git fetch failed: %s" % reason)
+    else:
+        reason = _git_failure(
+            lambda: run(
+                resolve("git") + ["checkout", "--quiet", "--detach", "FETCH_HEAD"],
+                cwd=root,
+                log=log.detail,
+            )
+        )
+        if reason:
+            log.stage("merge", "note: git checkout --detach failed: %s" % reason)
+    try:
+        removed, why = _delete_local_branch(
+            root, branch, log, when=gitops.current_branch(root) == "HEAD"
+        )
+        local = "local branch %s %s%s" % (branch, "removed" if removed else "kept", why)
+    except GIT_FAILURES as exc:
+        local = "could not tell whether local branch %s was removed: %s" % (
+            branch,
+            one_line(str(exc)),
+        )
+    # asked again, apart from the deletion: a failure here must not lose the deletion's result
+    try:
+        now = gitops.current_branch(root)
+        where = "detached at the merged %s" % base if now == "HEAD" else "still on %s" % now
+    except GIT_FAILURES as exc:
+        where = "could not tell where this worktree is (%s)" % one_line(str(exc))
     log.stage(
         "merge",
-        "worktree: %s, local branch %s %s%s; remove this worktree with `git worktree remove %s` "
-        "and run `git pull` in %s"
-        % (where, branch, "removed" if removed else "kept", why, root, elsewhere),
+        "worktree: %s, %s; remove this worktree with `git worktree remove %s` and run "
+        "`git pull` in %s" % (where, local, root, elsewhere),
     )
 
 

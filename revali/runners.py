@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from revali.config import PlatformCfg
-from revali.procs import ExeNotFound, ProcTimeout, resolve, run, run_shell
+from revali.procs import ExeNotFound, ProcError, ProcTimeout, one_line, resolve, run, run_shell
 from revali.state import write_text
 
 Logger = Optional[Callable[[str], None]]
@@ -206,6 +206,47 @@ def sandbox_scope(scope: str, key: str) -> str:
     return "%s-%s" % (scope, key) if scope and key else scope
 
 
+CLEANUP_FAILURES = (ProcError, OSError)  # OSError: a spawn error, a file held open on Windows
+
+
+def remove_dir(path: str, label: str, log: Logger = None) -> None:
+    """Remove a directory a session made; one that is still there is logged, never raised,
+    so the session's report or error stands."""
+    shutil.rmtree(path, ignore_errors=True)
+    if os.path.exists(path) and log:
+        log("[%s] could not remove %s (left for you to delete)" % (label, path))
+
+
+def remove_file(path: str, label: str, log: Logger = None) -> None:
+    """remove_dir for one file."""
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except OSError as exc:
+        if log:
+            log("[%s] could not remove %s (left for you to delete): %s" % (label, path, exc))
+
+
+def _cleanup_git(
+    git: list, args: list, cwd: str, timeout: float, about: str, label: str, log: Logger
+) -> None:
+    """`git worktree <args>` after a local session: a failure, or git that cannot be run, is
+    logged on one line and never raised."""
+    try:
+        res = run(git + ["worktree"] + args, cwd=cwd, timeout=timeout)
+    except CLEANUP_FAILURES as exc:
+        reason = str(exc)
+    else:
+        if res.ok:
+            return
+        reason = res.text or "exit %d" % res.returncode
+    if log:
+        log(
+            "[%s] could not clean up %s: git worktree %s failed: %s"
+            % (label, about, args[0], one_line(reason))
+        )
+
+
 class LocalRunner(Runner):
     """git worktree on the host. Every step runs through the host shell."""
 
@@ -269,9 +310,11 @@ class LocalRunner(Runner):
                 if not step.ok:
                     break
         finally:
-            run(git + ["worktree", "remove", "--force", wt], cwd=repo_root, timeout=120)
-            run(git + ["worktree", "prune"], cwd=repo_root, timeout=60)
-            shutil.rmtree(tmp, ignore_errors=True)
+            # the temp dir goes before the prune, so a worktree git could not remove is
+            # dropped from the repository's list as well
+            _cleanup_git(git, ["remove", "--force", wt], repo_root, 120, wt, label, log)
+            remove_dir(tmp, label, log)
+            _cleanup_git(git, ["prune"], repo_root, 60, wt, label, log)
         return report
 
 
@@ -785,7 +828,7 @@ class WslRunner(Runner):
             except ProcTimeout as exc:
                 raise RunnerError("wsl session for %s did not finish in time" % label) from exc
         finally:
-            shutil.rmtree(extra_dir, ignore_errors=True)
+            remove_dir(extra_dir, label, log)
         if not res.ok and not os.path.isfile(results_path):
             raise RunnerError(
                 "wsl could not start the sandbox script (exit %d): %s"
@@ -874,10 +917,10 @@ class SshRunner(Runner):
                 repo_root, ref, steps, logs_dir, label, log, scope, extra_dir, bundle, bundle_path
             )
         finally:
-            # whatever ended the session, before or after the ssh calls
-            shutil.rmtree(extra_dir, ignore_errors=True)
-            if os.path.isfile(bundle_path):
-                os.remove(bundle_path)
+            # whatever ended the session, before or after the ssh calls; a failure here is
+            # logged and the report or error stands
+            remove_dir(extra_dir, label, log)
+            remove_file(bundle_path, label, log)
 
     def _session(
         self, repo_root, ref, steps, logs_dir, label, log, scope, extra_dir, bundle, bundle_path
@@ -1019,7 +1062,7 @@ class SshRunner(Runner):
         )
         try:
             r = self._ssh(command, timeout=self._short())
-        except (ProcTimeout, ExeNotFound) as exc:
+        except CLEANUP_FAILURES as exc:
             r = None
             reason = str(exc)
         else:
