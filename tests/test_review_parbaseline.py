@@ -6,7 +6,10 @@ baseline is recorded by the main thread and reused by validation (AC-3). A faili
 the run with exit 1 and "branch is broken before review": no reviewer when it failed first
 (AC-4), the reviewer killed when it fails mid-session (AC-5), the answer discarded and its
 cost kept when the reviewer answered first (AC-6). A run that ends for another reason waits
-for the baseline (AC-7). `parallel_baseline = false` keeps the old order, and a dry run, a
+for the baseline, and when the baseline failed too its failure is reported with the other
+reason on the line below (AC-7). Stopping the reviewer takes bounded time even when a
+descendant of the session keeps its pipes open (AC-5, as amended after round 1).
+`parallel_baseline = false` keeps the old order, and a dry run, a
 second pass and a docs change run no baseline (AC-8). The history row keeps the baseline out
 of `stage_s.preflight` (AC-9).
 
@@ -17,11 +20,15 @@ through `held` and wall-clock stamps, never through a sleep that happens to be l
 
 import json
 import os
+import shutil
+import sys
+import tempfile
 import threading
 import time
+import unittest
 from unittest import mock
 
-from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
+from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, procs
 from revali.preflight import Stop
 from revali.state import State, read_history
 from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
@@ -320,6 +327,105 @@ class TheRunEndsForAnotherReason(ParallelCase):
         self.assertGreaterEqual(returned - failed_at, 0.9)  # the run waited for it
         self.assertEqual(self.fake_calls("claude"), [])
 
+    def line_below_the_baseline_failure(self, out):
+        lines = out.splitlines()
+        at = [i for i, ln in enumerate(lines) if ln.startswith("ERROR: " + BROKEN)]
+        self.assertEqual(len(at), 1, out)  # the baseline's failure is the reported one
+        self.assertLess(at[0] + 1, len(lines), out)
+        return lines[at[0] + 1]
+
+    def test_a_failing_pr_stage_and_a_failing_baseline_report_the_baseline_first(self):
+        # AC-7 as amended: the old order would have stopped at the baseline, so that is the
+        # reported failure (exit 1), and the PR stage's own reason is on the line below it
+        pushed = os.path.join(self.tmp, "pr-stage-failed")
+
+        def failing_pr_stage(*args, **kw):
+            with open(pushed, "w", encoding="utf-8") as fh:
+                fh.write("failed\n")
+            raise Stop(EXIT_ERROR, "git push failed: the remote said no")
+
+        # the baseline can only fail 1 s after the PR stage has
+        self.baseline_runner(exit_code=1, until=pushed, delay=1.0)
+        self.claude(self.reviewer())
+        with mock.patch("revali.pr.ensure_pr", failing_pr_stage):
+            code, out = run_cli(RUN)
+        self.assertEqual(code, EXIT_ERROR, out)
+        below = self.line_below_the_baseline_failure(out)
+        self.assertIn("git push failed: the remote said no", below)
+        self.assertFalse([ln for ln in out.splitlines() if ln.startswith("ERROR: git push")], out)
+        call = self.baseline_call()  # the run waited for the session to end
+        self.assertTrue(call["held"], call)  # which was running when the PR stage failed
+        self.assertEqual(self.fake_calls("claude"), [])
+        state = State.load(self.rdir())
+        self.assertEqual((state.stage, state.last_exit), ("error", EXIT_ERROR))
+        self.assertTrue(state.message.startswith(BROKEN), state.message)
+        self.assertEqual(state.rounds, [])
+
+    def test_a_reviewer_error_and_a_failing_baseline_report_the_baseline_first(self):
+        # the baseline can only fail 1 s after the reviewer session has ended in an error
+        self.baseline_runner(exit_code=1, until=self.answered, delay=1.0)
+        self.claude(self.reviewer(is_error=True))
+        head_before = self.head()
+        code, out = run_cli(RUN)
+        self.assert_ended_broken(code, out, head_before)
+        self.assertTrue(self.baseline_call()["held"])  # the reviewer had failed by then
+        below = self.line_below_the_baseline_failure(out)
+        self.assertIn("reviewer", below)  # AC-7: the other reason, under the baseline's
+        self.assertNotIn("not known", below)  # it ended by itself, nothing was stopped
+
+
+# A stand-in for a reviewer session that has started a helper process: the helper inherits the
+# session's stdout / stderr and stays alive after the session is stopped. It ends when the
+# test lets it go (the `release` file, or its directory disappearing), at the latest after 45 s.
+DESCENDANT = (
+    "import os, sys, time\n"
+    "up, release = sys.argv[1], sys.argv[2]\n"
+    "open(up, 'w').close()\n"
+    "end = time.time() + 45\n"
+    "while time.time() < end and os.path.isdir(os.path.dirname(up)):\n"
+    "    if os.path.exists(release):\n"
+    "        break\n"
+    "    time.sleep(0.1)\n"
+)
+SESSION = (
+    "import subprocess, sys, time\n"
+    "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]])\n"
+    "time.sleep(60)\n"
+)
+
+
+class StoppingTheSessionIsBounded(unittest.TestCase):
+    """AC-5 (as amended): a stopped session whose descendant holds its pipes"""
+
+    def let_go(self, release):
+        if os.path.isdir(os.path.dirname(release)):
+            with open(release, "w", encoding="utf-8") as fh:
+                fh.write("go\n")
+
+    def test_a_descendant_holding_the_pipes_delays_the_stop_by_seconds_not_its_lifetime(self):
+        tmp = tempfile.mkdtemp(prefix="revali-cancel-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        up = os.path.join(tmp, "descendant-up")
+        release = os.path.join(tmp, "release")
+        self.addCleanup(self.let_go, release)  # runs before the rmtree above
+        cancel = threading.Event()
+        fired = []
+
+        def fire():  # "the baseline failed", once the descendant exists
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and not os.path.exists(up):
+                time.sleep(0.05)
+            fired.append(time.monotonic())
+            cancel.set()
+
+        threading.Thread(target=fire, daemon=True).start()
+        with self.assertRaises(procs.ProcCancelled):
+            procs.run([sys.executable, "-c", SESSION, DESCENDANT, up, release], cancel=cancel)
+        returned = time.monotonic()
+        self.assertTrue(os.path.exists(up), "the descendant never started")
+        # AC-5: the pipes are given up after at most about 15 s; the descendant lives 45 s
+        self.assertLess(returned - fired[0], 20.0)
+
 
 class TheOldOrder(ParallelCase):
     """AC-8"""
@@ -410,6 +516,4 @@ class HistoryRow(ParallelCase):
 
 
 if __name__ == "__main__":
-    import unittest
-
     unittest.main()
