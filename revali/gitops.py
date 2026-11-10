@@ -47,11 +47,9 @@ def describe(cwd: str) -> str:
     times out or fails. Several projects' runs describe the one revali checkout at the same
     moment: the index refresh behind --dirty writes the index back only when it gets the lock
     and does not fail when another process holds it (git 2.55; GIT_OPTIONAL_LOCKS=0 does not
-    stop that write)."""
+    stop that write; docs/side-effects.md lists it)."""
     try:
-        res = run(
-            resolve("git") + ["describe", "--tags", "--always", "--dirty"], cwd=cwd, timeout=120
-        )
+        res = _git(["describe", "--tags", "--always", "--dirty"], cwd)
     except (ProcError, OSError):
         return ""
     return res.stdout.strip() if res.ok else ""

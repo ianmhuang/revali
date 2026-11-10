@@ -157,6 +157,9 @@ def _run_detached(args) -> int:
     logs = os.path.join(rdir, paths_for(gitops.repo_root(cwd)).logs_dir)
     os.makedirs(logs, exist_ok=True)
     log_path = os.path.join(logs, "run.log")
+    # before the spawn: a slow git here must not leave the child running while this process
+    # has not yet said its pid (PR #62 F2)
+    revali_build = build()
     cmd = [python_exe(), _entry_script(), "run", "--foreground"]
     if args.base:
         cmd += ["--base", args.base]
@@ -168,7 +171,7 @@ def _run_detached(args) -> int:
     # Reserve both locks for the child so a second `run` cannot slip in first.
     acquire_lock(rdir, pid=child)
     acquire_tree_lock(tpath, branch, pid=child)
-    print("started revali run (pid %d); log: %s; revali %s" % (child, log_path, build()))
+    print("started revali run (pid %d); log: %s; revali %s" % (child, log_path, revali_build))
     print("next: `revali wait --timeout 9m` (repeat until it reports a result)")
     return EXIT_OK
 

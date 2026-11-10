@@ -178,6 +178,21 @@ class BuildInTheRun(RepoCase):
             out,
         )
 
+    def test_build_is_worked_out_before_the_child_starts(self):
+        # PR #62 F2: a slow git must not delay the start line while the child already runs
+        order = []
+        with (
+            mock.patch("revali.pipeline.build", side_effect=lambda: order.append("build") or "B"),
+            mock.patch(
+                "revali.pipeline.spawn_detached",
+                side_effect=lambda *a, **k: order.append("spawn") or DEAD_PID,
+            ),
+        ):
+            code, out = run_cli(["run"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(order, ["build", "spawn"])
+        self.assertIn("; revali B\n", out)
+
     def test_history_row_carries_the_build(self):
         log = RunLog(self.rdir(), quiet=True, logs_dir="logs")
         _record_history(State(repo="o/r", branch="b", base="main", stage="error"), 1, log)
@@ -252,6 +267,8 @@ class StateFileWindow(RepoCase):
 
         def sleep(seconds):
             clock[0] += seconds
+            # PR #62 follow-up: a window that never ends fails here instead of spinning
+            self.assertLess(clock[0], 60, "still retrying a minute of faked time later")
 
         with (
             mock.patch("revali.state.time.monotonic", side_effect=lambda: clock[0]),

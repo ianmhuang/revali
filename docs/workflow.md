@@ -73,7 +73,8 @@ revali <build>` (in `logs/revali.log`, and in `logs/run.log` for a detached
 run), the `started revali run` line, and the history row's `revali_build`.
 The build is the version plus `git describe --tags --always --dirty` of the
 checkout revali was loaded from, e.g. `0.3.0 (v0.3.0-27-g4fbdb4e)`, or the
-version alone when that is not a git checkout. On Windows the detached
+version alone when that directory is not the root of a git checkout or git
+cannot describe it (git missing, timed out or failed). On Windows the detached
 run starts every subprocess (git, gh, claude, wsl, the `lint` line and the
 `local` runner's steps) with `CREATE_NO_WINDOW`, so no console windows
 appear while it works. `run` checks the working tree before it detaches:
