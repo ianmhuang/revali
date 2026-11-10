@@ -184,6 +184,9 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
             '"Several agents on one repository")' % (base, elsewhere),
         )
 
+    # before the CI wait, like the worktree check: a refusal must not cost that wait
+    check_title(state, rdir, root, log)
+
     if cfg.merge.wait_for_checks:
         wait_for_checks(state.pr_number, root, cfg.merge.checks_timeout_min, log)
 
@@ -246,6 +249,49 @@ def _delete_local_branch(root: str, branch: str, log: RunLog, when: bool) -> tup
     if res.ok:
         return True, ""
     return False, " (git branch -D failed: %s)" % res.text.strip()[:200]
+
+
+def check_title(state: State, rdir: str, root: str, log: RunLog) -> None:
+    """The last chance to keep a stale PR title off the base branch: a squash merge takes the
+    title as the commit subject. Reads the PR's title and gives it change.md's when they
+    differ; stops with exit 1 when that edit fails. When the title or change.md cannot be read
+    there is nothing to compare, and the merge goes on with a warning."""
+    from revali import changedoc
+    from revali.pr import sync_title
+
+    path = os.path.join(rdir, "change.md")
+    if not os.path.isfile(path):
+        log.stage("merge", "warning: no change.md to check the PR title against")
+        return
+    wanted = changedoc.load(path).title
+    res = run(
+        resolve("gh") + ["pr", "view", str(state.pr_number), "--json", "title"],
+        cwd=root,
+        log=log.detail,
+        timeout=120,
+    )
+    current = None
+    if res.ok:
+        try:
+            current = json.loads(res.stdout).get("title")
+        except (ValueError, AttributeError):
+            current = None
+    if not isinstance(current, str):
+        log.stage(
+            "merge",
+            "warning: could not read the PR title (%s); merging without checking it"
+            % (res.text.strip()[:200] or "no title in gh's answer"),
+        )
+        return
+    problem = sync_title(root, state.pr_number, current, wanted, log, "merge")
+    if problem:
+        raise Stop(
+            EXIT_ERROR,
+            "PR #%d is titled '%s' but change.md says '%s', and the title could not be "
+            "changed (%s); not merged, since the squash commit would carry the old title. "
+            "Fix the title on GitHub or merge again"
+            % (state.pr_number, current.strip(), wanted.strip(), problem),
+        )
 
 
 def pr_merged(pr_number: int, cwd: str, log: Optional[RunLog]) -> bool:
