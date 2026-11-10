@@ -71,7 +71,8 @@ class State:
     issues: List[dict] = field(
         default_factory=list
     )  # GitHub issues opened for pre-existing bugs: number, url, validation, tests, cause,
-    # summary, recommendation, withhold (STATE_VERSION 5)
+    # summary, recommendation, withhold (STATE_VERSION 5); found: true when the issue was open
+    # already, opened outside this branch, and was reused (STATE_VERSION 8; absent = opened)
     cost_usd: float = 0.0
     models_used: List[str] = field(default_factory=list)
     fallback: bool = False

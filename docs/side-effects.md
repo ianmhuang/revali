@@ -14,6 +14,9 @@ stated.
   run's own, and stops with exit 1 (stage `error`) otherwise, committing and
   pushing nothing from that point; `merge` holds the same lock while it
   checks out the base branch and pulls
+- in preflight, `git fetch origin <base>` (tried once more when it fails),
+  which updates `refs/remotes/origin/<base>`, shared by every worktree of
+  the repository, and `FETCH_HEAD`
 - `git push -u origin <branch>` and `gh pr create --draft`. With `[validate]
   parallel_baseline` (the default) this happens while the baseline is still
   running, so a branch whose existing suite fails can be left pushed with its
@@ -100,14 +103,24 @@ stated.
   the diagnosis text and the suggested fix are withheld from the body. The
   body passes the same credential scan as a comment. A second validation
   whose base-introduced failures an issue of this branch already names
-  opens nothing. A failing `gh` call here is a warning in the log; the
-  validation result and exit code stand
+  opens nothing. Before `gh issue create`, `gh issue list --state open
+  --limit 200 --json number,title,url`: when an open issue has exactly
+  that title (another branch or worktree hit the same bug first), it is
+  reused and nothing is opened; the log says it was opened outside this
+  branch, the branch state records it so later validations and `Fixes #n`
+  at merge treat it like one revali opened, and `stats` does not count it
+  as opened. Two runs listing before either has opened its issue still
+  open two. A failing `gh` call here is a warning in the log (a failed
+  listing opens the issue as before); the validation result and exit
+  code stand
 - once `revali merge` has merged the PR, for every such issue that a commit
   in `<base sha>..HEAD` references with `Fixes #n`, `Closes #n` or
   `Resolves #n`: one
   `gh issue comment` naming the merged PR, the commit, and the diagnosis
-  cause and suggested fix recorded when the issue was opened (the fix text
-  withheld on a repository that is not private). Closing the issue is left
+  cause and suggested fix recorded when the issue was opened (for an issue
+  reused because it was open already, the ones recorded when this PR hit
+  the failure; the fix text withheld on a repository that is not private).
+  Closing the issue is left
   to GitHub's handling of those keywords
 - before `revali merge` waits for CI (next item): `gh pr view <n> --json title`, and
   `gh pr edit <n> --title <title>` when the title differs from change.md's;

@@ -192,6 +192,56 @@ def render_body(ctx: Context, state: State, outcome, failures: List[dict], withh
     return string.Template(read_text(ctx.issue_template)).safe_substitute(values)
 
 
+def open_elsewhere(ctx: Context, wanted: str, log: Optional[RunLog]) -> Optional[dict]:
+    """The newest open issue of the repository whose title is exactly `wanted` (another
+    branch or worktree hit the same bug first), or None; a failed listing is a warning and
+    None, so the issue is opened as it would have been."""
+    try:
+        items = gitops.gh_open_issues(ctx.repo_root, log.detail if log else None)
+    except gitops.GhError as exc:
+        if log:
+            log.stage("validate", "warning: could not list the open issues: %s" % exc)
+        return None
+    for item in items:
+        if item["title"] == wanted:  # gh_open_issues keeps only well-formed items
+            return item
+    return None
+
+
+def _record(
+    state: State,
+    outcome,
+    number: int,
+    url: str,
+    tests: List[str],
+    withhold: bool,
+    found: bool = False,
+) -> None:
+    """Add an issue to the branch state. `found`: it was open already, opened outside this
+    branch; it is reused like one revali opened, and not counted as opened (STATE_VERSION 8)."""
+    d = outcome.diagnosis
+    entry = {
+        "number": number,
+        "url": url,
+        "validation": outcome.number,
+        "round": max(1, len(state.rounds)),
+        "tests": tests,
+        "cause": d.get("cause", ""),
+        "summary": str(d.get("summary", "")).strip(),
+        "recommendation": str(d.get("recommendation", "")).strip(),
+        "withhold": withhold,
+        "at": now_iso(),
+    }
+    if found:
+        entry["found"] = True
+    state.issues.append(entry)
+
+
+def opened_count(state: State) -> int:
+    """The issues revali opened for this branch, not the open ones it reused."""
+    return sum(1 for i in state.issues if not i.get("found"))
+
+
 def maybe_open(
     ctx: Context, state: State, rdir: str, outcome, log: Optional[RunLog]
 ) -> Optional[IssueRef]:
@@ -221,6 +271,19 @@ def maybe_open(
     from revali.pr import is_public
 
     withhold = is_public(ctx)
+    found = open_elsewhere(ctx, title(tests, ctx.base), log)
+    if found is not None:
+        number, url = int(found.get("number", 0)), str(found.get("url", ""))
+        _record(state, outcome, number, url, tests, withhold, found=True)
+        state.save(rdir)
+        if log:
+            log.stage(
+                "validate",
+                "pre-existing failure already has open issue #%d, opened outside this branch "
+                "(%s): %s" % (number, ", ".join(tests), url),
+            )
+        return IssueRef(number, url, existing=True)
+
     body = render_body(ctx, state, outcome, failures, withhold)
     hits = scan_text(body, label="issue")
     if hits:
@@ -265,21 +328,7 @@ def maybe_open(
             log.stage("validate", "warning: could not open the issue: %s" % str(exc)[:300])
         return None
     state.pending_effect = ""
-    d = outcome.diagnosis
-    state.issues.append(
-        {
-            "number": number,
-            "url": url,
-            "validation": outcome.number,
-            "round": max(1, len(state.rounds)),
-            "tests": tests,
-            "cause": d.get("cause", ""),
-            "summary": str(d.get("summary", "")).strip(),
-            "recommendation": str(d.get("recommendation", "")).strip(),
-            "withhold": withhold,
-            "at": now_iso(),
-        }
-    )
+    _record(state, outcome, number, url, tests, withhold)
     state.save(rdir)
     if log:
         log.stage(
@@ -315,8 +364,14 @@ def merge_comment(issue: dict, pr_number: int, base: str, sha: str, subject: str
     lines = [
         "Fixed by PR #%d, merged into `%s` (commit %s: %s)." % (pr_number, base, sha[:10], subject),
         "",
-        "revali's diagnosis when the issue was opened: cause **%s**." % (issue.get("cause") or "?"),
     ]
+    # an issue reused under `found` was opened by someone else: the diagnosis is this PR's
+    when = (
+        "when PR #%d hit the failure" % pr_number
+        if issue.get("found")
+        else "when the issue was opened"
+    )
+    lines.append("revali's diagnosis %s: cause **%s**." % (when, issue.get("cause") or "?"))
     if issue.get("withhold"):
         lines += ["", "Suggested fix at the time: " + WITHHELD]
     elif issue.get("recommendation"):

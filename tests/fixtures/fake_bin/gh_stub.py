@@ -31,6 +31,12 @@ DEFAULT = {
     "label_list_exit": 0,
     "issue_create": {"number": 41, "url": "https://github.example/me/sample/issues/41"},
     "issue_exit": 0,
+    # `issue list`: the repository's issues ({"number", "title", "url", "state"}; state
+    # defaults to OPEN), filtered by --state like GitHub does; `issue_list_raw` replaces the
+    # output when not None
+    "issues": [],
+    "issue_list_exit": 0,
+    "issue_list_raw": None,
     "issue_comment_exit": 0,
 }
 
@@ -139,6 +145,22 @@ def main(argv):
         return 0
     if argv[:2] == ["issue", "comment"]:
         return int(sc["issue_comment_exit"])
+    if argv[:2] == ["issue", "list"]:
+        if int(sc["issue_list_exit"]):
+            print("gh_stub: issue list failed", file=sys.stderr)
+            return int(sc["issue_list_exit"])
+        if sc["issue_list_raw"] is not None:
+            print(sc["issue_list_raw"])
+            return 0
+        state = argv[argv.index("--state") + 1].upper() if "--state" in argv else "OPEN"
+        limit = int(argv[argv.index("--limit") + 1]) if "--limit" in argv else 30
+        rows = [
+            {k: i[k] for k in ("number", "title", "url") if k in i}
+            for i in sc["issues"]
+            if state == "ALL" or str(i.get("state", "OPEN")).upper() == state
+        ]
+        print(json.dumps(rows[:limit]))
+        return 0
     print("gh_stub: unhandled: %s" % " ".join(argv), file=sys.stderr)
     return 2
 
