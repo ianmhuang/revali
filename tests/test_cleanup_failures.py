@@ -211,16 +211,95 @@ class LocalWorktreeLeft(LocalCleanupCase):
         self.assert_temp_dir_gone()
 
 
-def rmtree_keeping(suffix):
-    """shutil.rmtree that leaves any directory whose path ends with `suffix`."""
+def rmtree_keeping(keep):
+    """shutil.rmtree that leaves any directory whose path ends with `keep` (a string) or for
+    which `keep(path)` holds."""
     real = shutil.rmtree
+    test = keep if callable(keep) else lambda path: path.endswith(keep)
 
     def rmtree(path, *a, **kw):
-        if str(path).endswith(suffix):
+        if test(str(path)):
             return None
         return real(path, *a, **kw)
 
     return mock.patch("revali.runners.shutil.rmtree", side_effect=rmtree)
+
+
+class LocalTempDir(LocalCleanupCase):
+    """PR #66 round 1 F1 (1) and follow-up 1: the temp dir of a `git worktree add` that
+    failed or did not finish."""
+
+    def test_a_temp_dir_left_after_a_failed_add_is_logged(self):
+        lines = []
+        bad = Result(
+            cmd=["git"], returncode=128, stdout="", stderr="fatal: invalid ref", duration=0
+        )
+
+        def is_temp(path):
+            return os.path.basename(path).startswith("revali-%s-" % LABEL)
+
+        with rmtree_keeping(is_temp):
+            with self.assertRaises(RunnerError) as cm:
+                self.session([("test", "exit 0")], {"add": bad}, lines)
+        self.assertIn("git worktree add failed: fatal: invalid ref", str(cm.exception))
+        tmp = os.path.dirname(self.worktrees[0])
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.assertEqual(len(problems(lines, tmp)), 1, lines)
+
+    def test_an_add_that_raises_still_removes_the_temp_dir(self):
+        for exc in (ProcTimeout("timed out after 300s: git"), ExeNotFound("no git")):
+            with self.subTest(exc=type(exc).__name__):
+                lines = []
+                with self.assertRaises(type(exc)):
+                    self.session([("test", "exit 0")], {"add": exc}, lines)
+                self.assert_temp_dir_gone()
+                self.assertEqual([ln for ln in lines if "could not" in ln], [])
+
+
+class RemoveDirReason(unittest.TestCase):
+    """PR #66 round 1 F2: the line for a directory left behind carries the first error."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="revali-keep-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def left(self, rmtree):
+        from revali.runners import remove_dir
+
+        lines = []
+        with mock.patch("revali.runners.shutil.rmtree", side_effect=rmtree):
+            remove_dir(self.dir, LABEL, lines.append)
+        (line,) = lines
+        self.assertIn(self.dir, line)
+        self.assertIn("left for you to delete", line)
+        return line
+
+    def test_onexc(self):
+        def rmtree(path, onexc=None, **kw):
+            onexc(os.unlink, path, PermissionError(13, "held\nopen"))
+            onexc(os.rmdir, path, OSError(39, "second"))
+
+        line = self.left(rmtree)
+        self.assertIn("[Errno 13] held open", line)
+        self.assertNotIn("second", line)
+
+    def test_onerror_on_python_3_11(self):
+        def rmtree(path, onerror=None, **kw):
+            if "onexc" in kw:
+                raise TypeError("rmtree() got an unexpected keyword argument 'onexc'")
+            exc = PermissionError(13, "held open")
+            onerror(os.unlink, path, (type(exc), exc, None))
+
+        self.assertIn("[Errno 13] held open", self.left(rmtree))
+
+    def test_nothing_for_a_directory_that_is_gone(self):
+        from revali.runners import remove_dir
+
+        lines = []
+        shutil.rmtree(self.dir)
+        remove_dir(self.dir, LABEL, lines.append)
+        remove_dir(self.dir + "-never", LABEL, lines.append)
+        self.assertEqual(lines, [])
 
 
 class WslExtraLeft(unittest.TestCase):
@@ -253,6 +332,36 @@ class WslExtraLeft(unittest.TestCase):
                     log=lines.append,
                 )
         self.assertIn("wslpath failed", str(cm.exception))
+        extra = os.path.join(self.logs, LABEL + "-extra")
+        self.assertEqual(len(problems(lines, extra)), 1, lines)
+
+    def test_staging_that_fails_names_the_extra_dir_it_left(self):
+        # PR #66 round 1 F1 (2): stage_inputs' own removal, before the runner's `finally`
+        from revali.state import write_text
+
+        def write(path, text):
+            if path.endswith("x.py"):
+                raise OSError("disk full")
+            return write_text(path, text)
+
+        runner = WslRunner(PlatformCfg(runner="wsl", distro="Ubuntu", command_timeout_min=1))
+        lines = []
+        with (
+            mock.patch("revali.runners.clone_source", return_value=("D:/x/repo", "abc")),
+            mock.patch("revali.runners.write_text", side_effect=write),
+            rmtree_keeping(LABEL + "-extra"),
+        ):
+            with self.assertRaises(OSError) as cm:
+                runner.run(
+                    "D:/x/repo",
+                    "abc",
+                    [("test", "true")],
+                    {"t/x.py": "x\n"},
+                    self.logs,
+                    LABEL,
+                    log=lines.append,
+                )
+        self.assertIn("disk full", str(cm.exception))
         extra = os.path.join(self.logs, LABEL + "-extra")
         self.assertEqual(len(problems(lines, extra)), 1, lines)
 

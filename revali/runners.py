@@ -210,11 +210,18 @@ CLEANUP_FAILURES = (ProcError, OSError)  # OSError: a spawn error, a file held o
 
 
 def remove_dir(path: str, label: str, log: Logger = None) -> None:
-    """Remove a directory a session made; one that is still there is logged, never raised,
-    so the session's report or error stands."""
-    shutil.rmtree(path, ignore_errors=True)
-    if os.path.exists(path) and log:
-        log("[%s] could not remove %s (left for you to delete)" % (label, path))
+    """Remove a directory a session made; one that is still there is logged with the first
+    error, never raised, so the session's report or error stands."""
+    if not os.path.lexists(path):
+        return
+    errors: List[BaseException] = []
+    try:
+        shutil.rmtree(path, onexc=lambda _f, _p, exc: errors.append(exc))
+    except TypeError:  # Python 3.11: no onexc
+        shutil.rmtree(path, onerror=lambda _f, _p, info: errors.append(info[1]))
+    if os.path.lexists(path) and log:
+        reason = ": %s" % one_line(str(errors[0])) if errors else ""
+        log("[%s] could not remove %s (left for you to delete)%s" % (label, path, reason))
 
 
 def remove_file(path: str, label: str, log: Logger = None) -> None:
@@ -224,7 +231,10 @@ def remove_file(path: str, label: str, log: Logger = None) -> None:
             os.remove(path)
     except OSError as exc:
         if log:
-            log("[%s] could not remove %s (left for you to delete): %s" % (label, path, exc))
+            log(
+                "[%s] could not remove %s (left for you to delete): %s"
+                % (label, path, one_line(str(exc)))
+            )
 
 
 def _cleanup_git(
@@ -256,16 +266,20 @@ class LocalRunner(Runner):
         os.makedirs(logs_dir, exist_ok=True)
         tmp = tempfile.mkdtemp(prefix="revali-%s-" % label)
         wt = os.path.join(tmp, "wt")
-        git = resolve("git")
-        res = run(
-            git + ["worktree", "add", "--detach", "--quiet", wt, ref],
-            cwd=repo_root,
-            log=log,
-            timeout=300,
-        )
-        if not res.ok:
-            shutil.rmtree(tmp, ignore_errors=True)
-            raise RunnerError("git worktree add failed: %s" % res.text.strip())
+        try:
+            git = resolve("git")
+            res = run(
+                git + ["worktree", "add", "--detach", "--quiet", wt, ref],
+                cwd=repo_root,
+                log=log,
+                timeout=300,
+            )
+            if not res.ok:
+                raise RunnerError("git worktree add failed: %s" % res.text.strip())
+        except BaseException:
+            # no worktree yet: only the temp dir to remove
+            remove_dir(tmp, label, log)
+            raise
         report = RunReport(label=label)
         try:
             for rel, content in (extra_files or {}).items():
@@ -314,7 +328,9 @@ class LocalRunner(Runner):
             # dropped from the repository's list as well
             _cleanup_git(git, ["remove", "--force", wt], repo_root, 120, wt, label, log)
             remove_dir(tmp, label, log)
-            _cleanup_git(git, ["prune"], repo_root, 60, wt, label, log)
+            # prune works on the whole repository: name both
+            about = "%s from the worktree list of %s" % (wt, repo_root)
+            _cleanup_git(git, ["prune"], repo_root, 60, about, label, log)
         return report
 
 
@@ -528,7 +544,11 @@ def render_script(
 
 
 def stage_inputs(
-    logs_dir: str, label: str, steps: List[Tuple[str, str]], extra_files: Dict[str, str]
+    logs_dir: str,
+    label: str,
+    steps: List[Tuple[str, str]],
+    extra_files: Dict[str, str],
+    log: Logger = None,
 ) -> Tuple[List[Tuple[str, str]], str]:
     """Write one .cmd file per non-empty step and the extra files under logs_dir; drop a
     stale results file and script log. Returns (non-empty steps, extra dir)."""
@@ -549,7 +569,7 @@ def stage_inputs(
                 os.remove(path)
     except BaseException:
         # the runner's own cleanup only starts once this returns
-        shutil.rmtree(extra_dir, ignore_errors=True)
+        remove_dir(extra_dir, label, log)
         raise
     return steps, extra_dir
 
@@ -793,7 +813,7 @@ class WslRunner(Runner):
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope="", key=""):
         scope = sandbox_scope(scope, key)
         source, ref = clone_source(repo_root, ref, log)
-        steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files)
+        steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files, log)
         results_path = os.path.join(logs_dir, "%s.results" % label)
         # everything from here on can fail (a wslpath, writing the script, the session); the
         # extra files are only for this session and never stay in the logs directory
@@ -909,7 +929,7 @@ class SshRunner(Runner):
 
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope="", key=""):
         scope = sandbox_scope(scope, key)
-        steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files)
+        steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files, log)
         bundle = "%s.bundle" % label
         bundle_path = os.path.join(logs_dir, bundle)
         try:
@@ -1064,9 +1084,9 @@ class SshRunner(Runner):
             r = self._ssh(command, timeout=self._short())
         except CLEANUP_FAILURES as exc:
             r = None
-            reason = str(exc)
+            reason = one_line(str(exc))
         else:
-            reason = r.text.strip()[:200]
+            reason = one_line(r.text)
         ok = r is not None and r.ok
         if log:
             if ok:
