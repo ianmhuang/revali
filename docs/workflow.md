@@ -171,8 +171,9 @@ twice. The rule keys on that commit: amend or rebase it and the next run is a
 normal new round.
 
 revali's own CI ([.github/workflows/test.yml](../.github/workflows/test.yml)) runs lint and the
-suite on Linux on every push, and `revali merge` waits for it as it waits for any
-project's checks.
+suite on Linux and Windows on every push, and `revali merge` waits for it as it waits for
+any project's checks. The Windows leg takes about 28 minutes, so revali's own
+`revali.toml` sets `checks_timeout_min = 45`, above the job's `timeout-minutes`.
 
 ## Project setup
 

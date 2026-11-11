@@ -33,3 +33,6 @@ new_test = "python3 -m unittest {files}"
 
 [merge]
 method = "squash"
+# The Windows CI leg takes about 28 minutes (2026-11-11); above the job's timeout-minutes
+# (40) so a hung leg is cancelled and reported as failed before merge stops waiting.
+checks_timeout_min = 45

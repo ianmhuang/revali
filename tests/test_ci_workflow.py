@@ -54,7 +54,7 @@ class Workflow(unittest.TestCase):
         self.assertRegex(concurrency, r"cancel-in-progress:\s*true")
 
     def test_matrix_legs(self):
-        # AC-2
+        # AC-2; ci/windows-job AC-1 added the Windows leg
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(target, ["py311"])
         self.assertEqual(
@@ -62,9 +62,23 @@ class Workflow(unittest.TestCase):
             [
                 ("ubuntu-latest", "3.11"),
                 ("ubuntu-latest", "3.x"),
+                ("windows-latest", "3.x"),
             ],
         )
         self.assertRegex(self.text, r"fail-fast:\s*false")
+
+    def test_a_hung_leg_ends_before_merge_stops_waiting(self):
+        # ci/windows-job AC-2: the job's timeout-minutes is below revali's own
+        # checks_timeout_min (45); the defaults other projects get stay at 30
+        job = block(block(self.text, "jobs"), "  test")
+        timeouts = re.findall(r"^    timeout-minutes:\s*(\d+)\s*$", job, re.M)
+        self.assertEqual(len(timeouts), 1, "one timeout-minutes on the test job")
+        wait = tomllib.loads(read("revali.toml"))["merge"]["checks_timeout_min"]
+        self.assertEqual(wait, 45)
+        self.assertLess(int(timeouts[0]), wait)
+        for rel in (("defaults.toml",), ("templates", "revali.toml")):
+            with self.subTest(path="/".join(rel)):
+                self.assertEqual(tomllib.loads(read(*rel))["merge"]["checks_timeout_min"], 30)
 
     def test_one_leg_lints_with_the_projects_lint_line(self):
         # AC-3
@@ -102,7 +116,7 @@ class Docs(unittest.TestCase):
         for rel in (("CONVENTIONS.md",), ("docs", "workflow.md")):
             with self.subTest(path="/".join(rel)):
                 text = " ".join(read(*rel).split())
-                self.assertIn("the suite on Linux on every push", text)
+                self.assertIn("the suite on Linux and Windows on every push", text)
                 self.assertIn("`revali merge` waits for it", text)
                 self.assertIn("test.yml", text)
                 self.assertNotIn("Windows and macOS on every push", text)
