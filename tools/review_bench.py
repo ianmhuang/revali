@@ -43,7 +43,7 @@ sys.path.insert(0, ROOT)
 from revali import PROMPT_VERSION, VERSION, gitops  # noqa: E402
 from revali.preflight import Stop, locate  # noqa: E402
 from revali.review import CHANGES_REQUESTED, build_prompt, spawn_reviewer  # noqa: E402
-from revali.state import State, safe_branch  # noqa: E402
+from revali.state import State, safe_branch, write_json_atomic  # noqa: E402
 
 CASES_DIR = os.path.join(ROOT, "bench", "cases")
 CASE_FILE = "case.toml"
@@ -643,9 +643,10 @@ def main(argv=None) -> int:
     unknown = [
         os.path.basename(os.path.normpath(p))
         for p in paths
-        if not os.path.isdir(p) and os.path.basename(os.path.normpath(p)) not in prior
+        if not os.path.isfile(os.path.join(p, CASE_FILE))
+        and os.path.basename(os.path.normpath(p)) not in prior
     ]
-    if prior and unknown:  # a typo would become a `malformed` entry kept by every resume
+    if prior and args.cases and unknown:  # it would be a `malformed` entry every resume keeps
         print(
             "no case %s in the earlier run or the case directories" % ", ".join(unknown),
             file=sys.stderr,
@@ -782,30 +783,24 @@ def _print_case(r: Result, kept: bool = False) -> None:
 
 
 def _write_results(out_dir: str, args, results: List[Result]) -> None:
-    """Write a temporary file and move it over results.json, so a kill at any point leaves
-    the previous or the new file whole: --resume reads nothing else."""
-    path = os.path.join(out_dir, "results.json")
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="") as fh:
-        json.dump(
-            {
-                "revali": VERSION,
-                "prompt_version": PROMPT_VERSION,
-                "model": args.model,
-                "dry_run": args.dry_run,
-                "cases_dirs": args.cases_dir,
-                "budget_usd": args.budget_usd,
-                "session_budget_usd": args.session_budget_usd,
-                "line_margin": args.line_margin,
-                "summary": rates(results),
-                "cases": [asdict(r) for r in results],
-            },
-            fh,
-            indent=1,
-        )
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    """revali's own atomic write: a temporary file renamed over results.json, the rename
+    retried while Windows refuses it to a reader, the temporary file removed on failure. A
+    kill at any point leaves the previous or the new file whole: --resume reads nothing else."""
+    write_json_atomic(
+        os.path.join(out_dir, "results.json"),
+        {
+            "revali": VERSION,
+            "prompt_version": PROMPT_VERSION,
+            "model": args.model,
+            "dry_run": args.dry_run,
+            "cases_dirs": args.cases_dir,
+            "budget_usd": args.budget_usd,
+            "session_budget_usd": args.session_budget_usd,
+            "line_margin": args.line_margin,
+            "summary": rates(results),
+            "cases": [asdict(r) for r in results],
+        },
+    )
 
 
 if __name__ == "__main__":

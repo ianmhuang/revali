@@ -841,6 +841,26 @@ class Resume(BenchCase):
             with self.assertRaises(OSError):
                 bench._write_results(self.out, args, [])
         self.assertEqual(self.results_file(), before)
+        self.assertEqual(sorted(os.listdir(self.out)), ["a-one", "results.json"])  # round 2 F6
+
+    def test_a_refused_rename_is_retried(self):
+        """PR #72 round 2 F6: Windows refuses the rename while a reader has the file open"""
+        self.make_case("a-one")
+        self.claude(claude_entry(answer(finding())))
+        real, calls = os.replace, []
+
+        def refused_twice(src, dst):
+            calls.append(dst)
+            if len(calls) <= 2:
+                raise PermissionError(13, "Access is denied", dst)
+            real(src, dst)
+
+        with mock.patch("revali.state.os.replace", refused_twice):
+            code, out, cases, _ = self.run_bench()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(cases["a-one"]["outcome"], "caught-strict")
+        self.assertGreater(len(calls), 2)
+        self.assertEqual(sorted(os.listdir(self.out)), ["a-one", "results.json"])
 
     def test_a_resume_from_another_directory(self):
         """PR #72 round 1 F2: relative --cases are recorded absolute"""
@@ -872,6 +892,11 @@ class Resume(BenchCase):
         code, _, err = self.resume("b-tow")
         self.assertEqual(code, 1)
         self.assertIn("no case b-tow in the earlier run or the case directories", err)
+        stray = os.path.join(self.cases, "notes")  # round 2 follow-up: a directory, no case.toml
+        os.makedirs(stray)
+        code, _, err = self.resume(stray)
+        self.assertEqual(code, 1)
+        self.assertIn("no case notes in the earlier run", err)
         self.assertEqual(self.results_file(), before)
         self.assertEqual(len(self.fake_calls("claude")), calls)
 

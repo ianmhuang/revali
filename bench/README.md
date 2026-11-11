@@ -67,9 +67,10 @@ settings has no single rate). `--out` and `--dry-run` cannot go with `--resume`.
 directories are recorded as absolute paths, so a resume may start from any directory. Case
 names narrow the run as usual; the cases not named stay in `results.json` as they were, and
 the summary always covers every case the file holds. A name that is neither in the earlier
-run nor a case directory is refused before anything runs, instead of becoming a `malformed`
-entry every later resume would keep. `results.json` is written to a temporary file and moved
-into place, so a run killed while writing it leaves the previous version whole.
+run nor a directory with a `case.toml` is refused before anything runs, instead of becoming a
+`malformed` entry every later resume would keep. `results.json` is written to a temporary
+file and moved into place (retried while Windows refuses the rename because another program
+has the file open), so a run killed while writing it leaves the previous version whole.
 
 ## What a run does
 
