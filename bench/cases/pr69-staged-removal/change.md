@@ -5,7 +5,7 @@ author_model: claude-opus-5-5
 ---
 
 ## Request
-做啊
+Go ahead.
 
 (M3.2.6 in the author's plan. In PR #67 the author force-added
 `.revali/ci__windows-job/change.md` and the squash merge put it on main; PR #68 removed it and

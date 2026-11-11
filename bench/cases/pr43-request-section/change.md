@@ -5,9 +5,12 @@ author_model: claude-fable-5-1
 ---
 
 ## Request
-AC-1 改成：PR body 不含 ## Request 段，不分 public / private；其他 AC 不變。
-（前情：「如果是這樣，PR的Request欄位跟內容有存在的必要嗎？反正都有Goal了，對吧？Request本機端還是存在的，應該就夠了吧？」
-「AC-1照你說的。然後功能做好後，要能回去導入既有的PR: revali, bmc-toolkit, line-social-bot」）
+Change AC-1: the PR body leaves out the `## Request` section on every repository,
+public or private; the other acceptance criteria stay as they are.
+(Context: the user asked whether the PR needs the Request section at all, since the
+Goal is there and the Request stays in the local change.md; they agreed with the
+author's AC-1 and asked that, once the feature is done, the existing PRs of their
+projects be brought in line with it.)
 
 ## Goal
 The PR body revali writes is change.md without the `## Request` section, on every

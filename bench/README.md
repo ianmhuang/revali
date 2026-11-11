@@ -16,19 +16,33 @@ python tools/review_bench.py --budget-usd 15 --cases ../private-cases --out ../b
 `--budget-usd` is required. Before each case the tool adds that session's own cap (`[review]
 budget_usd` of the case's repository, or `--session-budget-usd`) to what it has spent; when
 that would pass the budget the case and every later one are reported as `not-run`. revali's
-own cap is $8, so a $15 budget runs three cases only with a lower `--session-budget-usd`. A session that fails
-still costs what it spent, and that counts. `--model` sets the reviewer model for every case;
-without it the case repository's own configuration chooses, as `revali run` would.
+own cap is $8, so a $15 budget runs three cases only with a lower `--session-budget-usd`. A
+session that fails still costs what it spent, and that counts; one that fails without saying
+what it spent (a timeout, output that is not JSON) counts as its whole cap against the
+budget, and its line says the cost is unknown. `--model` sets the reviewer model for every
+case; without it the case repository's own configuration chooses, as `revali run` would.
+
+A case that fails in any way is reported as `error` and the next case runs. Each case's line
+is printed and `results.json` rewritten as soon as the case ends, so a run stopped with
+Ctrl-C keeps what it already paid for (the interrupted case is `error`, the rest `not-run`).
+No case found (a mistyped `--cases`) is exit 1.
 
 ## What a run does
 
 For each case: `git clone` the repository into a temporary directory, fetch the refs the
-case lists, remove the remote, check out the head commit on the case's branch, put the
-case's `change.md` in the state directory, build the round-1 prompt with revali's
-`build_prompt` and run one session with `spawn_reviewer`. Nothing is pushed, no `gh`
-command runs, the sandbox and the reviewer's own tests are not run, and the clone is
-deleted afterwards. The output directory (`--out`, else a new temporary directory) keeps
-`<case>/prompt.md`, `<case>/review.raw.json`, `<case>/answer.json` and `results.json`.
+case lists, remove the remote, check out the head commit on the case's branch, point the
+base branch (`[project] base_branch` of the case's repository, else the branch the source
+had checked out) at the case's base commit, delete every other ref, `FETCH_HEAD` and the
+reflogs, put the case's `change.md` in the state directory, build the round-1 prompt with
+revali's `build_prompt` and run one session with `spawn_reviewer`. The clone then looks as
+the original round did: `git log main`, `git diff main...HEAD` and the like show the base,
+not today's main with the fix merged. The objects of later commits are still in the clone's
+object store, reachable by hash only. Nothing is pushed, no `gh` command runs, the sandbox
+and the reviewer's own tests are not run, and the clone is deleted afterwards (a clone that
+could not be deleted is named on the case's line). The output directory (`--out`, else a new
+temporary directory) keeps `<case>/prompt.md`, `<case>/review.raw.json`,
+`<case>/answer.json` and `results.json`, which also records the revali version and
+`PROMPT_VERSION` that ran.
 
 The prompt, schema and checklist are the ones of the revali running the benchmark; the case
 repository contributes its own `revali.toml` (model, budget, test pattern, project
@@ -62,7 +76,10 @@ What the number does not say:
 - `base`: `git merge-base <head> origin/main`.
 - `change.md`: the text between "## The author's description (change.md)" and "## The diff"
   in `logs/prompt-r<n>-1.md`. The archived `change.md` is the final one; its What may
-  already describe the fix.
+  already describe the fix. Replace the `## Request` section with a short English
+  paraphrase: it holds the user's own words, which revali keeps off GitHub (the PR body
+  leaves it out), and a case is committed. The replayed description then differs from the
+  original round in that section only.
 - `[expected]`: `file` and `line` of the finding, and its first sentence as the
   description.
 

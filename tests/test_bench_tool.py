@@ -8,6 +8,7 @@ import io
 import json
 import os
 import unittest
+from unittest import mock
 
 from tests.helpers import ROOT, RepoCase, approve_response, claude_entry, git
 
@@ -77,6 +78,14 @@ class BenchCase(RepoCase):
             with open(os.path.join(path, "change.md"), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(text)
         return path
+
+    def edit_case(self, name, old, new):
+        toml = os.path.join(self.cases, name, "case.toml")
+        with open(toml, encoding="utf-8", newline="") as fh:
+            text = fh.read()
+        self.assertIn(old, text)
+        with open(toml, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text.replace(old, new))
 
     def run_bench(self, *extra, budget="10"):
         out = io.StringIO()
@@ -237,6 +246,11 @@ class Malformed(BenchCase):
         self.make_case("c-no-change-md", change_md=False)
         self.make_case("d-no-head", drop=("case.head", "source.pr"))
         self.make_case("e-good")
+        self.make_case("f-one-number", expected={"lines": "188"})  # round 1 F2
+        self.make_case("g-a-string", expected={"lines": '"ab"'})
+        path = self.make_case("h-not-utf8")
+        with open(os.path.join(path, "change.md"), "wb") as fh:
+            fh.write(b"## Request\n\xff\xfe\n")
         self.claude(claude_entry(answer(finding())))
         code, out, cases, _ = self.run_bench()
         self.assertEqual(code, 1, out)
@@ -244,7 +258,18 @@ class Malformed(BenchCase):
         self.assertIn("expected.lines", cases["b-reversed"]["message"])
         self.assertIn("no change.md", cases["c-no-change-md"]["message"])
         self.assertIn("case.head, source.pr", cases["d-no-head"]["message"])
-        for name in ("a-no-file", "b-reversed", "c-no-change-md", "d-no-head"):
+        self.assertIn("expected.lines", cases["f-one-number"]["message"])
+        self.assertEqual(cases["g-a-string"]["message"].count("expected.lines"), 1)
+        self.assertIn("cannot read change.md", cases["h-not-utf8"]["message"])
+        for name in (
+            "a-no-file",
+            "b-reversed",
+            "c-no-change-md",
+            "d-no-head",
+            "f-one-number",
+            "g-a-string",
+            "h-not-utf8",
+        ):
             self.assertEqual(cases[name]["outcome"], "malformed")
         self.assertEqual(cases["e-good"]["outcome"], "caught-strict")
         self.assertEqual(len(self.fake_calls("claude")), 1)
@@ -261,6 +286,129 @@ class Malformed(BenchCase):
         self.assertEqual(cases["a-gone"]["outcome"], "error")
         self.assertIn("cat-file", cases["a-gone"]["message"])
         self.assertEqual(self.fake_calls("claude"), [])
+
+
+class Isolation(BenchCase):
+    """round 1 F1: the clone holds the base branch at the case's base, the case's branch, and
+    no ref or reflog that leads to a later commit"""
+
+    def test_nothing_past_the_round_is_reachable(self):
+        fix = git(
+            ["commit-tree", self.base + "^{tree}", "-p", self.base, "-m", "the fix"], self.repo
+        ).strip()
+        git(["update-ref", "refs/heads/main", fix], self.repo)
+        git(["tag", "v-fix", fix], self.repo)
+        path = self.make_case("a-iso")
+        self.edit_case("a-iso", "fetch = []", 'fetch = ["refs/heads/main"]')
+        case = bench.load_case(path)
+        tmp = os.path.join(self.tmp, "iso")
+        os.makedirs(tmp)
+        clone, default = bench.prepare_clone(case, tmp)
+        ctx = bench.locate_case(case, clone, default)
+        self.assertEqual(ctx.base, "main")
+        refs = git(["for-each-ref", "--format=%(refname) %(objectname)"], clone).splitlines()
+        self.assertEqual(
+            sorted(refs), ["refs/heads/bench/mul " + self.head, "refs/heads/main " + self.base]
+        )
+        self.assertNotIn(fix, git(["log", "--all", "--reflog", "--format=%H"], clone))
+        self.assertFalse(os.path.exists(os.path.join(clone, ".git", "FETCH_HEAD")))
+        self.assertEqual(git(["rev-parse", "HEAD"], clone).strip(), self.head)
+
+    def test_a_case_on_the_base_branch_is_an_error(self):
+        self.make_case("a-main")
+        self.edit_case("a-main", 'branch = "bench/mul"', 'branch = "main"')
+        code, _, cases, _ = self.run_bench()
+        self.assertEqual(code, 1)
+        self.assertEqual(cases["a-main"]["outcome"], "error")
+        self.assertIn("'main'", cases["a-main"]["message"])
+        self.assertEqual(self.fake_calls("claude"), [])
+
+
+class Failures(BenchCase):
+    """round 1 F3, F4, F7, F8"""
+
+    def test_a_session_without_a_cost_counts_its_cap(self):
+        self.make_case("a-garbled")
+        self.make_case("b-next")
+        self.claude(
+            claude_entry(raw_stdout="not json", write_tests=False),
+            claude_entry(answer(finding())),
+        )
+        code, out, cases, results = self.run_bench(budget="1.6")
+        self.assertEqual(code, 1, out)
+        a = cases["a-garbled"]
+        self.assertEqual((a["outcome"], a["cost"], a["charged"]), ("error", 0, 1.0))
+        self.assertIn("cost unknown", a["message"])
+        self.assertEqual(cases["b-next"]["outcome"], "not-run")  # 1.0 + the 1.0 cap > 1.6
+        self.assertEqual(len(self.fake_calls("claude")), 1)
+        self.assertEqual((results["summary"]["cost"], results["summary"]["charged"]), (0, 1.0))
+        self.assertIn("counted against the budget $1.00", out)
+
+    def test_a_git_failure_is_an_error_and_the_next_case_runs(self):
+        self.make_case("a-git")
+        self.make_case("b-next")
+        self.claude(claude_entry(answer(finding())))
+        real = bench.build_prompt
+        calls = []
+
+        def broken_once(*a, **kw):
+            calls.append(1)
+            if len(calls) == 1:
+                raise bench.gitops.GitError("git diff failed: no merge base")
+            return real(*a, **kw)
+
+        with mock.patch.object(bench, "build_prompt", broken_once):
+            code, out, cases, _ = self.run_bench()
+        self.assertEqual(code, 1, out)
+        self.assertEqual(cases["a-git"]["outcome"], "error")
+        self.assertIn("no merge base", cases["a-git"]["message"])
+        self.assertEqual(cases["a-git"]["charged"], 0)  # no session ran
+        self.assertEqual(cases["b-next"]["outcome"], "caught-strict")
+
+    def test_an_interrupted_run_keeps_its_results(self):
+        for name in ("a-one", "b-two", "c-three"):
+            self.make_case(name)
+        self.claude(claude_entry(answer(finding())))
+        real = bench.spawn_reviewer
+        calls = []
+
+        def interrupted_second(*a, **kw):
+            calls.append(1)
+            if len(calls) == 2:
+                raise KeyboardInterrupt
+            return real(*a, **kw)
+
+        with mock.patch.object(bench, "spawn_reviewer", interrupted_second):
+            code, out, cases, _ = self.run_bench()
+        self.assertEqual(code, 1, out)
+        self.assertEqual(
+            [cases[n]["outcome"] for n in ("a-one", "b-two", "c-three")],
+            ["caught-strict", "error", "not-run"],
+        )
+        self.assertIn("interrupted", cases["b-two"]["message"])
+
+    def test_a_clone_left_behind_is_reported(self):
+        self.make_case("a-kept")
+        self.claude(claude_entry(answer(finding())))
+        real, left = bench._rmtree, []
+        with mock.patch.object(bench, "_rmtree", left.append):
+            _, _, cases, _ = self.run_bench()
+        for path in left:
+            self.addCleanup(real, path)
+        self.assertEqual(len(left), 1)
+        self.assertIn("clone left at " + left[0], cases["a-kept"]["message"])
+
+    def test_no_case_is_an_error(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = bench.main(["--cases", self.cases, "--out", self.out, "--budget-usd", "5"])
+        self.assertEqual(code, 1)
+        self.assertIn("no case directory", err.getvalue())
+
+    def test_a_negative_margin_is_refused(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                bench.main(["--cases", self.cases, "--budget-usd", "5", "--line-margin", "-1"])
 
 
 class ScoreUnit(unittest.TestCase):

@@ -5,7 +5,7 @@ author_model: claude-opus-5-5
 ---
 
 ## Request
-好
+Approved.
 
 (M3.4.2 in the author's plan, from the M3.4.1 audit of concurrent runs:
 every run, merge and stop appends one row to `~/.revali/history.jsonl`

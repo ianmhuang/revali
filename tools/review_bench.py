@@ -1,13 +1,15 @@
 """Reviewer catch-rate benchmark: run one round-1 reviewer session per case and score whether
 a finding names the bug the case was built from.
 
-A case is a directory with `case.toml` and `change.md` (docs/benchmark.md says how to build
+A case is a directory with `case.toml` and `change.md` (bench/README.md says how to build
 one from an archived round). For each case the tool clones the case's repository into a
 temporary directory, fetches the listed refs, drops the remote, checks out the head commit
-on the case's branch, places change.md, and runs the reviewer through revali's own
-`build_prompt` and `spawn_reviewer`. Nothing is pushed, `gh` is never run, the sandbox and
-the reviewer's tests are not run, and the clone is removed afterwards; the prompt, the raw
-answer and the parsed answer stay under the output directory.
+on the case's branch, points the base branch at the case's base commit, deletes every other
+ref and the reflogs (so later commits, the fix among them, are out of the reviewer's
+reach), places change.md, and runs the reviewer through revali's own `build_prompt` and
+`spawn_reviewer`. Nothing is pushed, `gh` is never run, the sandbox and the reviewer's tests
+are not run, and the clone is removed afterwards; the prompt, the raw answer and the parsed
+answer stay under the output directory.
 
     python tools/review_bench.py --budget-usd 15 [--cases DIR] [--model M]
                                  [--session-budget-usd N] [--line-margin N] [--out DIR]
@@ -28,13 +30,13 @@ import tempfile
 import time
 import tomllib
 from dataclasses import asdict, dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from revali import gitops  # noqa: E402
+from revali import PROMPT_VERSION, VERSION, gitops  # noqa: E402
 from revali.preflight import Stop, locate  # noqa: E402
 from revali.review import CHANGES_REQUESTED, build_prompt, spawn_reviewer  # noqa: E402
 from revali.state import State, safe_branch  # noqa: E402
@@ -77,7 +79,8 @@ class Result:
     severity: str = ""
     verdict: str = ""
     model: str = ""
-    cost: float = 0.0
+    cost: float = 0.0  # what the session reported; 0 when it failed without saying
+    charged: float = 0.0  # what counts against --budget-usd: the cap when the cost is unknown
     duration_s: float = 0.0
     message: str = ""
     other_findings: List[str] = field(default_factory=list)
@@ -122,7 +125,7 @@ def load_case(path: str) -> Case:
         problems.append("case.fetch")
     file = get("expected", "file", str)
     lines = get("expected", "lines", list)
-    if lines is not None and not (
+    if isinstance(lines, list) and not (
         len(lines) == 2
         and all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in lines)
         and lines[0] <= lines[1]
@@ -136,8 +139,11 @@ def load_case(path: str) -> Case:
         raise CaseError(
             "%s: missing or malformed in %s: %s" % (name, CASE_FILE, ", ".join(problems))
         )
-    with open(doc_path, "r", encoding="utf-8") as fh:
-        change_md = fh.read()
+    try:
+        with open(doc_path, "r", encoding="utf-8") as fh:
+            change_md = fh.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CaseError("%s: cannot read %s: %s" % (name, CHANGE_FILE, exc)) from exc
     if not change_md.strip():
         raise CaseError("%s: %s is empty" % (name, CHANGE_FILE))
     return Case(
@@ -230,80 +236,127 @@ def _rmtree(path: str) -> None:
         shutil.rmtree(path, onerror=lambda func, target, _info: again(func, target, None))
 
 
-def prepare_clone(case: Case, tmp: str) -> str:
-    """The case's repository at its head commit on its branch, with no remote left."""
+def prepare_clone(case: Case, tmp: str) -> Tuple[str, str]:
+    """The case's repository at its head commit on its branch, with no remote left, and the
+    name of the branch the clone's source had checked out (its default branch)."""
     clone = os.path.join(tmp, "repo")
     _git(["clone", "--quiet", "--no-checkout", case.repo, clone], tmp)
+    default = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        cwd=clone,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
     for ref in case.fetch:
         _git(["fetch", "--quiet", "origin", ref], clone)
     _git(["remote", "remove", "origin"], clone)  # nothing can be pushed from here
     for sha in (case.base, case.head):
         _git(["cat-file", "-e", "%s^{commit}" % sha], clone)
-    _git(["checkout", "--quiet", "-b", case.branch, case.head], clone)
-    return clone
+    _git(["checkout", "--quiet", "-B", case.branch, case.head], clone)
+    return clone, default
+
+
+def isolate(clone: str, branch: str, base_branch: str, base: str) -> None:
+    """Make the clone look like the original round: the base branch at the case's base
+    commit, the case's branch, and nothing else. The source's default branch, tags, the
+    fetched refs and the reflogs would otherwise lead to commits made after the round,
+    the fix of the very bug the case measures among them."""
+    if base_branch == branch:
+        raise CaseError("the base branch %r is the case's own branch" % base_branch)
+    _git(["branch", "--force", base_branch, base], clone)
+    keep = {"refs/heads/" + branch, "refs/heads/" + base_branch}
+    for ref in _git(["for-each-ref", "--format=%(refname)"], clone).split():
+        if ref not in keep:
+            _git(["update-ref", "-d", ref], clone)
+    git_dir = os.path.join(clone, ".git")
+    for name in ("FETCH_HEAD", "ORIG_HEAD"):
+        if os.path.isfile(os.path.join(git_dir, name)):
+            os.remove(os.path.join(git_dir, name))
+    _git(["reflog", "expire", "--expire=now", "--all"], clone)
 
 
 def run_case(case: Case, args, spent: float, out_dir: str) -> Result:
     started = time.monotonic()
-    case_out = os.path.join(out_dir, case.name)
-    os.makedirs(case_out, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix="revali bench ")
     try:
-        clone = prepare_clone(case, tmp)
-        ctx = locate_case(case, clone)
+        result = _run_in(case, args, spent, out_dir, tmp)
+    finally:
+        _rmtree(tmp)
+    result.duration_s = time.monotonic() - started
+    if os.path.exists(tmp):
+        result.message = "; ".join(m for m in (result.message, "clone left at " + tmp) if m)
+    return result
+
+
+def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str) -> Result:
+    cap = args.session_budget_usd
+    if cap and spent + cap > args.budget_usd:  # known before the clone
+        return _not_run(case, spent, cap, args)
+    session = False
+    try:
+        case_out = os.path.join(out_dir, case.name)
+        os.makedirs(case_out, exist_ok=True)
+        clone, default = prepare_clone(case, tmp)
+        ctx = locate_case(case, clone, default)
         if args.model:
             ctx.cfg.review.model = args.model
-        if args.session_budget_usd:
-            ctx.cfg.review.budget_usd = args.session_budget_usd
+        if cap:
+            ctx.cfg.review.budget_usd = cap
         cap = ctx.cfg.review.budget_usd
         if spent + cap > args.budget_usd:
-            return Result(
-                case.name,
-                "not-run",
-                message="$%.2f spent + this session's cap $%.2f would pass the budget $%.2f"
-                % (spent, cap, args.budget_usd),
-            )
+            return _not_run(case, spent, cap, args)
         prompt = build_prompt(ctx, State(), ctx.rdir, 1)
         _write(os.path.join(case_out, "prompt.md"), prompt)
+        session = True
         try:
             rr = spawn_reviewer(ctx, prompt, ctx.rdir, 1, 1, None)
-        except Stop as exc:
+        finally:
             _keep_raw(ctx, case_out)
-            return Result(
-                case.name,
-                "error",
-                cost=exc.cost,
-                duration_s=time.monotonic() - started,
-                message=exc.message,
-            )
-        _keep_raw(ctx, case_out)
+        session = False
         _write(os.path.join(case_out, "answer.json"), json.dumps(rr.data, indent=1))
         result = score(case, rr.data, args.line_margin)
         result.model = rr.model_actual or rr.model_requested
-        result.cost = rr.cost
-        result.duration_s = time.monotonic() - started
+        result.cost = result.charged = rr.cost
         return result
-    except CaseError as exc:
-        return Result(case.name, "error", duration_s=time.monotonic() - started, message=str(exc))
     except Stop as exc:
-        return Result(
-            case.name,
-            "error",
-            cost=exc.cost,
-            duration_s=time.monotonic() - started,
-            message=exc.message,
-        )
-    finally:
-        _rmtree(tmp)
+        return _error(case, exc.message, exc.cost, cap if session else 0.0)
+    except (CaseError, gitops.GitError, OSError, ValueError) as exc:
+        return _error(case, str(exc), 0.0, cap if session else 0.0)
 
 
-def locate_case(case: Case, clone: str):
+def _not_run(case: Case, spent: float, cap: float, args) -> Result:
+    return Result(
+        case.name,
+        "not-run",
+        message="$%.2f spent + this session's cap $%.2f would pass the budget $%.2f"
+        % (spent, cap, args.budget_usd),
+    )
+
+
+def _error(case: Case, message: str, cost: float, cap: float) -> Result:
+    """A failed case. A session that failed without reporting its cost (a timeout, output
+    that is not JSON) may have spent up to its cap, so the cap counts against the budget."""
+    result = Result(case.name, "error", cost=cost, charged=cost, message=message)
+    if cap and not cost:
+        result.charged = cap
+        result.message += " (cost unknown; the session cap $%.2f counts against the budget)" % cap
+    return result
+
+
+def locate_case(case: Case, clone: str, default_branch: str):
     """revali's own context for the clone, with what preflight would have filled in, minus
-    every check that needs the network."""
+    every check that needs the network. The base branch is the case repository's
+    `[project] base_branch`, else the branch its source had checked out."""
     probe = locate_paths(clone, case.branch)
     os.makedirs(probe, exist_ok=True)
     _write(os.path.join(probe, CHANGE_FILE), case.change_md)
     ctx = locate(clone)
+    ctx.base = ctx.base or default_branch
+    if not ctx.base:
+        raise CaseError("cannot tell the base branch; set [project] base_branch in the case's repo")
+    isolate(clone, case.branch, ctx.base, case.base)
     ctx.base_ref = case.base
     ctx.head_sha = _git(["rev-parse", "HEAD"], clone).strip()
     ctx.base_sha = _git(["rev-parse", case.base], clone).strip()
@@ -356,6 +409,7 @@ def rates(results: List[Result]) -> dict:
         "strict_rate": strict / len(scored) if scored else None,
         "loose_rate": loose / len(scored) if scored else None,
         "cost": sum(r.cost for r in results),
+        "charged": sum(r.charged for r in results),
     }
 
 
@@ -382,46 +436,45 @@ def main(argv=None) -> int:
         parser.error("--budget-usd must be more than 0")
     if args.session_budget_usd < 0:
         parser.error("--session-budget-usd must not be negative")
+    if args.line_margin < 0:
+        parser.error("--line-margin must not be negative")
+    paths = case_dirs(args.cases_dir, args.cases)
+    if not paths:
+        print("no case directory under %s" % args.cases_dir, file=sys.stderr)
+        return 1
+    if hasattr(sys.stdout, "reconfigure"):  # git's or claude's text on a narrow code page
+        sys.stdout.reconfigure(errors="replace")
     out_dir = args.out or tempfile.mkdtemp(prefix="revali bench out ")
     os.makedirs(out_dir, exist_ok=True)
 
     results: List[Result] = []
     spent = 0.0
     stopped = ""
-    for path in case_dirs(args.cases_dir, args.cases):
+    for path in paths:
         name = os.path.basename(os.path.normpath(path))
         try:
             case = load_case(path)
         except CaseError as exc:
-            results.append(Result(name, "malformed", message=str(exc)))
-            continue
-        if stopped:
-            results.append(Result(name, "not-run", message=stopped))
-            continue
-        result = run_case(case, args, spent, out_dir)
-        spent += result.cost
-        if result.outcome == "not-run":
+            result = Result(name, "malformed", message=str(exc))
+        else:
+            if stopped:
+                result = Result(name, "not-run", message=stopped)
+            else:
+                try:
+                    result = run_case(case, args, spent, out_dir)
+                except KeyboardInterrupt:
+                    result = Result(name, "error", message="interrupted; cost unknown")
+                    stopped = "the run was interrupted"
+        spent += result.charged
+        if result.outcome == "not-run" and not stopped:
             stopped = result.message
         results.append(result)
+        _print_case(result)
+        _write_results(out_dir, args, results)  # an interrupted run keeps what it paid for
 
-    for r in results:
-        print(
-            "%-32s %-13s %-4s %-6s %-17s %-22s $%6.2f %6.0fs %s"
-            % (
-                r.case,
-                r.outcome,
-                r.finding or "-",
-                r.severity or "-",
-                r.verdict or "-",
-                r.model or "-",
-                r.cost,
-                r.duration_s,
-                r.message,
-            )
-        )
     summary = rates(results)
     print(
-        "caught: strict %d/%d (%s), loose %d/%d (%s); cost $%.2f; output %s"
+        "caught: strict %d/%d (%s), loose %d/%d (%s); cost $%.2f%s; output %s"
         % (
             summary["strict"],
             summary["scored"],
@@ -430,23 +483,52 @@ def main(argv=None) -> int:
             summary["scored"],
             _pct(summary["loose_rate"]),
             summary["cost"],
+            (
+                " (counted against the budget $%.2f)" % summary["charged"]
+                if summary["charged"] != summary["cost"]
+                else ""
+            ),
             out_dir,
         )
     )
+    ok = all(r.outcome in ("caught-strict", "caught-loose", "missed") for r in results)
+    return 0 if ok else 1
+
+
+def _print_case(r: Result) -> None:
+    print(
+        "%-32s %-13s %-4s %-6s %-17s %-22s $%6.2f %6.0fs %s"
+        % (
+            r.case,
+            r.outcome,
+            r.finding or "-",
+            r.severity or "-",
+            r.verdict or "-",
+            r.model or "-",
+            r.cost,
+            r.duration_s,
+            r.message,
+        ),
+        flush=True,
+    )
+
+
+def _write_results(out_dir: str, args, results: List[Result]) -> None:
     with open(os.path.join(out_dir, "results.json"), "w", encoding="utf-8", newline="") as fh:
         json.dump(
             {
+                "revali": VERSION,
+                "prompt_version": PROMPT_VERSION,
                 "model": args.model,
                 "budget_usd": args.budget_usd,
+                "session_budget_usd": args.session_budget_usd,
                 "line_margin": args.line_margin,
-                "summary": summary,
+                "summary": rates(results),
                 "cases": [asdict(r) for r in results],
             },
             fh,
             indent=1,
         )
-    ok = all(r.outcome in ("caught-strict", "caught-loose", "missed") for r in results)
-    return 0 if ok else 1
 
 
 if __name__ == "__main__":
