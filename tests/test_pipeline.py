@@ -149,9 +149,15 @@ class ApprovePath(RepoCase):
         self.assertEqual(self.fake_calls("claude"), [])
         self.assertFalse(any(c["argv"][:2] == ["pr", "create"] for c in self.fake_calls("gh")))
 
-    def test_gitignore_added_when_missing(self):
+    def drop_the_ignore(self):
+        # commit .gitignore alone: `commit_all` would also commit the then unignored
+        # .revali/feature__mul/change.md, which preflight refuses (feature/state-dir-untracked)
         self.write(".gitignore", ".venv/\n")
-        self.commit_all("drop ignore")
+        git(["add", ".gitignore"], self.repo)
+        git(["commit", "-q", "-m", "drop ignore"], self.repo)
+
+    def test_gitignore_added_when_missing(self):
+        self.drop_the_ignore()
         self.claude(claude_entry())
         run_cli(["run", "--foreground"])
         self.assertIn(".revali/", self.read(".gitignore"))
@@ -159,8 +165,7 @@ class ApprovePath(RepoCase):
 
     def test_gitignore_untouched_when_git_already_ignores(self):
         # .git/info/exclude ignores the state dir; .gitignore must stay as the project left it
-        self.write(".gitignore", ".venv/\n")
-        self.commit_all("drop ignore")
+        self.drop_the_ignore()
         exclude = os.path.join(self.repo, ".git", "info", "exclude")
         with open(exclude, "a", encoding="utf-8", newline="\n") as fh:
             fh.write(".revali/\n")

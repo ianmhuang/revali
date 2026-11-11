@@ -378,7 +378,9 @@ class Interrupted(ArchiveCase):
     def test_an_occupied_archived_path_stops_the_run_and_keeps_the_occupant(self):
         # AC-5: the only occupant preflight lets through is a gitignored file; place_back
         # refuses before copying anything, and the cleanup that follows deletes nothing
-        self.write(".gitignore", "tests/review_data/\n")
+        # keep the fixture's `.revali/` line: commit_all must not commit the state directory,
+        # which preflight refuses (feature/state-dir-untracked)
+        self.write(".gitignore", self.read(".gitignore") + "tests/review_data/\n")
         self.commit_all("ignore the data directory")
         self.write(HELPER, "the author's data\n")
         self.claude(approving(**{FILE: TEST_REVIEW_MUL}))

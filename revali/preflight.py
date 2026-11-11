@@ -177,6 +177,34 @@ def check_tree(ctx: Context, tolerate: Sequence[str] = ()) -> None:
         raise Stop(EXIT_ERROR, problem)
 
 
+TRACKED_SHOWN = 20  # files listed in the refusal; the rest are counted
+
+
+def check_state_dir_untracked(ctx: Context) -> None:
+    """Refuse while git tracks anything under the state directory (a forced add, or a base
+    that already carries one): revali writes and archives that directory on its own, and a
+    tracked copy would reach the base with the next merge. Runs before any network call."""
+    state_dir = ctx.cfg.paths.state_dir
+    tracked = gitops.tracked_under(ctx.repo_root, state_dir)
+    if not tracked:
+        return
+    shown = tracked[:TRACKED_SHOWN]
+    more = len(tracked) - len(shown)
+    raise Stop(
+        EXIT_ACTION,
+        "git tracks %d file(s) under %s/, revali's state directory:\n  %s%s\n"
+        "remove them from the index with `git rm -r --cached %s` and commit; the directory "
+        "itself belongs in .gitignore (revali adds it there)"
+        % (
+            len(tracked),
+            state_dir,
+            "\n  ".join(shown),
+            "\n  ... and %d more" % more if more else "",
+            state_dir,
+        ),
+    )
+
+
 def check_github(ctx: Context) -> None:
     if not gitops.gh_available():
         raise Stop(EXIT_ERROR, "gh (GitHub CLI) not found on PATH")
@@ -329,6 +357,7 @@ def preflight(
     if before_tree is not None:
         before_tree(ctx)
     check_tree(ctx, tolerate)
+    check_state_dir_untracked(ctx)
     check_github(ctx)
     ctx.say(
         "GitHub: %s/%s (%s), base %s"

@@ -88,6 +88,14 @@ def status_porcelain(cwd: str) -> List[Tuple[str, str]]:
     return entries
 
 
+def tracked_under(cwd: str, path: str) -> List[str]:
+    """The files git tracks under `path` (relative to `cwd`), read from the index by
+    `git ls-files -z`, so a file only staged counts as much as a committed one. The pathspec
+    is `:(literal)` so a name with glob characters matches only itself."""
+    res = git_ok(["ls-files", "-z", "--", ":(literal)%s" % path], cwd)
+    return [p for p in res.stdout.split("\0") if p]
+
+
 def dirty_paths(cwd: str, ignore_prefixes: Tuple[str, ...]) -> List[str]:
     out = []
     for code, path in status_porcelain(cwd):

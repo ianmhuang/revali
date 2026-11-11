@@ -123,7 +123,9 @@ class FailedSession(PruneCase):
 
     def test_a_directory_with_an_ignored_file_stays(self):
         # AC-1: a gitignored file is "another file" too; the cleanup does not delete it
-        self.write(".gitignore", "tests/review_data/nested/*.log\n")
+        # author's change (feature/state-dir-untracked): keep the fixture's `.revali/` line, so
+        # commit_all does not commit the state directory, which preflight now refuses
+        self.write(".gitignore", self.read(".gitignore") + "tests/review_data/nested/*.log\n")
         self.commit_all("ignore logs")
         self.write("tests/review_data/nested/run.log", "kept\n")
         self.claude(claude_entry(is_error=True))
