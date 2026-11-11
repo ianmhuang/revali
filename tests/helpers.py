@@ -89,7 +89,9 @@ class RepoCase(unittest.TestCase):
     runner = "local"
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="revali test ")
+        # the long form: git and revali print it even when TEMP is an 8.3 short path (GitHub's
+        # Windows runners: C:\Users\RUNNER~1\...), so expected paths built from it match
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="revali test "))
         self.addCleanup(self._cleanup)
         self.info = make_sample_repo.create(
             os.path.join(self.tmp, "sample"),
