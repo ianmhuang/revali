@@ -1,0 +1,19 @@
+# Built by tools/bench_case.py from round 2 of PR #118 (finding F1): the head commit
+# the reviewer saw, the change.md from that round's prompt.
+
+[case]
+repo = "https://github.com/ianmhuang/bmc-toolkit"
+fetch = ["refs/pull/118/head"]
+base = "108914466c503fc2bdadc8c3aa917b1f33819604"
+head = "5fb03a67ec3832e0ca84cd16eb75b8d209c38a95"
+branch = "fix/caption-to-line-bottom"
+
+[expected]
+file = "bmc_toolkit/spec/tables.py"
+lines = [768, 768]
+description = "The round 1 fix makes the page-before rule require `_TABLE_MENTION.match(...)`, i.e. `Table\\s+[A-Z]?-?\\d`"
+
+[source]
+pr = 118
+round = 2
+finding = "F1"

@@ -1,0 +1,19 @@
+# Built by tools/bench_case.py from round 1 of PR #70 (finding F1): the head commit
+# the reviewer saw, the change.md from that round's prompt.
+
+[case]
+repo = "https://github.com/ianmhuang/revali"
+fetch = ["refs/pull/70/head"]
+base = "1c7d0c41a94bad192898992370e7438f47d78e59"
+head = "a6577289649eb8d700c3375ebf965a44efc40728"
+branch = "feature/review-bench"
+
+[expected]
+file = "tools/review_bench.py"
+lines = [236, 236]
+description = "`prepare_clone` clones the repository, removes the remote and checks out the head on the case's branch, but leaves the local branch that `git clone` creates for the remote's HEAD"
+
+[source]
+pr = 70
+round = 1
+finding = "F1"

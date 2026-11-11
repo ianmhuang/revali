@@ -216,7 +216,14 @@ class PilotCases(unittest.TestCase):
         return cases
 
     def test_three_cases_from_prs_43_61_and_69(self):
-        cases = self.load()
+        # M3.3.2 (feature/bench-cases) adds 7 more cases under the same directory; the pilot
+        # cases are revali's PRs 43, 61 and 69, which this test still pins as they were
+        cases = {
+            name: (path, data)
+            for name, (path, data) in self.load().items()
+            if data["case"]["repo"].rstrip("/").endswith("/revali")
+            and data["source"]["pr"] in (43, 61, 69)
+        }
         self.assertEqual(len(cases), 3, sorted(cases))
         self.assertEqual(sorted(data["source"]["pr"] for _, data in cases.values()), [43, 61, 69])
         for name, (_path, data) in cases.items():

@@ -1,19 +1,28 @@
 # Reviewer catch-rate benchmark
 
 `tools/review_bench.py` measures how often the reviewer finds a bug it is known to have
-found before. Each case is a real round-1 review of one of revali's own PRs in which the
-reviewer named a correctness bug; the case replays that round's head commit and description
-against the reviewer as it is configured now, and checks whether a finding names the same
-place.
+found before. Each case is a real review round of a project revali reviews, in which the
+reviewer named a correctness or security bug that the next round found fixed; the case
+replays that round's head commit and description against the reviewer as it is configured
+now, as a first round, and checks whether a finding names the same place.
 
 ```
-python tools/review_bench.py --budget-usd 15                       # every case under bench/cases/
-python tools/review_bench.py --budget-usd 15 --model claude-sonnet-5-5
-python tools/review_bench.py --budget-usd 5 pr69-staged-removal    # one case
-python tools/review_bench.py --budget-usd 15 --cases ../private-cases --out ../bench-out
+python tools/review_bench.py --dry-run                             # check every case, run no session
+python tools/review_bench.py --budget-usd 40 --session-budget-usd 8   # every case under bench/cases/
+python tools/review_bench.py --budget-usd 40 --model claude-sonnet-5-5
+python tools/review_bench.py --budget-usd 8 pr69-staged-removal    # one case
+python tools/review_bench.py --budget-usd 80 --session-budget-usd 8 \
+    --cases bench/cases --cases ~/.revali/bench/cases --out ../bench-out
 ```
 
-`--budget-usd` is required. Before each case the tool adds that session's own cap (`[review]
+`--dry-run` does everything up to the session for each case (clone, isolate, configuration,
+prompt, written to `<case>/prompt.md`), spends nothing and needs no budget; each case is
+`ready` or `error`, and exit 1 means one is not ready. Run it after adding a case.
+
+`--cases` may be given more than once; the cases of every directory run under one budget,
+and a case name found in two directories stops the run before anything starts.
+
+`--budget-usd` is required for a real run. Before each case the tool adds that session's own cap (`[review]
 budget_usd` of the case's repository, or `--session-budget-usd`) to what it has spent; when
 that would pass the budget the case and every later one are reported as `not-run`. revali's
 own cap is $8, so a $15 budget runs three cases only with a lower `--session-budget-usd`. A
@@ -46,7 +55,10 @@ temporary directory) keeps `<case>/prompt.md`, `<case>/review.raw.json`,
 
 The prompt, schema and checklist are the ones of the revali running the benchmark; the case
 repository contributes its own `revali.toml` (model, budget, test pattern, project
-checklist). A case whose old `revali.toml` this revali no longer accepts ends as `error`.
+checklist). A project that keeps `revali.toml` out of git has none in the clone: its cases
+carry a copy in the case directory, which is written into the clone first and replaces any
+the clone has. A case whose `revali.toml` this revali does not accept ends as `error`, and
+one that is not valid TOML as `malformed`.
 
 ## Scoring
 
@@ -69,19 +81,46 @@ What the number does not say:
 ## Building a case from an archived round
 
 `revali merge` archives `.revali/<branch>/` under `~/.revali/archive/<owner>__<repo>/
-<pr>-<branch>/`. A round that asked for changes for a correctness bug gives:
+<pr>-<branch>/`. `tools/bench_case.py` turns one finding of one archived round into a case:
+
+```
+python tools/bench_case.py --list ~/.revali/archive/<owner>__<repo>      # candidates, in selection order
+python tools/bench_case.py ~/.revali/archive/<owner>__<repo>/<pr>-<branch> \
+    --round 1 --finding F1 --out bench/cases/<name> \
+    --request "As you suggest." [--config <project>/revali.toml]
+```
+
+Only a medium or high correctness or security finding with a line, which the next round
+marked resolved, makes a case; the tool refuses anything else, a head the repository cannot
+reach, or an output directory that exists, and says why. `--request` replaces the body of
+the `## Request` section; without it the section is copied as it was, which is right for a
+private case only. `--config` copies the project's `revali.toml` into the case when the
+project keeps it out of git. `--repo` overrides the repository (default
+`https://github.com/<owner>/<repo>`). Run `--dry-run` on the new case before paying for it.
+
+The selection rule, so the set is not hand-picked: per repository, PRs newest first, one case
+per PR (the first qualifying finding of the earliest round that has one, which is what
+`--list` prints), skipping a candidate the builder or the dry run refuses, until the
+repository's quota. The committed set is revali 6 (the three pilot cases #43, #61, #69 and
+the three newest others) and bmc-toolkit 4; 8 more come from two private projects and live
+in `~/.revali/bench/cases/`, outside any repository.
+
+What the builder takes from the archive:
 
 - `head`: `head_sha` of `review-<n>.json`. revali adds fixes on top of it, so it stays
   reachable through `refs/pull/<pr>/head` after the branch is deleted.
-- `base`: `git merge-base <head> origin/main`.
+- `base`: `git merge-base <head> origin/<base branch>`, in a temporary clone.
 - `change.md`: the text between "## The author's description (change.md)" and "## The diff"
   in `logs/prompt-r<n>-1.md`. The archived `change.md` is the final one; its What may
-  already describe the fix. Replace the `## Request` section with a short English
-  paraphrase: it holds the user's own words, which revali keeps off GitHub (the PR body
-  leaves it out), and a case is committed. The replayed description then differs from the
-  original round in that section only.
+  already describe the fix. A committed case's `## Request` is a short English paraphrase
+  (`--request`): it holds the user's own words, which revali keeps off GitHub (the PR body
+  leaves it out). The replayed description then differs from the original round in that
+  section only; a test fails when a committed Request has a non-ASCII character.
 - `[expected]`: `file` and `line` of the finding, and its first sentence as the
   description.
+- `[source]`: the PR, the round and the finding id. A case from a later round is replayed
+  as a first round: the reviewer sees the whole diff at that head, without the earlier
+  rounds' findings.
 
 ```toml
 [case]
@@ -102,5 +141,5 @@ round = 1
 finding = "F1"
 ```
 
-A case from a private repository does not belong in this public repository: keep it in a
-directory of its own and pass `--cases`.
+A case from a private repository does not belong in this public repository: keep it in
+`~/.revali/bench/cases/` (or any directory of its own) and pass a second `--cases`.

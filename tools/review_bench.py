@@ -11,12 +11,14 @@ reach), places change.md, and runs the reviewer through revali's own `build_prom
 are not run, and the clone is removed afterwards; the prompt, the raw answer and the parsed
 answer stay under the output directory.
 
-    python tools/review_bench.py --budget-usd 15 [--cases DIR] [--model M]
+    python tools/review_bench.py --budget-usd 15 [--cases DIR ...] [--model M]
                                  [--session-budget-usd N] [--line-margin N] [--out DIR]
                                  [case ...]
+    python tools/review_bench.py --dry-run [--cases DIR ...] [case ...]
 
 Exit 0 when every case that ran was scored (caught or missed), 1 when a case was malformed,
-failed, or was not run for the budget.
+failed, or was not run for the budget. With --dry-run no session runs: exit 0 when every
+case got as far as its prompt.
 """
 
 import argparse
@@ -44,9 +46,11 @@ from revali.state import State, safe_branch  # noqa: E402
 CASES_DIR = os.path.join(ROOT, "bench", "cases")
 CASE_FILE = "case.toml"
 CHANGE_FILE = "change.md"
+CONFIG_FILE = "revali.toml"
 SCORED_KINDS = ("correctness", "security")
 STRONG = ("medium", "high")
 DEFAULT_MARGIN = 15
+READY = "ready"  # --dry-run: the case would run
 
 
 class CaseError(Exception):
@@ -69,12 +73,13 @@ class Case:
     round: int
     finding: str
     change_md: str
+    config: str = ""  # the case's own revali.toml, for a project that keeps it out of git
 
 
 @dataclass
 class Result:
     case: str
-    outcome: str  # caught-strict | caught-loose | missed | error | not-run | malformed
+    outcome: str  # caught-strict | caught-loose | missed | error | not-run | malformed | ready
     finding: str = ""
     severity: str = ""
     verdict: str = ""
@@ -146,6 +151,15 @@ def load_case(path: str) -> Case:
         raise CaseError("%s: cannot read %s: %s" % (name, CHANGE_FILE, exc)) from exc
     if not change_md.strip():
         raise CaseError("%s: %s is empty" % (name, CHANGE_FILE))
+    config = ""
+    config_path = os.path.join(path, CONFIG_FILE)
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as fh:
+                config = fh.read()
+            tomllib.loads(config)
+        except (OSError, ValueError) as exc:
+            raise CaseError("%s: %s is not valid TOML: %s" % (name, CONFIG_FILE, exc)) from exc
     return Case(
         name=name,
         path=path,
@@ -161,6 +175,7 @@ def load_case(path: str) -> Case:
         round=round_no,
         finding=finding,
         change_md=change_md,
+        config=config,
     )
 
 
@@ -292,7 +307,7 @@ def run_case(case: Case, args, spent: float, out_dir: str) -> Result:
 
 def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str) -> Result:
     cap = args.session_budget_usd
-    if cap and spent + cap > args.budget_usd:  # known before the clone
+    if not args.dry_run and cap and spent + cap > args.budget_usd:  # known before the clone
         return _not_run(case, spent, cap, args)
     session = False
     try:
@@ -305,10 +320,12 @@ def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str) -> Result:
         if cap:
             ctx.cfg.review.budget_usd = cap
         cap = ctx.cfg.review.budget_usd
-        if spent + cap > args.budget_usd:
+        if not args.dry_run and spent + cap > args.budget_usd:
             return _not_run(case, spent, cap, args)
         prompt = build_prompt(ctx, State(), ctx.rdir, 1)
         _write(os.path.join(case_out, "prompt.md"), prompt)
+        if args.dry_run:  # everything a session needs is in place; nothing is spent
+            return Result(case.name, READY, message="prompt.md %d lines" % prompt.count("\n"))
         session = True
         try:
             rr = spawn_reviewer(ctx, prompt, ctx.rdir, 1, 1, None)
@@ -348,7 +365,10 @@ def _error(case: Case, message: str, cost: float, cap: float) -> Result:
 def locate_case(case: Case, clone: str, default_branch: str):
     """revali's own context for the clone, with what preflight would have filled in, minus
     every check that needs the network. The base branch is the case repository's
-    `[project] base_branch`, else the branch its source had checked out."""
+    `[project] base_branch`, else the branch its source had checked out. A case's own
+    revali.toml replaces the clone's (most projects keep theirs out of git)."""
+    if case.config:  # first: the state directory's name comes from it
+        _write(os.path.join(clone, CONFIG_FILE), case.config)
     probe = locate_paths(clone, case.branch)
     os.makedirs(probe, exist_ok=True)
     _write(os.path.join(probe, CHANGE_FILE), case.change_md)
@@ -386,16 +406,37 @@ def _write(path: str, text: str) -> None:
         fh.write(text)
 
 
-def case_dirs(cases_dir: str, names: List[str]) -> List[str]:
+def case_dirs(cases_dir, names: List[str]) -> List[str]:
+    """The case directories to run: the named ones (a directory, or a name looked up in each
+    cases directory in turn), else every directory under every cases directory."""
+    roots = [cases_dir] if isinstance(cases_dir, str) else list(cases_dir)
     if names:
-        return [n if os.path.isdir(n) else os.path.join(cases_dir, n) for n in names]
-    if not os.path.isdir(cases_dir):
-        return []
-    return sorted(
-        os.path.join(cases_dir, d)
-        for d in os.listdir(cases_dir)
-        if os.path.isdir(os.path.join(cases_dir, d))
-    )
+        found = []
+        for n in names:
+            hits = [os.path.join(r, n) for r in roots if os.path.isdir(os.path.join(r, n))]
+            found.append(
+                n if os.path.isdir(n) else (hits[0] if hits else os.path.join(roots[0], n))
+            )
+        return found
+    found = []
+    for root in roots:
+        if os.path.isdir(root):
+            found.extend(
+                os.path.join(root, d)
+                for d in sorted(os.listdir(root))
+                if os.path.isdir(os.path.join(root, d))
+            )
+    return found
+
+
+def duplicate_names(paths: List[str]) -> List[str]:
+    seen, dup = {}, []
+    for p in paths:
+        name = os.path.basename(os.path.normpath(p))
+        if name in seen:
+            dup.append("%s (%s and %s)" % (name, seen[name], p))
+        seen.setdefault(name, p)
+    return dup
 
 
 def rates(results: List[Result]) -> dict:
@@ -420,8 +461,18 @@ def _pct(n: Optional[float]) -> str:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="reviewer catch-rate benchmark")
     parser.add_argument("cases", nargs="*", help="case names (under --cases) or directories")
-    parser.add_argument("--cases", dest="cases_dir", default=CASES_DIR)
-    parser.add_argument("--budget-usd", type=float, required=True)
+    parser.add_argument(
+        "--cases",
+        dest="cases_dir",
+        action="append",
+        help="a directory of cases; may be given more than once (default: bench/cases/)",
+    )
+    parser.add_argument("--budget-usd", type=float, help="required unless --dry-run")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="clone, isolate and build each prompt; run no session",
+    )
     parser.add_argument("--model", default="", help="reviewer model (default: the case's config)")
     parser.add_argument(
         "--session-budget-usd",
@@ -432,7 +483,10 @@ def main(argv=None) -> int:
     parser.add_argument("--line-margin", type=int, default=DEFAULT_MARGIN)
     parser.add_argument("--out", default="", help="output directory (default: a new temp dir)")
     args = parser.parse_args(argv)
-    if args.budget_usd <= 0:
+    args.cases_dir = args.cases_dir or [CASES_DIR]
+    if args.budget_usd is None and not args.dry_run:
+        parser.error("--budget-usd is required (or --dry-run)")
+    if args.budget_usd is not None and args.budget_usd <= 0:
         parser.error("--budget-usd must be more than 0")
     if args.session_budget_usd < 0:
         parser.error("--session-budget-usd must not be negative")
@@ -440,7 +494,11 @@ def main(argv=None) -> int:
         parser.error("--line-margin must not be negative")
     paths = case_dirs(args.cases_dir, args.cases)
     if not paths:
-        print("no case directory under %s" % args.cases_dir, file=sys.stderr)
+        print("no case directory under %s" % ", ".join(args.cases_dir), file=sys.stderr)
+        return 1
+    dup = duplicate_names(paths)
+    if dup:
+        print("a case name is in two directories: %s" % "; ".join(dup), file=sys.stderr)
         return 1
     if hasattr(sys.stdout, "reconfigure"):  # git's or claude's text on a narrow code page
         sys.stdout.reconfigure(errors="replace")
@@ -472,6 +530,10 @@ def main(argv=None) -> int:
         _print_case(result)
         _write_results(out_dir, args, results)  # an interrupted run keeps what it paid for
 
+    if args.dry_run:
+        ready = sum(r.outcome == READY for r in results)
+        print("ready: %d/%d; no session run; output %s" % (ready, len(results), out_dir))
+        return 0 if ready == len(results) else 1
     summary = rates(results)
     print(
         "caught: strict %d/%d (%s), loose %d/%d (%s); cost $%.2f%s; output %s"
@@ -520,6 +582,8 @@ def _write_results(out_dir: str, args, results: List[Result]) -> None:
                 "revali": VERSION,
                 "prompt_version": PROMPT_VERSION,
                 "model": args.model,
+                "dry_run": args.dry_run,
+                "cases_dirs": args.cases_dir,
                 "budget_usd": args.budget_usd,
                 "session_budget_usd": args.session_budget_usd,
                 "line_margin": args.line_margin,

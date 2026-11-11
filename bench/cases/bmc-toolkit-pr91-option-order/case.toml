@@ -1,0 +1,19 @@
+# Built by tools/bench_case.py from round 1 of PR #91 (finding F2): the head commit
+# the reviewer saw, the change.md from that round's prompt.
+
+[case]
+repo = "https://github.com/ianmhuang/bmc-toolkit"
+fetch = ["refs/pull/91/head"]
+base = "21502d478b4568a880cb70194136cdfad0655e88"
+head = "be27dd47406731d4ca864f040b423ddbe2c39af2"
+branch = "experiment/invocation-subcommand"
+
+[expected]
+file = "bmc_toolkit/spec/invocation.py"
+lines = [251, 251]
+description = "The documented and tested call form `invocation pldm --subcommand NAME FIELD...` puts an option between the `protocol` positional and the `fields` positional with nargs='*'. argparse before the CPy..."
+
+[source]
+pr = 91
+round = 1
+finding = "F2"

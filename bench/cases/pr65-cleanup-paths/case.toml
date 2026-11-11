@@ -1,0 +1,19 @@
+# Built by tools/bench_case.py from round 1 of PR #65 (finding F1): the head commit
+# the reviewer saw, the change.md from that round's prompt.
+
+[case]
+repo = "https://github.com/ianmhuang/revali"
+fetch = ["refs/pull/65/head"]
+base = "5e7d43b66855220e85e6f900515160257199fab9"
+head = "35488a2e5303377d4cb0d8f5a1eea50adb501bfb"
+branch = "fix/cleanup-failures"
+
+[expected]
+file = "revali/runners.py"
+lines = [267, 267]
+description = "The Request's planned acceptance is \"check every `finally` and cleanup path in `runners.py`; a cleanup that fails is logged and never replaces the report or the original error\""
+
+[source]
+pr = 65
+round = 1
+finding = "F1"

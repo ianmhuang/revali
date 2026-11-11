@@ -1,0 +1,31 @@
+# revali project configuration. Keys left out come from defaults.toml.
+
+[project]
+config_version = 1
+base_branch = "develop"
+platforms = ["linux"]
+test_dir = "tests"
+test_file_pattern = "test_review_{topic}.py"
+lint = '.venv\Scripts\python -m ruff check . && .venv\Scripts\python -m ruff format --check .'  # the CI line; revali runs it through cmd.exe on this host, so backslashes; pyproject excludes test_review_* from both
+
+[review]
+budget_usd = 10.0                 # M7 diff is about 2400 reviewable lines; 6.0 ran out at 27 turns
+checklist = "CONVENTIONS.md"
+max_diff_lines = 2500             # a milestone is code plus its tests
+max_fixes = 4                     # M13 needed four fix cycles, each one smaller than the last
+exclude = ["*.lock", "bmc_toolkit/spec/catalog.toml"]  # catalog is data, covered by tests and a real fetch --all
+
+[validate]
+budget_usd = 1.0
+
+[validate.linux]
+runner = "wsl"
+distro = "Ubuntu"
+network = true                    # setup installs from PyPI
+command_timeout_min = 20
+setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt -r requirements-dev.txt"
+test = ".venv/bin/python -m pytest -q"
+new_test = ".venv/bin/python -m pytest -q {files}"  # this round's files in the smoke run, every reviewer file on the branch in validation
+
+[merge]
+method = "squash"
