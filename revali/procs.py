@@ -48,6 +48,12 @@ class Result:
         return (self.stdout or "") + (self.stderr or "")
 
 
+def one_line(text: str, limit: int = 200) -> str:
+    """A command's error for a one-line message: git's run over several lines, so the
+    whitespace is folded and the text cut to `limit` characters."""
+    return " ".join((text or "").split())[:limit]
+
+
 def resolve(name: str) -> list:
     """Return the argv prefix for an executable, or raise ExeNotFound."""
     override = os.environ.get("REVALI_%s_CMD" % name.upper().replace("-", "_"))

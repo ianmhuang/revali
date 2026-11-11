@@ -141,6 +141,14 @@ port, key-only login); on Ubuntu 24.04 `Port` in `sshd_config` is ignored
 while `ssh.socket` is active, so disable the socket and enable `ssh.service`
 if the port does not change.
 
+Every runner cleans up after its session: the local runner's worktree and
+temp directory, the `<label>-extra` directory and the ssh runner's
+`<label>.bundle` in the logs directory, the staging directories on the ssh
+host. A cleanup that fails is logged, naming what is left for you to delete,
+and never changes the session's result: the report, or the error that ended
+the session, stands. A file held open on Windows (an antivirus scan, an
+editor) is the usual cause.
+
 ## Verification record
 
 The ssh runner was verified end to end on 2026-08-30 on the author's

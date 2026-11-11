@@ -152,6 +152,9 @@ stated.
   `git fetch --prune origin <base>`, `git checkout --detach FETCH_HEAD`,
   `git branch -D <branch>`, each reported if it fails, and the state
   directory is archived as above; the worktree is left for you to remove.
+  git that fails, times out or cannot be started there does not stop the
+  merge: each failure in the worktree follow-up is reported, as a note or in
+  the `worktree:` line, and the exit code stays 0.
   When `gh pr merge` exits non-zero but `gh pr view`
   reports the PR as MERGED, the merge counts as done and the local
   follow-up still runs

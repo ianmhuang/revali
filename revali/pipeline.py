@@ -1086,19 +1086,19 @@ def cmd_merge(args) -> int:
         release_tree_lock(tpath)
     _record_history(state, code)
     print(merge.merge_summary(state, state.base))
-    root = gitops.repo_root(cwd)
-    if root:
-        paths = paths_for(root)
-        rdir = review_dir(root, state.branch, paths.state_dir)
-        root_dir = archive_root(paths)
-        if root_dir:
-            line = merge.archive_review_dir(
-                rdir, root_dir, state.repo or os.path.basename(root), state.pr_number, state.branch
-            )
-        else:
-            merge.remove_tree(rdir)
-            line = "removed %s/%s/" % (paths.state_dir, safe_branch(state.branch))
-        print("  " + line)
+    # the root found before the merge: a checkout does not move it, and asking git again here
+    # could fail now that the PR is merged and skip the archive
+    paths = paths_for(root)
+    rdir = review_dir(root, state.branch, paths.state_dir)
+    root_dir = archive_root(paths)
+    if root_dir:
+        line = merge.archive_review_dir(
+            rdir, root_dir, state.repo or os.path.basename(root), state.pr_number, state.branch
+        )
+    else:
+        merge.remove_tree(rdir)
+        line = "removed %s/%s/" % (paths.state_dir, safe_branch(state.branch))
+    print("  " + line)
     return code
 
 

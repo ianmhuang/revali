@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from revali.config import PlatformCfg
-from revali.procs import ExeNotFound, ProcTimeout, resolve, run, run_shell
+from revali.procs import ExeNotFound, ProcError, ProcTimeout, one_line, resolve, run, run_shell
 from revali.state import write_text
 
 Logger = Optional[Callable[[str], None]]
@@ -206,6 +206,57 @@ def sandbox_scope(scope: str, key: str) -> str:
     return "%s-%s" % (scope, key) if scope and key else scope
 
 
+CLEANUP_FAILURES = (ProcError, OSError)  # OSError: a spawn error, a file held open on Windows
+
+
+def remove_dir(path: str, label: str, log: Logger = None) -> None:
+    """Remove a directory a session made; one that is still there is logged with the first
+    error, never raised, so the session's report or error stands."""
+    if not os.path.lexists(path):
+        return
+    errors: List[BaseException] = []
+    try:
+        shutil.rmtree(path, onexc=lambda _f, _p, exc: errors.append(exc))
+    except TypeError:  # Python 3.11: no onexc
+        shutil.rmtree(path, onerror=lambda _f, _p, info: errors.append(info[1]))
+    if os.path.lexists(path) and log:
+        reason = ": %s" % one_line(str(errors[0])) if errors else ""
+        log("[%s] could not remove %s (left for you to delete)%s" % (label, path, reason))
+
+
+def remove_file(path: str, label: str, log: Logger = None) -> None:
+    """remove_dir for one file."""
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except OSError as exc:
+        if log:
+            log(
+                "[%s] could not remove %s (left for you to delete): %s"
+                % (label, path, one_line(str(exc)))
+            )
+
+
+def _cleanup_git(
+    git: list, args: list, cwd: str, timeout: float, about: str, label: str, log: Logger
+) -> None:
+    """`git worktree <args>` after a local session: a failure, or git that cannot be run, is
+    logged on one line and never raised."""
+    try:
+        res = run(git + ["worktree"] + args, cwd=cwd, timeout=timeout)
+    except CLEANUP_FAILURES as exc:
+        reason = str(exc)
+    else:
+        if res.ok:
+            return
+        reason = res.text or "exit %d" % res.returncode
+    if log:
+        log(
+            "[%s] could not clean up %s: git worktree %s failed: %s"
+            % (label, about, args[0], one_line(reason))
+        )
+
+
 class LocalRunner(Runner):
     """git worktree on the host. Every step runs through the host shell."""
 
@@ -215,16 +266,26 @@ class LocalRunner(Runner):
         os.makedirs(logs_dir, exist_ok=True)
         tmp = tempfile.mkdtemp(prefix="revali-%s-" % label)
         wt = os.path.join(tmp, "wt")
-        git = resolve("git")
-        res = run(
-            git + ["worktree", "add", "--detach", "--quiet", wt, ref],
-            cwd=repo_root,
-            log=log,
-            timeout=300,
-        )
-        if not res.ok:
-            shutil.rmtree(tmp, ignore_errors=True)
-            raise RunnerError("git worktree add failed: %s" % res.text.strip())
+        # prune works on the whole repository: its failure line names both
+        pruned = "%s from the worktree list of %s" % (wt, repo_root)
+        git = None
+        try:
+            git = resolve("git")
+            res = run(
+                git + ["worktree", "add", "--detach", "--quiet", wt, ref],
+                cwd=repo_root,
+                log=log,
+                timeout=300,
+            )
+            if not res.ok:
+                raise RunnerError("git worktree add failed: %s" % res.text.strip())
+        except BaseException:
+            # an add that failed or timed out midway may have registered the worktree: the
+            # temp dir goes first, then the prune drops that entry
+            remove_dir(tmp, label, log)
+            if git is not None:
+                _cleanup_git(git, ["prune"], repo_root, 60, pruned, label, log)
+            raise
         report = RunReport(label=label)
         try:
             for rel, content in (extra_files or {}).items():
@@ -269,9 +330,11 @@ class LocalRunner(Runner):
                 if not step.ok:
                     break
         finally:
-            run(git + ["worktree", "remove", "--force", wt], cwd=repo_root, timeout=120)
-            run(git + ["worktree", "prune"], cwd=repo_root, timeout=60)
-            shutil.rmtree(tmp, ignore_errors=True)
+            # the temp dir goes before the prune, so a worktree git could not remove is
+            # dropped from the repository's list as well
+            _cleanup_git(git, ["remove", "--force", wt], repo_root, 120, wt, label, log)
+            remove_dir(tmp, label, log)
+            _cleanup_git(git, ["prune"], repo_root, 60, pruned, label, log)
         return report
 
 
@@ -485,14 +548,20 @@ def render_script(
 
 
 def stage_inputs(
-    logs_dir: str, label: str, steps: List[Tuple[str, str]], extra_files: Dict[str, str]
+    logs_dir: str,
+    label: str,
+    steps: List[Tuple[str, str]],
+    extra_files: Dict[str, str],
+    log: Logger = None,
 ) -> Tuple[List[Tuple[str, str]], str]:
     """Write one .cmd file per non-empty step and the extra files under logs_dir; drop a
     stale results file and script log. Returns (non-empty steps, extra dir)."""
     os.makedirs(logs_dir, exist_ok=True)
     steps = [(n, c) for n, c in steps if c.strip()]
     extra_dir = os.path.join(logs_dir, "%s-extra" % label)
-    shutil.rmtree(extra_dir, ignore_errors=True)
+    # an earlier session's directory that cannot go is reused: its files would travel with
+    # this session's, so the log names it
+    remove_dir(extra_dir, label, log)
     os.makedirs(extra_dir, exist_ok=True)
     try:
         for rel, content in (extra_files or {}).items():
@@ -506,7 +575,7 @@ def stage_inputs(
                 os.remove(path)
     except BaseException:
         # the runner's own cleanup only starts once this returns
-        shutil.rmtree(extra_dir, ignore_errors=True)
+        remove_dir(extra_dir, label, log)
         raise
     return steps, extra_dir
 
@@ -750,7 +819,7 @@ class WslRunner(Runner):
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope="", key=""):
         scope = sandbox_scope(scope, key)
         source, ref = clone_source(repo_root, ref, log)
-        steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files)
+        steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files, log)
         results_path = os.path.join(logs_dir, "%s.results" % label)
         # everything from here on can fail (a wslpath, writing the script, the session); the
         # extra files are only for this session and never stay in the logs directory
@@ -785,7 +854,7 @@ class WslRunner(Runner):
             except ProcTimeout as exc:
                 raise RunnerError("wsl session for %s did not finish in time" % label) from exc
         finally:
-            shutil.rmtree(extra_dir, ignore_errors=True)
+            remove_dir(extra_dir, label, log)
         if not res.ok and not os.path.isfile(results_path):
             raise RunnerError(
                 "wsl could not start the sandbox script (exit %d): %s"
@@ -866,7 +935,7 @@ class SshRunner(Runner):
 
     def run(self, repo_root, ref, steps, extra_files, logs_dir, label, log=None, scope="", key=""):
         scope = sandbox_scope(scope, key)
-        steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files)
+        steps, extra_dir = stage_inputs(logs_dir, label, steps, extra_files, log)
         bundle = "%s.bundle" % label
         bundle_path = os.path.join(logs_dir, bundle)
         try:
@@ -874,10 +943,10 @@ class SshRunner(Runner):
                 repo_root, ref, steps, logs_dir, label, log, scope, extra_dir, bundle, bundle_path
             )
         finally:
-            # whatever ended the session, before or after the ssh calls
-            shutil.rmtree(extra_dir, ignore_errors=True)
-            if os.path.isfile(bundle_path):
-                os.remove(bundle_path)
+            # whatever ended the session, before or after the ssh calls; a failure here is
+            # logged and the report or error stands
+            remove_dir(extra_dir, label, log)
+            remove_file(bundle_path, label, log)
 
     def _session(
         self, repo_root, ref, steps, logs_dir, label, log, scope, extra_dir, bundle, bundle_path
@@ -1019,11 +1088,11 @@ class SshRunner(Runner):
         )
         try:
             r = self._ssh(command, timeout=self._short())
-        except (ProcTimeout, ExeNotFound) as exc:
+        except CLEANUP_FAILURES as exc:
             r = None
-            reason = str(exc)
+            reason = one_line(str(exc))
         else:
-            reason = r.text.strip()[:200]
+            reason = one_line(r.text)
         ok = r is not None and r.ok
         if log:
             if ok:
