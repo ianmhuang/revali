@@ -42,6 +42,25 @@ def tracked_under(root: str, path: str) -> Optional[List[str]]:
     return [name for name in out.split("\0") if name]
 
 
+def model_here() -> Optional[str]:
+    """This machine's CPU model where the test can read it itself, else None."""
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/cpuinfo", "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("model name"):
+                        return line.split(":", 1)[1].strip() or None
+        elif os.name == "nt":
+            import winreg
+
+            where = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, where) as key:
+                return str(winreg.QueryValueEx(key, "ProcessorNameString")[0]).strip() or None
+    except (ImportError, OSError):
+        return None
+    return None
+
+
 def load_runner_facts():
     path = os.path.join(ROOT, ".github", "runner_facts.py")
     spec = importlib.util.spec_from_file_location("runner_facts", path)
@@ -145,21 +164,49 @@ class RunnerFactsScript(unittest.TestCase):
     def test_prints_the_model_and_the_count_here(self):
         code, out = self.run_main()
         self.assertEqual(code, 0)
-        self.assertRegex(out, r"^cpu: .+; logical processors: %d; " % os.cpu_count())
-        if sys.platform.startswith("linux") or os.name == "nt":
-            self.assertNotEqual(self.facts.cpu_model(), "unknown")
+        count = re.escape(str(os.cpu_count() or "unknown"))
+        self.assertRegex(out, r"^cpu: .+; logical processors: %s; " % count)
+        model = model_here()
+        if model is not None:  # round 1 F1: only where the test itself can read one
+            self.assertEqual(self.facts.cpu_model(), model)
 
-    def test_a_model_it_cannot_read_is_unknown(self):
+    def test_a_model_it_cannot_read_is_unknown_with_the_reason(self):
+        # round 1 F2: the reason the primary source failed reaches the log
         with (
-            mock.patch("builtins.open", side_effect=OSError("denied")),
+            mock.patch("builtins.open", side_effect=PermissionError("denied")),
             mock.patch.dict(sys.modules, {"winreg": None}),
-            mock.patch("subprocess.run", side_effect=OSError("no sysctl")),
+            mock.patch("platform.processor", return_value=""),
+            mock.patch("platform.platform", return_value="SomeOS-1"),
+        ):
+            model = self.facts.cpu_model()
+            code, out = self.run_main()
+        if sys.platform.startswith("linux") or os.name == "nt":
+            self.assertRegex(model, r"^unknown \((PermissionError: denied|\w*Error: .+)\)$")
+        else:
+            self.assertEqual(model, "unknown")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("cpu: unknown"), out)
+        self.assertTrue(out.rstrip().endswith("; SomeOS-1"), out)
+
+    def test_no_model_line_falls_back_without_a_reason(self):
+        # e.g. an ARM Linux whose /proc/cpuinfo has no "model name"
+        with (
+            mock.patch.object(self.facts, "_primary_model", return_value=""),
+            mock.patch("platform.processor", return_value="aarch64"),
+        ):
+            self.assertEqual(self.facts.cpu_model(), "aarch64")
+        with (
+            mock.patch.object(self.facts, "_primary_model", return_value=""),
             mock.patch("platform.processor", return_value=""),
         ):
             self.assertEqual(self.facts.cpu_model(), "unknown")
-            code, out = self.run_main()
-        self.assertEqual(code, 0)
-        self.assertTrue(out.startswith("cpu: unknown; logical processors: "), out)
+
+    def test_a_failing_fallback_keeps_the_first_reason(self):
+        with (
+            mock.patch.object(self.facts, "_primary_model", side_effect=OSError("gone")),
+            mock.patch("platform.processor", side_effect=RuntimeError("no uname")),
+        ):
+            self.assertEqual(self.facts.cpu_model(), "unknown (OSError: gone)")
 
     def test_an_error_in_the_facts_is_printed_not_raised(self):
         with mock.patch.object(self.facts, "cpu_model", side_effect=RuntimeError("boom")):

@@ -97,6 +97,10 @@ class TheSuiteSaysSo(unittest.TestCase):
         init = run_git(["init", "--quiet"], cls.repo, cls.env)
         if init.returncode != 0:
             raise AssertionError("git init failed: %s" % init.stderr)
+        # author's change after round 1: test_review_ciidentity wants an identity with every
+        # `git init`; this repository never commits
+        for key, value in (("user.email", "test@example.invalid"), ("user.name", "revali test")):
+            run_git(["config", key, value], cls.repo, cls.env)
         cls.clean = None
 
     def run_module(self, cwd):
