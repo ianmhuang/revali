@@ -174,7 +174,8 @@ revali's own CI ([.github/workflows/test.yml](../.github/workflows/test.yml)) ru
 suite on Linux and Windows on every push, and `revali merge` waits for it as it waits for
 any project's checks. The Windows leg is the slow one, so revali's own
 `revali.toml` raises `checks_timeout_min` above the job's `timeout-minutes`; its comment has
-the measured times.
+the measured times. Its time depends on the runner it lands on, so every leg prints the CPU
+model before the suite ([.github/runner_facts.py](../.github/runner_facts.py)).
 
 ## Project setup
 
