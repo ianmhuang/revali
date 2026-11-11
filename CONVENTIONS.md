@@ -42,8 +42,8 @@ Things a linter cannot check; formatting is not listed.
 ## Portability
 - Runs on the Windows host (PowerShell / Git Bash) and inside WSL or Linux:
   no absolute paths, no user names, no platform-only tools in `revali/`.
-  CI ([.github/workflows/test.yml](.github/workflows/test.yml)) runs lint and the suite on Linux on every
-  push, and `revali merge` waits for it.
+  CI ([.github/workflows/test.yml](.github/workflows/test.yml)) runs lint and the suite on Linux and
+  Windows on every push, and `revali merge` waits for it.
 - No default value in code: models, budgets, timeouts, paths, and file
   names live in [defaults.toml](defaults.toml); a CLI flag lives only in `revali/engines/`.
 - Files are written with `newline=""` and LF; subprocesses use UTF-8 with
