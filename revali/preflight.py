@@ -183,24 +183,35 @@ TRACKED_SHOWN = 20  # files listed in the refusal; the rest are counted
 def check_state_dir_untracked(ctx: Context) -> None:
     """Refuse while git tracks anything under the state directory (a forced add, or a base
     that already carries one): revali writes and archives that directory on its own, and a
-    tracked copy would reach the base with the next merge. Runs before any network call."""
+    tracked copy would reach the base with the next merge. Both the index and HEAD count:
+    the clean-tree check skips the state directory, so a removal only staged would pass the
+    index alone while the push still carries the files. Runs before any network call."""
     state_dir = ctx.cfg.paths.state_dir
-    tracked = gitops.tracked_under(ctx.repo_root, state_dir)
+    index = gitops.tracked_under(ctx.repo_root, state_dir)
+    head = gitops.committed_under(ctx.repo_root, state_dir)
+    tracked = sorted(set(index) | set(head))
     if not tracked:
         return
+    staged_removal = len(set(head) - set(index))
     shown = tracked[:TRACKED_SHOWN]
     more = len(tracked) - len(shown)
     raise Stop(
         EXIT_ACTION,
         "git tracks %d file(s) under %s/, revali's state directory:\n  %s%s\n"
         "remove them from the index with `git rm -r --cached %s` and commit; the directory "
-        "itself belongs in .gitignore (revali adds it there)"
+        "itself belongs in .gitignore (revali adds it there)%s"
         % (
             len(tracked),
             state_dir,
             "\n  ".join(shown),
             "\n  ... and %d more" % more if more else "",
             state_dir,
+            (
+                "\n%d of them are out of the index already but still in HEAD: the removal "
+                "is staged, commit it" % staged_removal
+                if staged_removal
+                else ""
+            ),
         ),
     )
 

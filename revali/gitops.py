@@ -96,6 +96,15 @@ def tracked_under(cwd: str, path: str) -> List[str]:
     return [p for p in res.stdout.split("\0") if p]
 
 
+def committed_under(cwd: str, path: str, ref: str = "HEAD") -> List[str]:
+    """The files commit `ref` holds under `path` (what a push of it would carry), [] when
+    `ref` does not resolve (a branch with no commit yet). Literal pathspec, as tracked_under."""
+    if rev_parse(ref, cwd) is None:
+        return []
+    res = git_ok(["ls-tree", "-r", "-z", "--name-only", ref, "--", ":(literal)%s" % path], cwd)
+    return [p for p in res.stdout.split("\0") if p]
+
+
 def dirty_paths(cwd: str, ignore_prefixes: Tuple[str, ...]) -> List[str]:
     out = []
     for code, path in status_porcelain(cwd):

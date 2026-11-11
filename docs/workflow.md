@@ -110,10 +110,14 @@ the primary tree its `git pull --prune`). When both attempts fail,
 preflight prints a note with git's error and compares against the local
 `<base>`, which may be behind the remote. Before that, right after the
 clean-tree check, preflight stops with exit 2 while git tracks any file under
-the state directory (`.revali/`, or `[paths] state_dir`), whether the branch
-committed it, the base already had it, or it is only staged: it lists the
-files (twenty, then a count) and says to run `git rm -r --cached .revali` and
-commit. Nothing is fetched, pushed or sent to GitHub before that check. On the first pass of a branch
+the state directory (`.revali/`, or `[paths] state_dir`) in the index or in
+HEAD, whether the branch committed it, the base already had it, or it is only
+staged: it lists the files (twenty, then a count) and says to run `git rm -r
+--cached .revali` and commit (a removal staged but not committed is refused
+too, since the push would still carry the files). Nothing is fetched, pushed
+or sent to GitHub before that check. When the files came from the base, that
+commit removes them from the base at merge, and the next `git pull` in other
+checkouts deletes their copies of those old state directories. On the first pass of a branch
 (no review round yet, not a dry run, not `kind: docs`) preflight ends with
 the baseline: the existing suite on the commit preflight checked, in the
 sandbox. With `[validate] parallel_baseline` (the default) the baseline only

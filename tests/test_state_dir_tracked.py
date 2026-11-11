@@ -59,6 +59,17 @@ class Refused(Case):
         self.assert_refused(code, out, ".revali/feature__mul/notes.md")
         self.assert_nothing_left_the_machine()
 
+    def test_a_removal_only_staged(self):
+        # round 1 F1: `git rm --cached` without the commit leaves HEAD carrying the file
+        rel = ".revali/feature__mul/stray.md"
+        self.force_add(rel)
+        git(["rm", "-q", "-r", "--cached", ".revali"], self.repo)
+        self.assertEqual(gitops.tracked_under(self.repo, ".revali"), [])
+        code, out = run_cli(["preflight"])
+        self.assert_refused(code, out, rel)
+        self.assertIn("1 of them are out of the index already but still in HEAD", out)
+        self.assert_nothing_left_the_machine()
+
     def test_twenty_listed_then_counted(self):
         for i in range(25):
             self.write(".revali/many/f%02d.txt" % i, "x\n")
@@ -91,6 +102,12 @@ class Allowed(Case):
         code, out = run_cli(["preflight"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertNotIn("git tracks", out)
+
+    def test_the_removal_once_committed(self):
+        self.force_add(".revali/feature__mul/stray.md")
+        git(["rm", "-q", "-r", "--cached", ".revali"], self.repo)
+        git(["commit", "-q", "-m", "untrack the state directory"], self.repo)
+        self.preflight_passes()
 
     def test_files_only_on_disk(self):
         self.write(".revali/feature__mul/notes.md", "ignored\n")
@@ -131,3 +148,12 @@ class TrackedUnder(Case):
         self.force_add("ab/y.md")
         self.assertEqual(gitops.tracked_under(self.repo, "a[b]"), ["a[b]/x.md"])
         self.assertEqual(gitops.tracked_under(self.repo, ".revali"), [])
+        self.assertEqual(gitops.committed_under(self.repo, "a[b]"), ["a[b]/x.md"])
+
+    def test_no_commit_yet_holds_nothing(self):
+        tmp = os.path.join(self.tmp, "unborn")
+        os.makedirs(tmp)
+        git(["init", "-q"], tmp)
+        git(["config", "user.email", "test@example.invalid"], tmp)
+        git(["config", "user.name", "revali test"], tmp)
+        self.assertEqual(gitops.committed_under(tmp, ".revali"), [])
