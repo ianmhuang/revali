@@ -15,6 +15,11 @@ KeyboardInterrupt raised where the tool starts the session (`spawn_reviewer`) or
 prompt (`build_prompt`), the two revali functions the tool's own docstring names.
 
 The fixture repository's session cap is $1.00 and a fake session costs $0.50.
+
+Round 2 adds what the round 1 fixes promise: a run given a relative `--cases` is continued
+from another working directory (AC-3), a name on `--resume` that is no case is refused with
+results.json untouched (AC-4), and "named twice" is decided on the directory, so two
+directories of one name keep the two-directories message (AC-7).
 """
 
 import contextlib
@@ -422,6 +427,32 @@ class Resume(ResumeCase):
         self.assertAlmostEqual(data["summary"]["cost"], 1.5)
         self.assertAlmostEqual(data["summary"]["charged"], 3.5)
 
+    def test_a_run_given_a_relative_case_directory_is_continued_from_another_directory(self):
+        # round 1 F2: DIR alone says which run to continue, wherever the command is typed
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(answer(finding()))
+        os.chdir(self.tmp)  # RepoCase's cleanup goes back to where the suite started
+        code, out = self.run_tool(
+            "--cases", os.path.basename(self.cases), "--out", self.out, "--budget-usd", "10"
+        )
+        self.assertEqual(code, 0, out + self.stderr)
+        self.machine_went_down_at(2)  # a-one scored, b-two's session running
+        os.chdir(self.repo)
+        before = self.sessions()
+        code, out = self.resume()
+        self.assertEqual(code, 0, out + self.stderr)
+        self.assertEqual(self.ran(before), ["b-two"])
+        cases, _ = self.results()
+        self.assertEqual(sorted(cases), ["a-one", "b-two"])
+        for name in cases:
+            self.assertEqual(cases[name]["outcome"], "caught-strict", name)
+        # the same directory given again by its full path is no difference
+        before = self.sessions()
+        code, out = self.resume("--cases", self.cases)
+        self.assertEqual(code, 0, out + self.stderr)
+        self.assertEqual(self.sessions(), before)
+
 
 class ResumeSettingsAndRefusals(ResumeCase):
     """AC-4"""
@@ -469,6 +500,18 @@ class ResumeSettingsAndRefusals(ResumeCase):
             fh.write("{not json")
         code, out = self.resume()
         self.assert_refused(code, out, r"results\.json", 0, "{not json")
+
+    def test_a_name_that_is_no_case_is_refused_and_the_file_is_left_alone(self):
+        # round 1 F4: a mistyped name must not become an entry every later resume keeps
+        self.stopped_run()
+        before, text = self.sessions(), self.file_text()
+        code, out = self.resume("b-tow")
+        self.assert_refused(code, out, r"b-tow", before, text)
+        code, out = self.resume("b-two")  # the name as it is still narrows the run
+        self.assertEqual(code, 0, out + self.stderr)
+        self.assertEqual(self.ran(before), ["b-two"])
+        cases, _ = self.results()
+        self.assertEqual(sorted(cases), ["a-one", "b-two"])
 
     def test_a_dry_run_is_not_resumed(self):
         self.make_case("a-one")
@@ -559,6 +602,25 @@ class NamedTwice(ResumeCase):
                 self.assertNotIn("two directories", self.stderr)
                 self.assertNotIn("b-two", self.stderr)
                 self.assertEqual(self.sessions(), 0)
+
+    def test_one_directory_given_two_ways_is_named_twice_and_two_directories_are_not(self):
+        # round 1 F3: "named twice" is about the directory, not the base name
+        first = self.make_case("a-one")
+        code, out = self.run_tool(
+            "--cases", self.cases, "--out", self.out, "--dry-run", "a-one", first
+        )
+        self.assertEqual(code, 1, out + self.stderr)
+        self.assertIn("case named twice: a-one", self.stderr)
+        self.assertNotIn("two directories", self.stderr)
+        self.cases = os.path.join(self.tmp, "private")
+        second = self.make_case("a-one")
+        code, out = self.run_tool("--out", self.out, "--dry-run", first, second)
+        self.assertEqual(code, 1, out + self.stderr)
+        self.assertIn("two directories", self.stderr)
+        self.assertIn(first, self.stderr)
+        self.assertIn(second, self.stderr)
+        self.assertNotIn("named twice", self.stderr)
+        self.assertEqual(self.sessions(), 0)
 
 
 if __name__ == "__main__":
