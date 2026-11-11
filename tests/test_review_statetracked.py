@@ -169,7 +169,7 @@ class NothingLeavesTheMachine(TrackedCase):
         self.assert_nothing_left()
 
     def test_a_staged_removal_stops_a_run_as_early(self):
-        # round 1 F1: this run used to pass preflight and push the commit that holds the file
+        # PR #69 round 1 F1: this run used to pass preflight and push the commit with the file
         stray = ".revali/feature__mul/stray.md"
         self.track(stray)
         git(["rm", "-r", "-q", "--cached", "--", ".revali"], self.repo)
