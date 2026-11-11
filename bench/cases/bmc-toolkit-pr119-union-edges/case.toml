@@ -1,0 +1,19 @@
+# Built by tools/bench_case.py from round 1 of PR #119 (finding F1): the head commit
+# the reviewer saw, the change.md from that round's prompt.
+
+[case]
+repo = "https://github.com/ianmhuang/bmc-toolkit"
+fetch = ["refs/pull/119/head"]
+base = "3754a3569be380aff8e9b879c114633154f5940e"
+head = "a6cbb823fdb7d705c097e76e8348dc54c10681f5"
+branch = "fix/join-nested-parts"
+
+[expected]
+file = "bmc_toolkit/spec/tables.py"
+lines = [1098, 1098]
+description = "`spread_row` maps each cell to the union edge nearest its left edge, and skips that only when `edges == union` exactly"
+
+[source]
+pr = 119
+round = 1
+finding = "F1"

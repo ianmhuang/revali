@@ -417,6 +417,145 @@ class Failures(BenchCase):
                 bench.main(["--cases", self.cases, "--budget-usd", "5", "--line-margin", "-1"])
 
 
+class DryRunAndDirectories(BenchCase):
+    """M3.3.2 AC-3, AC-5"""
+
+    def test_a_dry_run_builds_prompts_and_runs_no_session(self):
+        self.make_case("a-ok")
+        self.make_case("b-gone")
+        self.edit_case("b-gone", self.head, "0" * 40)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = bench.main(["--dry-run", "--cases", self.cases, "--out", self.out])
+        self.assertEqual(code, 1, out.getvalue())
+        with open(os.path.join(self.out, "results.json"), encoding="utf-8") as fh:
+            results = json.load(fh)
+        cases = {c["case"]: c for c in results["cases"]}
+        self.assertEqual(cases["a-ok"]["outcome"], "ready")
+        self.assertEqual(cases["b-gone"]["outcome"], "error")
+        self.assertTrue(results["dry_run"])
+        self.assertIn("ready: 1/2; no session run", out.getvalue())
+        self.assertTrue(os.path.isfile(os.path.join(self.out, "a-ok", "prompt.md")))
+        self.assertEqual(self.fake_calls("claude"), [])
+        self.assert_nothing_pushed()
+
+    def test_without_a_dry_run_the_budget_is_still_required(self):
+        self.make_case("a-ok")
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit):
+                bench.main(["--cases", self.cases])
+        self.assertIn("--dry-run", err.getvalue())
+
+    def test_several_case_directories_share_one_budget(self):
+        self.make_case("a-one")
+        self.cases, first = os.path.join(self.tmp, "private"), self.cases
+        self.make_case("b-two")
+        self.make_case("c-three")
+        self.claude(claude_entry(answer(finding())))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = bench.main(
+                ["--cases", first, "--cases", self.cases, "--out", self.out, "--budget-usd", "2"]
+            )  # 0+1, 0.5+1, 1.0+1 fit; a fourth would not
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertEqual(len(self.fake_calls("claude")), 3)
+        self.assertIn("caught: strict 3/3", out.getvalue())
+
+    def test_a_name_in_two_directories_is_refused(self):
+        self.make_case("a-one")
+        self.cases, first = os.path.join(self.tmp, "private"), self.cases
+        self.make_case("a-one")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = bench.main(
+                ["--cases", first, "--cases", self.cases, "--out", self.out, "--budget-usd", "5"]
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("a case name is in two directories: a-one", err.getvalue())
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_a_case_carries_its_own_revali_toml(self):
+        """a project that keeps revali.toml out of git: the case's copy goes into the clone"""
+        path = self.make_case("a-own-config")
+        config = self.read("revali.toml").replace("budget_usd = 1.0", "budget_usd = 0.7", 1)
+        self.assertNotEqual(config, self.read("revali.toml"))
+        with open(os.path.join(path, "revali.toml"), "w", encoding="utf-8", newline="") as fh:
+            fh.write(config)
+        self.make_case("b-bad-config")
+        with open(os.path.join(self.cases, "b-bad-config", "revali.toml"), "w") as fh:
+            fh.write("[review\n")
+        self.claude(claude_entry(answer(finding())))
+        code, out, cases, _ = self.run_bench()
+        self.assertEqual(cases["a-own-config"]["outcome"], "caught-strict", out)
+        argv = self.fake_calls("claude")[0]["argv"]
+        self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "0.7")
+        self.assertEqual(cases["b-bad-config"]["outcome"], "malformed")
+        self.assertIn("revali.toml is not valid TOML", cases["b-bad-config"]["message"])
+        self.assertEqual(code, 1)
+
+    def test_a_named_case_is_found_in_any_directory(self):
+        self.cases, first = os.path.join(self.tmp, "private"), self.cases
+        self.make_case("b-two")
+        paths = bench.case_dirs([first, self.cases], ["b-two"])
+        self.assertEqual(paths, [os.path.join(self.cases, "b-two")])
+
+    def test_a_named_case_in_two_directories_is_refused(self):
+        """round 1 F2"""
+        self.make_case("a-one")
+        self.cases, first = os.path.join(self.tmp, "private"), self.cases
+        self.make_case("a-one")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = bench.main(
+                ["--cases", first, "--cases", self.cases, "--budget-usd", "5", "a-one"]
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("a case name is in two directories: a-one", err.getvalue())
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_a_cases_value_that_is_not_a_directory_stops_the_run(self):
+        """round 1 F1: one missing directory of several would drop part of the set unnoticed"""
+        self.make_case("a-one")
+        missing = os.path.join(self.tmp, "no-such-dir")
+        for argv in (
+            ["--dry-run", "--cases", self.cases, "--cases", missing],
+            ["--budget-usd", "5", "--cases", self.cases, "--cases", missing],
+        ):
+            with self.subTest(argv=argv[0]):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                    code = bench.main(argv + ["--out", self.out])
+                self.assertEqual(code, 1)
+                self.assertIn("no case directory under %s" % missing, err.getvalue())
+                self.assertFalse(os.path.exists(os.path.join(self.out, "results.json")))
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_a_tilde_in_a_cases_value_is_expanded(self):
+        self.cases = os.path.join(self.tmp, "home", "private")
+        self.make_case("a-one")
+        home = os.path.join(self.tmp, "home")
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}):
+            with contextlib.redirect_stdout(out):
+                code = bench.main(["--dry-run", "--cases", "~/private", "--out", self.out])
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("ready: 1/1", out.getvalue())
+
+    def test_an_empty_case_revali_toml_still_replaces_the_clones(self):
+        """AC-7: the case's file replaces the clone's, whatever it holds"""
+        path = self.make_case("a-empty-config")
+        with open(os.path.join(path, "revali.toml"), "w", encoding="utf-8", newline="") as fh:
+            fh.write("")
+        self.assertEqual(bench.load_case(path).config, "")
+        self.assertIsNone(bench.load_case(self.make_case("b-none")).config)
+        clone = os.path.join(self.tmp, "clone")
+        git(["clone", "--quiet", self.repo, clone], self.tmp)
+        with self.assertRaisesRegex(Exception, "before revali can run"):  # revali refuses it
+            bench.locate_case(bench.load_case(path), clone, "main")
+        with open(os.path.join(clone, "revali.toml"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "")
+
+
 class ScoreUnit(unittest.TestCase):
     def case(self):
         return bench.Case(
@@ -459,12 +598,21 @@ class ScoreUnit(unittest.TestCase):
 
 
 class PilotCases(unittest.TestCase):
-    """AC-6: the shipped cases load"""
+    """AC-6 (M3.3.1) and M3.3.2 AC-4: the shipped cases load; 6 from revali (the 3 pilot
+    cases among them), 4 from bmc-toolkit, one per PR"""
 
-    def test_the_three_pilot_cases(self):
+    def test_the_committed_cases(self):
         dirs = bench.case_dirs(bench.CASES_DIR, [])
-        names = [os.path.basename(d) for d in dirs]
-        self.assertEqual(len(names), 3, names)
+        cases = [bench.load_case(d) for d in dirs]
+        per_repo = {}
+        for case in cases:
+            per_repo.setdefault(case.repo.rsplit("/", 1)[-1], []).append(case.pr)
+        self.assertEqual(
+            {repo: len(prs) for repo, prs in per_repo.items()}, {"revali": 6, "bmc-toolkit": 4}
+        )
+        self.assertLessEqual({43, 61, 69}, set(per_repo["revali"]))
+        for prs in per_repo.values():
+            self.assertEqual(len(prs), len(set(prs)))  # one case per PR
         for path in dirs:
             with self.subTest(case=os.path.basename(path)):
                 case = bench.load_case(path)
@@ -472,6 +620,16 @@ class PilotCases(unittest.TestCase):
                 self.assertEqual(len(case.base), 40)
                 self.assertTrue(case.fetch)
                 self.assertIn("## Acceptance criteria", case.change_md)
+
+    def test_no_committed_request_holds_the_users_words(self):
+        """M3.3.2 AC-2: a committed case's Request is a paraphrase; the user writes in
+        Chinese, so a non-ASCII character there is their own words"""
+        for path in bench.case_dirs(bench.CASES_DIR, []):
+            with self.subTest(case=os.path.basename(path)):
+                text = bench.load_case(path).change_md
+                request = text.split("## Request\n", 1)[1].split("\n## ", 1)[0]
+                self.assertTrue(request.strip())
+                self.assertEqual([c for c in request if ord(c) > 127], [])
 
 
 if __name__ == "__main__":

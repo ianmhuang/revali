@@ -189,7 +189,7 @@ prints the CPU model and the logical processor count before the suite
 ([.github/runner_facts.py](../.github/runner_facts.py)).
 
 How often the reviewer finds a bug it is known to have found before is measured by
-[tools/review_bench.py](../tools/review_bench.py), which replays archived round-1 reviews;
+[tools/review_bench.py](../tools/review_bench.py), which replays archived review rounds as a first round;
 [bench/README.md](../bench/README.md) says how to run it and build a case.
 
 ## Project setup

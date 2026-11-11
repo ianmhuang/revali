@@ -1,0 +1,19 @@
+# Built by tools/bench_case.py from round 1 of PR #55 (finding F1): the head commit
+# the reviewer saw, the change.md from that round's prompt.
+
+[case]
+repo = "https://github.com/ianmhuang/revali"
+fetch = ["refs/pull/55/head"]
+base = "e1cb4a0c6a677e9af329a3472db09620135ddbd7"
+head = "3bbac47cd13188be5852c59115ef1e91ec0376a4"
+branch = "feature/parallel-baseline"
+
+[expected]
+file = "tests/test_review_stagetiming.py"
+lines = [146, 146]
+description = "`TheTimingLine.test_a_stage_wall_time_covers_its_sandbox_session` runs with the real local runner and the default config, and asserts `stage_s.preflight >= sandbox_s.baseline` (its docstring: \"the ..."
+
+[source]
+pr = 55
+round = 1
+finding = "F1"
