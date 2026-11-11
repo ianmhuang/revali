@@ -470,6 +470,10 @@ def _pct(n: Optional[float]) -> str:
     return "n/a" if n is None else "%.0f%%" % (100 * n)
 
 
+def _key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
 def _same_dirs(a: List[str], b: List[str]) -> bool:
     def norm(dirs):
         return [os.path.normcase(os.path.abspath(os.path.expanduser(d))) for d in dirs]
@@ -504,6 +508,10 @@ def _prior_results(path: str):
             )
             for c in entries
         )
+        and isinstance(prior.get("model") or "", str)
+        and isinstance(prior.get("session_budget_usd") or 0.0, (int, float))
+        and isinstance(prior.get("line_margin", DEFAULT_MARGIN), int)
+        and not any(isinstance(prior.get(k), bool) for k in ("session_budget_usd", "line_margin"))
     )
     if not ok:
         return None, "%s is not a benchmark results.json" % path
@@ -585,7 +593,9 @@ def main(argv=None) -> int:
         help="each session's cap (default: the case's [review] budget_usd)",
     )
     parser.add_argument(
-        "--line-margin", type=int, help="lines either side of the expected range (default 15)"
+        "--line-margin",
+        type=int,
+        help="lines either side of the expected range (default %d)" % DEFAULT_MARGIN,
     )
     parser.add_argument("--out", default="", help="output directory (default: a new temp dir)")
     parser.add_argument(
@@ -602,10 +612,11 @@ def main(argv=None) -> int:
         parser.error("--session-budget-usd must not be negative")
     if args.line_margin is not None and args.line_margin < 0:
         parser.error("--line-margin must not be negative")
-    if args.cases_dir is not None:
-        args.cases_dir = [os.path.expanduser(d) for d in args.cases_dir]
+    if args.cases_dir is not None:  # recorded absolute: a resume may start anywhere
+        args.cases_dir = [os.path.abspath(os.path.expanduser(d)) for d in args.cases_dir]
     prior = {}
     if args.resume:
+        args.resume = os.path.expanduser(args.resume)
         prior, problem = resume_from(args)
         if problem:
             print(problem, file=sys.stderr)
@@ -614,11 +625,6 @@ def main(argv=None) -> int:
     args.model = args.model or ""
     args.session_budget_usd = args.session_budget_usd or 0.0
     args.line_margin = DEFAULT_MARGIN if args.line_margin is None else args.line_margin
-    named = [os.path.basename(os.path.normpath(n)) for n in args.cases]
-    twice = sorted({n for n in named if named.count(n) > 1})
-    if twice:
-        print("case named twice: %s" % ", ".join(twice), file=sys.stderr)
-        return 1
     missing = [d for d in args.cases_dir if not os.path.isdir(d)]
     if missing:  # one of several: the run would cover part of the set and say nothing
         print("no case directory under %s: not a directory" % ", ".join(missing), file=sys.stderr)
@@ -626,6 +632,24 @@ def main(argv=None) -> int:
     paths = case_dirs(args.cases_dir, args.cases)
     if not paths:
         print("no case directory under %s" % ", ".join(args.cases_dir), file=sys.stderr)
+        return 1
+    keys = [_key(p) for p in paths]
+    twice = sorted(
+        {os.path.basename(os.path.normpath(p)) for p in paths if keys.count(_key(p)) > 1}
+    )
+    if twice:  # the same directory twice; two directories of one name are `dup` below
+        print("case named twice: %s" % ", ".join(twice), file=sys.stderr)
+        return 1
+    unknown = [
+        os.path.basename(os.path.normpath(p))
+        for p in paths
+        if not os.path.isdir(p) and os.path.basename(os.path.normpath(p)) not in prior
+    ]
+    if prior and unknown:  # a typo would become a `malformed` entry kept by every resume
+        print(
+            "no case %s in the earlier run or the case directories" % ", ".join(unknown),
+            file=sys.stderr,
+        )
         return 1
     dup = duplicate_names(paths)
     if dup:
@@ -758,7 +782,11 @@ def _print_case(r: Result, kept: bool = False) -> None:
 
 
 def _write_results(out_dir: str, args, results: List[Result]) -> None:
-    with open(os.path.join(out_dir, "results.json"), "w", encoding="utf-8", newline="") as fh:
+    """Write a temporary file and move it over results.json, so a kill at any point leaves
+    the previous or the new file whole: --resume reads nothing else."""
+    path = os.path.join(out_dir, "results.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="") as fh:
         json.dump(
             {
                 "revali": VERSION,
@@ -775,6 +803,9 @@ def _write_results(out_dir: str, args, results: List[Result]) -> None:
             fh,
             indent=1,
         )
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
 
 
 if __name__ == "__main__":

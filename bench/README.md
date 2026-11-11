@@ -63,9 +63,13 @@ directory.
 against it before the first new session. The model, session cap, line margin and case
 directories come from `results.json`; given on the command line they must match it, and so
 must `PROMPT_VERSION`, or the run is refused before anything starts (a set measured with two
-settings has no single rate). `--out` and `--dry-run` cannot go with `--resume`. Case names
-narrow the run as usual; the cases not named stay in `results.json` as they were, and the
-summary always covers every case the file holds.
+settings has no single rate). `--out` and `--dry-run` cannot go with `--resume`. The case
+directories are recorded as absolute paths, so a resume may start from any directory. Case
+names narrow the run as usual; the cases not named stay in `results.json` as they were, and
+the summary always covers every case the file holds. A name that is neither in the earlier
+run nor a case directory is refused before anything runs, instead of becoming a `malformed`
+entry every later resume would keep. `results.json` is written to a temporary file and moved
+into place, so a run killed while writing it leaves the previous version whole.
 
 ## What a run does
 
@@ -97,8 +101,8 @@ A case is **caught** when a finding of kind correctness or security names the ex
 file at a line inside the expected range widened by `--line-margin` (15 by default).
 It is **strict** when that finding is medium or high and the verdict is
 `CHANGES_REQUESTED`, **loose** otherwise. Other findings are listed under the case, not
-scored. The summary line gives both rates over the cases that were scored (not `error`,
-`malformed` or `not-run`) and the total cost.
+scored. The summary line gives both rates over the cases that ended as caught or missed
+(not `error`, `malformed`, `not-run`, `interrupted` or `started`) and the total cost.
 
 What the number does not say:
 

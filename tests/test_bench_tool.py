@@ -566,6 +566,20 @@ class DryRunAndDirectories(BenchCase):
         self.assertNotIn("two directories", err.getvalue())
         self.assertEqual(self.fake_calls("claude"), [])
 
+    def test_two_directories_of_one_name_are_not_named_twice(self):
+        """PR #72 round 1 F3"""
+        first = self.make_case("x")
+        self.cases = os.path.join(self.tmp, "private")
+        second = self.make_case("x")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = bench.main(["--budget-usd", "5", first, second])
+        self.assertEqual(code, 1)
+        self.assertIn(
+            "a case name is in two directories: x (%s and %s)" % (first, second), err.getvalue()
+        )
+        self.assertNotIn("named twice", err.getvalue())
+
 
 class Resume(BenchCase):
     """M3.3.3 AC-1 to AC-5: the fixture's session cap is $1.00, each fake session costs $0.50"""
@@ -808,6 +822,81 @@ class Resume(BenchCase):
         self.assertEqual(code, 1)
         self.assertIn("PROMPT_VERSION", err)
         self.assertEqual(len(self.fake_calls("claude")), before)
+
+    def test_a_failed_write_leaves_the_previous_file_whole(self):
+        """PR #72 round 1 F1"""
+        self.make_case("a-one")
+        self.claude(claude_entry(answer(finding())))
+        self.run_bench()
+        before = self.results_file()
+        args = mock.Mock(
+            model="",
+            dry_run=False,
+            cases_dir=[self.cases],
+            budget_usd=1.0,
+            session_budget_usd=0.0,
+            line_margin=15,
+        )
+        with mock.patch.object(bench.json, "dump", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                bench._write_results(self.out, args, [])
+        self.assertEqual(self.results_file(), before)
+
+    def test_a_resume_from_another_directory(self):
+        """PR #72 round 1 F2: relative --cases are recorded absolute"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.tmp)
+        spawn, restore = self.killed_at(2)
+        with mock.patch.object(bench, "spawn_reviewer", spawn):
+            with contextlib.redirect_stdout(io.StringIO()):
+                bench.main(["--cases", "cases", "--out", self.out, "--budget-usd", "10"])
+        restore()
+        self.assertEqual(self.results_file()["cases_dirs"], [os.path.abspath(self.cases)])
+        os.chdir(self.repo)
+        code, out, err = self.resume()
+        self.assertEqual(code, 0, out + err)
+        code, out, err = self.resume("--cases", self.cases)  # the same directory, given again
+        self.assertEqual(code, 0, out + err)
+
+    def test_a_mistyped_name_on_resume_is_refused(self):
+        """PR #72 round 1 F4"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        self.first_run_killed_at(2)
+        before, calls = self.results_file(), len(self.fake_calls("claude"))
+        code, _, err = self.resume("b-tow")
+        self.assertEqual(code, 1)
+        self.assertIn("no case b-tow in the earlier run or the case directories", err)
+        self.assertEqual(self.results_file(), before)
+        self.assertEqual(len(self.fake_calls("claude")), calls)
+
+    def test_a_tilde_in_the_resume_value_and_bad_settings(self):
+        """PR #72 round 1 follow-ups"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        self.first_run_killed_at(2)
+        home = os.path.dirname(self.out)
+        with mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = bench.main(
+                    ["--resume", "~/" + os.path.basename(self.out), "--budget-usd", "10"]
+                )
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        good = self.results_file()
+        for key, value in (("model", 5), ("session_budget_usd", "8"), ("line_margin", True)):
+            with self.subTest(key=key):
+                with open(os.path.join(self.out, "results.json"), "w", encoding="utf-8") as fh:
+                    json.dump(dict(good, **{key: value}), fh)
+                code, _, err = self.resume()
+                self.assertEqual(code, 1)
+                self.assertIn("not a benchmark results.json", err)
 
     def test_no_usable_results_file_is_refused(self):
         """AC-4"""
