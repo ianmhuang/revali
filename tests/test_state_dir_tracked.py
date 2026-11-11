@@ -60,14 +60,14 @@ class Refused(Case):
         self.assert_nothing_left_the_machine()
 
     def test_a_removal_only_staged(self):
-        # round 1 F1: `git rm --cached` without the commit leaves HEAD carrying the file
+        # PR #69 round 1 F1: `git rm --cached` without the commit leaves HEAD carrying the file
         rel = ".revali/feature__mul/stray.md"
         self.force_add(rel)
         git(["rm", "-q", "-r", "--cached", ".revali"], self.repo)
         self.assertEqual(gitops.tracked_under(self.repo, ".revali"), [])
         code, out = run_cli(["preflight"])
         self.assert_refused(code, out, rel)
-        # round 2 F2: nothing is left to `git rm`; the commit is what is missing
+        # PR #69 round 2 F2: nothing is left to `git rm`; the commit is what is missing
         self.assertIn("the removal (`git rm -r --cached .revali`) is staged but not committed", out)
         self.assertNotIn("remove them from the index", out)
         self.assert_nothing_left_the_machine()

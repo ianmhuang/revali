@@ -196,8 +196,8 @@ def check_state_dir_untracked(ctx: Context) -> None:
     shown = tracked[:TRACKED_SHOWN]
     more = len(tracked) - len(shown)
     if not index:
-        # round 2 F2: running `git rm --cached` again would fail with nothing left in the
-        # index; name it as done and ask for the commit
+        # nothing is left in the index, so `git rm --cached` would fail: name it as done and
+        # ask for the commit
         fix = "the removal (`git rm -r --cached %s`) is staged but not committed: commit it" % (
             state_dir
         )
