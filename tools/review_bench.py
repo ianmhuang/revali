@@ -103,7 +103,7 @@ def load_case(path: str) -> Case:
     try:
         with open(toml_path, "rb") as fh:
             data = tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, ValueError) as exc:  # ValueError: TOMLDecodeError, UnicodeDecodeError
         raise CaseError("%s: %s is not valid TOML: %s" % (name, CASE_FILE, exc)) from exc
     problems = []
 

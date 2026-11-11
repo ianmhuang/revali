@@ -95,6 +95,7 @@ class BenchCase(RepoCase):
             )
         with open(os.path.join(self.out, "results.json"), encoding="utf-8") as fh:
             results = json.load(fh)
+        self.assert_nothing_pushed()  # every run
         return code, out.getvalue(), {c["case"]: c for c in results["cases"]}, results
 
     def assert_nothing_pushed(self):
@@ -251,6 +252,9 @@ class Malformed(BenchCase):
         path = self.make_case("h-not-utf8")
         with open(os.path.join(path, "change.md"), "wb") as fh:
             fh.write(b"## Request\n\xff\xfe\n")
+        path = self.make_case("i-toml-not-utf8")  # round 2 F10
+        with open(os.path.join(path, "case.toml"), "ab") as fh:
+            fh.write(b"# caf\xe9 in a legacy code page\n")
         self.claude(claude_entry(answer(finding())))
         code, out, cases, _ = self.run_bench()
         self.assertEqual(code, 1, out)
@@ -261,7 +265,9 @@ class Malformed(BenchCase):
         self.assertIn("expected.lines", cases["f-one-number"]["message"])
         self.assertEqual(cases["g-a-string"]["message"].count("expected.lines"), 1)
         self.assertIn("cannot read change.md", cases["h-not-utf8"]["message"])
+        self.assertIn("case.toml is not valid TOML", cases["i-toml-not-utf8"]["message"])
         for name in (
+            "i-toml-not-utf8",
             "a-no-file",
             "b-reversed",
             "c-no-change-md",
