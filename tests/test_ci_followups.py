@@ -43,7 +43,9 @@ def tracked_under(root: str, path: str) -> Optional[List[str]]:
 
 
 def model_here() -> Optional[str]:
-    """This machine's CPU model where the test can read it itself, else None."""
+    """This machine's CPU model where the test can read it itself, else None. It reads the
+    same sources as the script's `_primary_model`, so it only checks that the script returns
+    them; the independent check is tests/test_review_runnerfacts.py."""
     try:
         if sys.platform.startswith("linux"):
             with open("/proc/cpuinfo", "r", encoding="utf-8", errors="replace") as fh:
@@ -181,7 +183,10 @@ class RunnerFactsScript(unittest.TestCase):
             model = self.facts.cpu_model()
             code, out = self.run_main()
         if sys.platform.startswith("linux") or os.name == "nt":
-            self.assertRegex(model, r"^unknown \((PermissionError: denied|\w*Error: .+)\)$")
+            if os.name == "nt":  # round 2 F1: each platform's own reason
+                self.assertRegex(model, r"^unknown \((ModuleNotFoundError|ImportError): .+\)$")
+            else:
+                self.assertEqual(model, "unknown (PermissionError: denied)")
         else:
             self.assertEqual(model, "unknown")
         self.assertEqual(code, 0)
