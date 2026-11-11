@@ -8,6 +8,9 @@ AC-3 tests first show that preflight passes, then track one file to show the che
 
 Round 2: a removal that is staged but not committed leaves the files in HEAD, which is what
 a push carries, so it is refused as well; once the removal is committed preflight passes.
+
+Round 3: with the whole removal staged the refusal asks for the commit only; while a file is
+still in the index it asks for the removal.
 """
 
 import os
@@ -76,6 +79,10 @@ class Refused(TrackedCase):
         self.assertEqual(git(["ls-files", "--", ".revali"], self.repo), "")
         code, out = run_cli(["preflight"])
         self.assert_refused(code, out, [stray])
+        # round 3: nothing is left in the index, so the message says the removal is staged
+        # and asks for the commit, and does not ask for a removal that is already done
+        self.assertRegex(out, r"staged but not committed")
+        self.assertNotRegex(out, r"(?i)remove them from the index")
         # the other half: committed, nothing is tracked there any more
         git(["commit", "-q", "-m", "untrack the state directory"], self.repo)
         self.assertTrue(self.exists(stray))  # --cached left the file on disk
@@ -89,6 +96,15 @@ class Refused(TrackedCase):
         git(["rm", "-q", "--cached", "--", removed], self.repo)
         code, out = run_cli(["preflight"])
         self.assert_refused(code, out, [kept, removed])
+        # round 3: one file is still in the index, so the removal is still what is asked for
+        self.assertNotRegex(out, r"staged but not committed")
+        # what the message asks for, done: the index is empty, the commit is what is left
+        git(["rm", "-r", "-q", "--cached", "--", ".revali"], self.repo)
+        code, out = run_cli(["preflight"])
+        self.assert_refused(code, out, [kept, removed])
+        self.assertRegex(out, r"staged but not committed")
+        git(["commit", "-q", "-m", "untrack the state directory"], self.repo)
+        self.assert_passes()
 
     def many(self, count):
         for i in range(count):
