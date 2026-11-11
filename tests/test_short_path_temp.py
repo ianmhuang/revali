@@ -59,8 +59,8 @@ class LongFormOfTheTempDir(ShortTempCase):
     """AC-1"""
 
     def test_the_case_works_in_the_long_form(self):
-        self.assertIn("~", self.short_temp)  # the premise: tempfile gave a short path
-        self.assertNotIn("~", self.tmp)
+        # the premise: tempfile handed out the other spelling of the directory
+        self.assertNotEqual(os.path.normcase(self.short_temp), os.path.normcase(self.long_temp))
         self.assertEqual(self.tmp, os.path.realpath(self.tmp))
         self.assertEqual(
             os.path.normcase(os.path.dirname(self.tmp)), os.path.normcase(self.long_temp)
