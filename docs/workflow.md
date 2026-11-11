@@ -117,7 +117,8 @@ staged: it lists the files (twenty, then a count) and says to run `git rm -r
 too, since the push would still carry the files). Nothing is fetched, pushed
 or sent to GitHub before that check. When the files came from the base, that
 commit removes them from the base at merge, and the next `git pull` in other
-checkouts deletes their copies of those old state directories. On the first pass of a branch
+checkouts deletes the tracked files of those old state directories (untracked
+files beside them stay). On the first pass of a branch
 (no review round yet, not a dry run, not `kind: docs`) preflight ends with
 the baseline: the existing suite on the commit preflight checked, in the
 sandbox. With `[validate] parallel_baseline` (the default) the baseline only

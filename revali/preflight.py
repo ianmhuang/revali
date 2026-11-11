@@ -195,23 +195,29 @@ def check_state_dir_untracked(ctx: Context) -> None:
     staged_removal = len(set(head) - set(index))
     shown = tracked[:TRACKED_SHOWN]
     more = len(tracked) - len(shown)
+    if not index:
+        # round 2 F2: running `git rm --cached` again would fail with nothing left in the
+        # index; name it as done and ask for the commit
+        fix = "the removal (`git rm -r --cached %s`) is staged but not committed: commit it" % (
+            state_dir
+        )
+    else:
+        fix = "remove them from the index with `git rm -r --cached %s` and commit" % state_dir
+        if staged_removal:
+            fix += " (%d %s out of the index already)" % (
+                staged_removal,
+                "is" if staged_removal == 1 else "are",
+            )
     raise Stop(
         EXIT_ACTION,
         "git tracks %d file(s) under %s/, revali's state directory:\n  %s%s\n"
-        "remove them from the index with `git rm -r --cached %s` and commit; the directory "
-        "itself belongs in .gitignore (revali adds it there)%s"
+        "%s; the directory itself belongs in .gitignore (revali adds it there)"
         % (
             len(tracked),
             state_dir,
             "\n  ".join(shown),
             "\n  ... and %d more" % more if more else "",
-            state_dir,
-            (
-                "\n%d of them are out of the index already but still in HEAD: the removal "
-                "is staged, commit it" % staged_removal
-                if staged_removal
-                else ""
-            ),
+            fix,
         ),
     )
 

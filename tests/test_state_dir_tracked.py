@@ -67,8 +67,20 @@ class Refused(Case):
         self.assertEqual(gitops.tracked_under(self.repo, ".revali"), [])
         code, out = run_cli(["preflight"])
         self.assert_refused(code, out, rel)
-        self.assertIn("1 of them are out of the index already but still in HEAD", out)
+        # round 2 F2: nothing is left to `git rm`; the commit is what is missing
+        self.assertIn("the removal (`git rm -r --cached .revali`) is staged but not committed", out)
+        self.assertNotIn("remove them from the index", out)
         self.assert_nothing_left_the_machine()
+
+    def test_a_removal_partly_staged(self):
+        kept, removed = ".revali/feature__mul/kept.md", ".revali/feature__mul/removed.md"
+        self.force_add(kept)
+        self.force_add(removed)
+        git(["rm", "-q", "--cached", removed], self.repo)
+        code, out = run_cli(["preflight"])
+        self.assert_refused(code, out, kept, removed)
+        self.assertIn("remove them from the index with `git rm -r --cached .revali`", out)
+        self.assertIn("(1 is out of the index already)", out)
 
     def test_twenty_listed_then_counted(self):
         for i in range(25):
