@@ -20,6 +20,9 @@ Round 2 adds what the round 1 fixes promise: a run given a relative `--cases` is
 from another working directory (AC-3), a name on `--resume` that is no case is refused with
 results.json untouched (AC-4), and "named twice" is decided on the directory, so two
 directories of one name keep the two-directories message (AC-7).
+
+Round 3 adds the round 2 follow-up: a directory named on `--resume` that holds no case.toml
+and is not in the earlier run is refused like a mistyped name, results.json untouched (AC-4).
 """
 
 import contextlib
@@ -510,6 +513,19 @@ class ResumeSettingsAndRefusals(ResumeCase):
         code, out = self.resume("b-two")  # the name as it is still narrows the run
         self.assertEqual(code, 0, out + self.stderr)
         self.assertEqual(self.ran(before), ["b-two"])
+        cases, _ = self.results()
+        self.assertEqual(sorted(cases), ["a-one", "b-two"])
+
+    def test_a_named_directory_that_is_no_case_is_refused_like_a_mistyped_name(self):
+        # round 2 follow-up: a directory without a case.toml must not become a kept entry either
+        self.stopped_run()
+        stray = os.path.join(self.cases, "scratch-notes")
+        os.makedirs(stray)
+        before, text = self.sessions(), self.file_text()
+        for given in ("scratch-notes", stray):  # by name under the case directory, and by path
+            with self.subTest(given=given):
+                code, out = self.resume(given)
+                self.assert_refused(code, out, r"scratch-notes", before, text)
         cases, _ = self.results()
         self.assertEqual(sorted(cases), ["a-one", "b-two"])
 
