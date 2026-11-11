@@ -43,6 +43,9 @@ BROKEN = {
     "bad-15": ("file = ", 'file = ""', "file"),  # empty
     "bad-16": ("fetch = ", 'fetch = "refs/pull/7/head"', "fetch"),  # not a list
     "bad-17": ("pr = ", 'pr = "seven"', "pr"),  # not a number
+    "bad-18": ("lines = ", "lines = 13", "lines"),  # one number, not a pair (round 1 F2)
+    "bad-19": ("lines = ", 'lines = "ab"', "lines"),  # a string of length two
+    "bad-20": ("lines = ", "lines = 1.5", "lines"),  # a float
 }
 
 
@@ -84,7 +87,10 @@ class MalformedCases(RepoCase):
         if toml is not False:
             with open(os.path.join(path, "case.toml"), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(toml)
-        if change_md is not False:
+        if isinstance(change_md, bytes):
+            with open(os.path.join(path, "change.md"), "wb") as fh:
+                fh.write(change_md)
+        elif change_md is not False:
             with open(os.path.join(path, "change.md"), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(change_md)
 
@@ -131,6 +137,7 @@ class MalformedCases(RepoCase):
         self.claude(self.answer())
         res, cases, summary = self.bench()
         self.assertNotEqual(res.returncode, 0, res.stdout)
+        self.assertNotIn("Traceback", res.stderr)
         for name, (_prefix, _replacement, field) in BROKEN.items():
             with self.subTest(case=name):
                 self.assertEqual(cases[name]["outcome"], "malformed")
@@ -162,11 +169,15 @@ class MalformedCases(RepoCase):
         self.make_case("m-empty-change-md", change_md="  \n")
         self.make_case("m-no-case-toml", toml=False)
         self.make_case("m-not-toml", toml="[case\nrepo = \n")
+        # round 1 F2: a description that is not UTF-8 is a refusal, not a traceback
+        self.make_case("m-not-utf8-change-md", change_md=b"## Request\n\xff\xfe mul\n")
         res, cases, summary = self.bench()
         self.assertNotEqual(res.returncode, 0, res.stdout)
+        self.assertNotIn("Traceback", res.stderr)
         for name, named in (
             ("m-no-change-md", "change.md"),
             ("m-empty-change-md", "change.md"),
+            ("m-not-utf8-change-md", "change.md"),
             ("m-no-case-toml", "case.toml"),
             ("m-not-toml", "case.toml"),
         ):

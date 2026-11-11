@@ -15,9 +15,52 @@ import sys
 import unittest
 
 from tests.fixtures.make_sample_repo import CHANGE_MD
-from tests.helpers import ROOT, RepoCase, approve_response, claude_entry, git
+from tests.helpers import CLAUDE_STUB, ROOT, RepoCase, approve_response, claude_entry, git
 
 TOOL = os.path.join(ROOT, "tools", "review_bench.py")
+
+# Stands in for `claude`: records the refs of the directory it is started in, then runs the
+# fake claude with the same arguments and the same stdin.
+PROBE = """\
+import json
+import os
+import subprocess
+import sys
+
+
+def git(*args):
+    res = subprocess.run(
+        ["git"] + list(args),
+        stdin=subprocess.DEVNULL,  # the prompt on stdin is for the fake claude
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return res.stdout
+
+
+git_dir = git("rev-parse", "--absolute-git-dir").strip()
+record = {
+    "refs": git("for-each-ref", "--format=%(refname) %(objectname)").splitlines(),
+    "reachable": git("log", "--all", "--reflog", "--format=%H").split(),
+    "remotes": git("remote").split(),
+    "fetch_head": os.path.isfile(os.path.join(git_dir, "FETCH_HEAD")),
+    "head": git("rev-parse", "HEAD").strip(),
+    "branch": git("symbolic-ref", "--short", "HEAD").strip(),
+}
+with open(os.environ["BENCH_PROBE_OUT"], "a", encoding="utf-8") as fh:
+    fh.write(json.dumps(record) + "\\n")
+sys.exit(subprocess.call([sys.executable, os.environ["BENCH_PROBE_STUB"]] + sys.argv[1:]))
+"""
+
+
+def quoted(path):
+    if " " not in path:
+        return path
+    return '"%s"' % path if os.name == "nt" else "'%s'" % path
+
+
 MARKER = "bench case text 7f3a"  # only in the case's change.md, not in the source checkout's
 CASE_CHANGE_MD = CHANGE_MD.replace(
     "`mul` multiplies two integers.", "`mul` multiplies two integers (%s)." % MARKER
@@ -83,7 +126,9 @@ class BenchRun(RepoCase):
         self.assertEqual(after, self.before)
         self.assertFalse(self.exists("tests/test_review_mul.py"))
 
-    def make_case(self, name, head=None, fetch=(), lines=EXPECTED_LINES, file=EXPECTED_FILE):
+    def make_case(
+        self, name, head=None, fetch=(), lines=EXPECTED_LINES, file=EXPECTED_FILE, base=None
+    ):
         path = os.path.join(self.cases, name)
         os.makedirs(path)
         text = "\n".join(
@@ -91,7 +136,7 @@ class BenchRun(RepoCase):
                 "[case]",
                 "repo = %s" % json.dumps(self.repo),
                 "fetch = %s" % json.dumps(list(fetch)),
-                "base = %s" % json.dumps(self.base),
+                "base = %s" % json.dumps(base or self.base),
                 "head = %s" % json.dumps(head or self.head),
                 'branch = "bench/mul"',
                 "",
@@ -241,6 +286,88 @@ class OneSessionOnAThrowawayClone(BenchRun):
             self.assertFalse(os.path.exists(call["cwd"]))
         self.assert_source_untouched()
 
+    def test_a_case_git_cannot_diff_is_an_error_and_the_next_case_runs(self):
+        # round 1 F4: a base with no history in common with the head; `git diff base...head`
+        # fails after the clone was prepared, which is not a failure of the session
+        tree = git(["rev-parse", "%s^{tree}" % self.base], self.repo).strip()
+        unrelated = git(["commit-tree", tree, "-m", "no common history"], self.repo).strip()
+        git(["update-ref", "refs/heads/unrelated", unrelated], self.repo)
+        self.make_case("a-unrelated", base=unrelated)
+        self.make_case("b-runs")
+        self.claude(answer(finding()))
+        code, out, cases, summary = self.bench()
+        self.assertNotEqual(code, 0, out)
+        self.assertNotIn("Traceback", self.stderr)
+        self.assertEqual(cases["a-unrelated"]["outcome"], "error")
+        self.assertTrue(cases["a-unrelated"]["message"].strip())
+        self.assertIn("error", self.line_of(out, "a-unrelated"))
+        self.assertEqual(cases["b-runs"]["outcome"], "caught-strict")
+        self.assertEqual(len(self.fake_calls("claude")), 1)  # no session for the broken case
+        self.assertAlmostEqual(summary["cost"], 0.5)
+        self.assertEqual(summary["scored"], 1)
+        self.assert_source_untouched()
+
+    def test_no_case_found_is_not_a_successful_run(self):
+        # round 1 F7: a mistyped --cases must not read as "0 of 0 caught, exit 0"
+        for label in ("a directory that does not exist", "an empty directory"):
+            with self.subTest(cases=label):
+                code, out, cases, _ = self.bench()
+                self.assertNotEqual(code, 0, out)
+                self.assertTrue(self.stderr.strip())
+                self.assertNotIn("Traceback", self.stderr)
+                self.assertEqual(cases, {})
+                self.assertEqual(self.fake_calls(), [])
+            os.makedirs(self.cases, exist_ok=True)
+
+
+class TheCloneLooksLikeTheRound(BenchRun):
+    """AC-2 (round 1 F1): the reviewer works in a clone whose base branch is the round's base.
+    The reviewer here is a probe that writes down what git shows in its working directory and
+    then hands over to the fake claude, so the clone is read while the session runs."""
+
+    def setUp(self):
+        super().setUp()
+        self.probe_out = os.path.join(self.tmp, "probe.jsonl")
+        probe = os.path.join(self.tmp, "probe_claude.py")
+        with open(probe, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(PROBE)
+        os.environ["BENCH_PROBE_OUT"] = self.probe_out
+        os.environ["BENCH_PROBE_STUB"] = CLAUDE_STUB
+        os.environ["REVALI_CLAUDE_CMD"] = "%s %s" % (quoted(sys.executable), quoted(probe))
+
+    def test_nothing_made_after_the_round_is_reachable_from_a_ref(self):
+        tree = git(["rev-parse", "%s^{tree}" % self.base], self.repo).strip()
+        fix = git(
+            ["commit-tree", tree, "-p", self.base, "-m", "the fix, merged after the round"],
+            self.repo,
+        ).strip()
+        git(["update-ref", "refs/heads/main", fix], self.repo)  # today's main has the fix
+        git(["tag", "v-later", fix], self.repo)
+        # the PR's final head: the round's head plus the commits that fixed it
+        git(["update-ref", "refs/pull/7/head", self.source_head], self.repo)
+        self.make_case("a-iso", fetch=["refs/pull/7/head"])
+        self.claude(answer(finding()))
+        code, out, cases, _ = self.bench()
+        self.assertEqual(code, 0, out + self.stderr)
+        self.assertEqual(cases["a-iso"]["outcome"], "caught-strict")
+
+        with open(self.probe_out, encoding="utf-8") as fh:
+            seen = [json.loads(line) for line in fh if line.strip()]
+        self.assertEqual(len(seen), 1)
+        seen = seen[0]
+        self.assertEqual((seen["branch"], seen["head"]), ("bench/mul", self.head))
+        # `main` is what it was in the round, and no other branch, tag or pull ref is left
+        self.assertEqual(
+            sorted(seen["refs"]),
+            ["refs/heads/bench/mul " + self.head, "refs/heads/main " + self.base],
+        )
+        self.assertIn(self.head, seen["reachable"])
+        self.assertNotIn(fix, seen["reachable"])  # `git log --all --reflog`
+        self.assertNotIn(self.source_head, seen["reachable"])
+        self.assertFalse(seen["fetch_head"])
+        self.assertEqual(seen["remotes"], [])  # nothing to push to
+        self.assert_source_untouched()
+
 
 class Scoring(BenchRun):
     """AC-4"""
@@ -372,6 +499,28 @@ class BudgetAndModel(BenchRun):
         self.assertEqual([cases[n]["outcome"] for n in names], ["error", "not-run", "not-run"], out)
         self.assertEqual(len(self.fake_calls("claude")), 1)
         self.assertAlmostEqual(summary["cost"], 0.7)
+
+    def test_a_session_that_fails_without_a_cost_counts_as_its_whole_cap(self):
+        # round 1 F3: output that is not JSON reports no cost; the session may have spent up to
+        # its $1.00 cap, and 1.0 + the next cap 1.0 passes 1.6
+        names = self.three_cases()
+        self.claude(claude_entry(raw_stdout="not json at all", write_tests=False))
+        code, out, cases, summary = self.bench(budget="1.6")
+        self.assertNotEqual(code, 0, out)
+        self.assertEqual([cases[n]["outcome"] for n in names], ["error", "not-run", "not-run"], out)
+        self.assertEqual(len(self.fake_calls("claude")), 1)
+        self.assertAlmostEqual(summary["cost"], 0.0)  # what is known to have been spent
+        self.assertIn("error", self.line_of(out, "a-one"))
+        self.assertRegex(cases["a-one"]["message"], r"(?i)unknown")  # the cost, said so
+        self.assertTrue(cases["b-two"]["message"].strip())
+
+    def test_a_negative_line_margin_is_refused(self):
+        self.make_case("a-one")
+        code, out, cases, _ = self.bench("--line-margin", "-1")
+        self.assertNotEqual(code, 0, out)
+        self.assertRegex(self.stderr, r"--line-margin")
+        self.assertEqual(self.fake_calls(), [])
+        self.assertEqual(cases, {})
 
     def test_a_lower_session_cap_reaches_the_session_and_lets_more_cases_run(self):
         names = self.three_cases()
