@@ -63,9 +63,11 @@ def review(archive: str, round_no: int) -> dict:
 
 
 def qualifies(f: dict) -> bool:
-    line = f.get("line")
+    line, file = f.get("line"), f.get("file")
     return (
-        f.get("severity") in STRONG
+        isinstance(file, str)
+        and bool(file.strip())
+        and f.get("severity") in STRONG
         and f.get("kind") in KINDS
         and isinstance(line, int)
         and not isinstance(line, bool)
@@ -98,11 +100,11 @@ def first_candidate(archive: str) -> Optional[Tuple[int, str]]:
     for n in rounds(archive):
         try:
             data = review(archive, n)
-        except BuildError:
-            continue
-        for f in (data.get("data") or {}).get("findings") or []:
-            if isinstance(f, dict) and qualifies(f) and resolved_next(archive, n, f.get("id")):
-                return n, f["id"]
+            for f in (data.get("data") or {}).get("findings") or []:
+                if isinstance(f, dict) and qualifies(f) and resolved_next(archive, n, f.get("id")):
+                    return n, f["id"]
+        except BuildError as exc:  # the order changes: say so
+            print("skipped round %d of %s: %s" % (n, archive, exc), file=sys.stderr)
     return None
 
 
@@ -131,10 +133,13 @@ def cut_change_md(prompt: str) -> str:
 
 
 def replace_request(text: str, body: str) -> str:
-    m = re.search(r"^## Request\n(.*?)(?=^## )", text, re.S | re.M)
+    if not body.strip():
+        raise BuildError("--request is empty")
+    m = re.search(r"^## Request\n(.*?)(?=^## |\Z)", text, re.S | re.M)
     if not m:
         raise BuildError("the round's change.md has no ## Request section")
-    return text[: m.start(1)] + body.strip() + "\n\n" + text[m.end(1) :]
+    tail = "\n\n" if m.end(1) < len(text) else "\n"
+    return text[: m.start(1)] + body.strip() + tail + text[m.end(1) :]
 
 
 def first_sentence(text: str) -> str:
@@ -163,9 +168,15 @@ def merge_base(repo: str, fetch: List[str], head: str, base_branch: str) -> str:
                 "the head %s is not reachable from %s" % (head, ", ".join(fetch))
             ) from exc
         try:
-            return bench._git(["merge-base", head, "origin/" + base_branch], clone).strip()
+            base = bench._git(["merge-base", head, "origin/" + base_branch], clone).strip()
         except bench.CaseError as exc:
             raise BuildError("no merge base of %s and %s" % (head, base_branch)) from exc
+        if base == head:
+            raise BuildError(
+                "the merge base of %s and %s is the head itself (merged without squashing); "
+                "the replay would have an empty diff" % (head, base_branch)
+            )
+        return base
     finally:
         bench._rmtree(tmp)
 
@@ -183,12 +194,12 @@ def build(
     the case, for a project whose revali.toml is not in git."""
     if os.path.exists(out):
         raise BuildError("%s already exists" % out)
-    config_text = ""
+    config_text = None
     if config:
         try:
             with open(config, encoding="utf-8") as fh:
                 config_text = fh.read()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:  # ValueError: UnicodeDecodeError
             raise BuildError("cannot read %s: %s" % (config, exc)) from exc
     state = _load(os.path.join(archive, "state.json"))
     missing = [k for k in ("repo", "branch", "base", "pr_number") if not state.get(k)]
@@ -220,11 +231,13 @@ def build(
     try:
         with open(prompt_path, encoding="utf-8") as fh:
             change_md = cut_change_md(fh.read())
-    except OSError as exc:
+    except (OSError, ValueError) as exc:  # ValueError: UnicodeDecodeError
         raise BuildError("cannot read %s: %s" % (prompt_path, exc)) from exc
     if request is not None:
         change_md = replace_request(change_md, request)
-    pr = int(state["pr_number"])
+    pr = state["pr_number"]
+    if not isinstance(pr, int) or isinstance(pr, bool) or pr <= 0:
+        raise BuildError("state.json has pr_number %r, not a PR number" % (pr,))
     repo = repo or "https://github.com/%s" % state["repo"]
     fetch = ["refs/pull/%d/head" % pr]
     base = merge_base(repo, fetch, head, state["base"])
@@ -259,7 +272,7 @@ def build(
     os.makedirs(out)
     bench._write(os.path.join(out, bench.CASE_FILE), toml)
     bench._write(os.path.join(out, bench.CHANGE_FILE), change_md)
-    if config_text:
+    if config_text is not None:
         bench._write(os.path.join(out, bench.CONFIG_FILE), config_text)
     try:
         bench.load_case(out)
@@ -283,7 +296,12 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
     if args.list:
-        for pr, path, n, fid in candidates(args.list):
+        try:
+            found = candidates(args.list)
+        except (BuildError, OSError) as exc:
+            print("refused: %s" % exc, file=sys.stderr)
+            return 1
+        for pr, path, n, fid in found:
             print("%5d  r%-2d %-4s %s" % (pr, n, fid, path))
         return 0
     if not (args.archive and args.round and args.finding and args.out):

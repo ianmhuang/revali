@@ -211,6 +211,39 @@ class Refusals(Archive):
     def test_a_round_without_its_prompt(self):
         self.refused(self.archive(prompt=False), "prompt-r1-1.md")
 
+    def test_a_head_already_merged_into_the_base_branch(self):
+        """round 1 F4: a merge or fast-forward leaves merge-base == head, an empty replay"""
+        git(["update-ref", "refs/heads/main", self.head], self.repo)
+        self.refused(self.archive(), "is the head itself")
+
+    def test_unreadable_input_is_refused_not_a_traceback(self):
+        """round 1 F3"""
+        bad = os.path.join(self.tmp, "latin1.toml")
+        with open(bad, "wb") as fh:
+            fh.write(b"# caf\xe9\n")
+        self.refused(self.archive(), "cannot read", config=bad)
+        d = self.archive()
+        with open(os.path.join(d, "logs", "prompt-r1-1.md"), "wb") as fh:
+            fh.write(b"\xff\xfe broken")
+        self.refused(d, "prompt-r1-1.md", name="e")
+        self.root = os.path.join(self.tmp, "archive-nofile")
+        f = finding()
+        del f["file"]
+        d = self.archive(rounds={1: ([f], []), 2: ([], [{"id": "F1", "status": "resolved"}])})
+        self.refused(d, "a case needs a medium or high", name="f")
+        self.root = os.path.join(self.tmp, "archive-badpr")
+        d = self.archive()
+        with open(os.path.join(d, "state.json"), encoding="utf-8") as fh:
+            state = json.load(fh)
+        state["pr_number"] = "seven"
+        self.write(os.path.join(d, "state.json"), state)
+        self.refused(d, "not a PR number", name="g")
+
+    def test_the_request_section_last_or_an_empty_request(self):
+        text = "## Goal\nx\n\n## Request\nold words\n"
+        self.assertEqual(builder.replace_request(text, "New."), "## Goal\nx\n\n## Request\nNew.\n")
+        self.refused(self.archive(), "--request is empty", request="  ")
+
     def test_the_command_line_says_refused(self):
         d = self.archive()
         err = io.StringIO()
@@ -254,3 +287,18 @@ class Candidates(Archive):
         with contextlib.redirect_stdout(out):
             self.assertEqual(builder.main(["--list", self.root]), 0)
         self.assertEqual(len(out.getvalue().splitlines()), 2)
+
+    def test_an_unreadable_round_is_named_and_a_missing_directory_refused(self):
+        """round 1 F3"""
+        d = self.archive(pr=7)
+        with open(os.path.join(d, "review-2.json"), "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(builder.candidates(self.root), [])
+        self.assertIn("skipped round 1 of %s" % d, err.getvalue())
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = builder.main(["--list", os.path.join(self.tmp, "no-such-archive")])
+        self.assertEqual(code, 1)
+        self.assertIn("refused:", err.getvalue())

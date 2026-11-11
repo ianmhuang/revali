@@ -73,7 +73,7 @@ class Case:
     round: int
     finding: str
     change_md: str
-    config: str = ""  # the case's own revali.toml, for a project that keeps it out of git
+    config: Optional[str] = None  # the case's own revali.toml (a project keeps it out of git)
 
 
 @dataclass
@@ -151,7 +151,7 @@ def load_case(path: str) -> Case:
         raise CaseError("%s: cannot read %s: %s" % (name, CHANGE_FILE, exc)) from exc
     if not change_md.strip():
         raise CaseError("%s: %s is empty" % (name, CHANGE_FILE))
-    config = ""
+    config = None
     config_path = os.path.join(path, CONFIG_FILE)
     if os.path.exists(config_path):
         try:
@@ -367,7 +367,7 @@ def locate_case(case: Case, clone: str, default_branch: str):
     every check that needs the network. The base branch is the case repository's
     `[project] base_branch`, else the branch its source had checked out. A case's own
     revali.toml replaces the clone's (most projects keep theirs out of git)."""
-    if case.config:  # first: the state directory's name comes from it
+    if case.config is not None:  # first: the state directory's name comes from it
         _write(os.path.join(clone, CONFIG_FILE), case.config)
     probe = locate_paths(clone, case.branch)
     os.makedirs(probe, exist_ok=True)
@@ -414,9 +414,12 @@ def case_dirs(cases_dir, names: List[str]) -> List[str]:
         found = []
         for n in names:
             hits = [os.path.join(r, n) for r in roots if os.path.isdir(os.path.join(r, n))]
-            found.append(
-                n if os.path.isdir(n) else (hits[0] if hits else os.path.join(roots[0], n))
-            )
+            if os.path.isdir(n):
+                found.append(n)
+            elif hits:
+                found.extend(hits)  # more than one: duplicate_names refuses the run
+            else:
+                found.append(os.path.join(roots[0], n))
         return found
     found = []
     for root in roots:
@@ -483,7 +486,7 @@ def main(argv=None) -> int:
     parser.add_argument("--line-margin", type=int, default=DEFAULT_MARGIN)
     parser.add_argument("--out", default="", help="output directory (default: a new temp dir)")
     args = parser.parse_args(argv)
-    args.cases_dir = args.cases_dir or [CASES_DIR]
+    args.cases_dir = [os.path.expanduser(d) for d in args.cases_dir or [CASES_DIR]]
     if args.budget_usd is None and not args.dry_run:
         parser.error("--budget-usd is required (or --dry-run)")
     if args.budget_usd is not None and args.budget_usd <= 0:
@@ -492,6 +495,10 @@ def main(argv=None) -> int:
         parser.error("--session-budget-usd must not be negative")
     if args.line_margin < 0:
         parser.error("--line-margin must not be negative")
+    missing = [d for d in args.cases_dir if not os.path.isdir(d)]
+    if missing:  # one of several: the run would cover part of the set and say nothing
+        print("no case directory under %s: not a directory" % ", ".join(missing), file=sys.stderr)
+        return 1
     paths = case_dirs(args.cases_dir, args.cases)
     if not paths:
         print("no case directory under %s" % ", ".join(args.cases_dir), file=sys.stderr)

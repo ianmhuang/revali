@@ -8,12 +8,18 @@ now, as a first round, and checks whether a finding names the same place.
 
 ```
 python tools/review_bench.py --dry-run                             # check every case, run no session
-python tools/review_bench.py --budget-usd 40 --session-budget-usd 8   # every case under bench/cases/
-python tools/review_bench.py --budget-usd 40 --model claude-sonnet-5-5
+python tools/review_bench.py --budget-usd 55 --session-budget-usd 8   # every case under bench/cases/
+python tools/review_bench.py --budget-usd 55 --model claude-sonnet-5-5
 python tools/review_bench.py --budget-usd 8 pr69-staged-removal    # one case
-python tools/review_bench.py --budget-usd 80 --session-budget-usd 8 \
+python tools/review_bench.py --budget-usd 95 --session-budget-usd 8 \
     --cases bench/cases --cases ~/.revali/bench/cases --out ../bench-out
 ```
+
+A session cost $2.80 to $6.10 with claude-fable-5-2; the 10 committed cases cost $43.70 and
+the 18 with the private ones $81.13. The budget has to leave one session cap free for the last
+case (see below), so 10 cases at a cap of $8 need about $55 and 18 about $95. `~` in a
+`--cases` value is expanded by the tool, and a `--cases` value that is not a directory stops
+the run before anything starts.
 
 `--dry-run` does everything up to the session for each case (clone, isolate, configuration,
 prompt, written to `<case>/prompt.md`), spends nothing and needs no budget; each case is

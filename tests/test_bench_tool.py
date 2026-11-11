@@ -499,6 +499,62 @@ class DryRunAndDirectories(BenchCase):
         paths = bench.case_dirs([first, self.cases], ["b-two"])
         self.assertEqual(paths, [os.path.join(self.cases, "b-two")])
 
+    def test_a_named_case_in_two_directories_is_refused(self):
+        """round 1 F2"""
+        self.make_case("a-one")
+        self.cases, first = os.path.join(self.tmp, "private"), self.cases
+        self.make_case("a-one")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = bench.main(
+                ["--cases", first, "--cases", self.cases, "--budget-usd", "5", "a-one"]
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("a case name is in two directories: a-one", err.getvalue())
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_a_cases_value_that_is_not_a_directory_stops_the_run(self):
+        """round 1 F1: one missing directory of several would drop part of the set unnoticed"""
+        self.make_case("a-one")
+        missing = os.path.join(self.tmp, "no-such-dir")
+        for argv in (
+            ["--dry-run", "--cases", self.cases, "--cases", missing],
+            ["--budget-usd", "5", "--cases", self.cases, "--cases", missing],
+        ):
+            with self.subTest(argv=argv[0]):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                    code = bench.main(argv + ["--out", self.out])
+                self.assertEqual(code, 1)
+                self.assertIn("no case directory under %s" % missing, err.getvalue())
+                self.assertFalse(os.path.exists(os.path.join(self.out, "results.json")))
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_a_tilde_in_a_cases_value_is_expanded(self):
+        self.cases = os.path.join(self.tmp, "home", "private")
+        self.make_case("a-one")
+        home = os.path.join(self.tmp, "home")
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}):
+            with contextlib.redirect_stdout(out):
+                code = bench.main(["--dry-run", "--cases", "~/private", "--out", self.out])
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("ready: 1/1", out.getvalue())
+
+    def test_an_empty_case_revali_toml_still_replaces_the_clones(self):
+        """AC-7: the case's file replaces the clone's, whatever it holds"""
+        path = self.make_case("a-empty-config")
+        with open(os.path.join(path, "revali.toml"), "w", encoding="utf-8", newline="") as fh:
+            fh.write("")
+        self.assertEqual(bench.load_case(path).config, "")
+        self.assertIsNone(bench.load_case(self.make_case("b-none")).config)
+        clone = os.path.join(self.tmp, "clone")
+        git(["clone", "--quiet", self.repo, clone], self.tmp)
+        with self.assertRaisesRegex(Exception, "before revali can run"):  # revali refuses it
+            bench.locate_case(bench.load_case(path), clone, "main")
+        with open(os.path.join(clone, "revali.toml"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "")
+
 
 class ScoreUnit(unittest.TestCase):
     def case(self):
