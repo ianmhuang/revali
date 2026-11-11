@@ -69,12 +69,12 @@ class Workflow(unittest.TestCase):
 
     def test_a_hung_leg_ends_before_merge_stops_waiting(self):
         # ci/windows-job AC-2: the job's timeout-minutes is below revali's own
-        # checks_timeout_min (60); the defaults other projects get stay at 30
+        # checks_timeout_min (75); the defaults other projects get stay at 30
         job = block(block(self.text, "jobs"), "  test")
         timeouts = re.findall(r"^    timeout-minutes:\s*(\d+)\s*$", job, re.M)
         self.assertEqual(len(timeouts), 1, "one timeout-minutes on the test job")
         wait = tomllib.loads(read("revali.toml"))["merge"]["checks_timeout_min"]
-        self.assertEqual(wait, 60)
+        self.assertEqual(wait, 75)
         self.assertLess(int(timeouts[0]), wait)
         for rel in (("defaults.toml",), ("templates", "revali.toml")):
             with self.subTest(path="/".join(rel)):
