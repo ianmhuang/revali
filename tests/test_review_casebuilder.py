@@ -243,6 +243,20 @@ class Build(BuilderCase):
         self.assertEqual([c for c in text if ord(c) > 127], [])
         self.assertNotIn("approved 2026-01-02", text)  # the whole body went, not one line
 
+    def test_request_replaces_a_request_section_that_ends_the_description(self):
+        doc = (
+            "---\ntitle: Add mul to calc\nkind: feature\n---\n\n"
+            "## Goal\n`mul` multiplies two integers.\n\n"
+            "## Acceptance criteria\n- AC-1: mul(a, b) returns the product\n\n"
+            "## Request\n%s\n"
+        )
+        archive = self.archive(docs={1: doc % REQUEST_BODY})
+        res, out = self.build(archive, extra=["--request", "Add mul to calc."])
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        text = self.text(os.path.join(out, "change.md"))
+        self.assertEqual(squeeze(text), squeeze(doc % "Add mul to calc."))
+        self.assertNotIn(USER_WORDS, text)
+
     def test_config_puts_a_revali_toml_in_the_case_and_the_benchmark_uses_it(self):
         own = self.text(os.path.join(self.repo, "revali.toml"))
         self.assertIn('test_dir = "tests"\n', own)
@@ -314,6 +328,43 @@ class Refusals(BuilderCase):
         self.assert_refused(res, out, r"(?i)exist")
         self.assertEqual(os.listdir(out), ["notes.txt"])  # left as it was
 
+    def test_a_head_that_is_already_on_the_base_branch(self):
+        # merged without squashing: the merge base is the head itself, a case the benchmark
+        # would load and replay with an empty diff
+        git(["update-ref", "refs/heads/main", self.head], self.repo)
+        res, out = self.build(self.archive())
+        self.assert_refused(res, out, r"(?i)merge|empty|base")
+        self.assertFalse(os.path.exists(out))
+
+    def test_input_that_cannot_be_used_is_refused_without_a_traceback(self):
+        config = os.path.join(self.tmp, "latin1.toml")
+        with open(config, "wb") as fh:
+            fh.write(b"# caf\xe9\n")
+        res, out = self.build(self.archive(), name="bad-config", extra=["--config", config])
+        self.assert_refused(res, out, r"latin1\.toml")
+        self.assertFalse(os.path.exists(out))
+
+        archive = self.archive(root=os.path.join(self.tmp, "a-bad-prompt"))
+        with open(os.path.join(archive, "logs", "prompt-r1-1.md"), "wb") as fh:
+            fh.write(b"\xff\xfe not UTF-8")
+        res, out = self.build(archive, name="bad-prompt")
+        self.assert_refused(res, out, r"prompt-r1-1\.md")
+        self.assertFalse(os.path.exists(out))
+
+        nameless = finding()
+        del nameless["file"]
+        archive = self.archive(
+            rounds={1: ([nameless], []), 2: ([], resolved("F1"))},
+            root=os.path.join(self.tmp, "a-no-file"),
+        )
+        res, out = self.build(archive, name="no-file")
+        self.assert_refused(res, out, r"F1")
+        self.assertFalse(os.path.exists(out))
+
+        res, out = self.build(self.archive(), name="empty-request", extra=["--request", ""])
+        self.assert_refused(res, out, r"(?i)request")
+        self.assertFalse(os.path.exists(out))
+
 
 class Listing(BuilderCase):
     """AC-4: the order the selection rule takes candidates in"""
@@ -353,3 +404,19 @@ class Listing(BuilderCase):
                 self.assertRegex(line, r"(^|\s)%s(\s|$)" % fid)
                 self.assertNotRegex(line, r"(^|\s)F[35](\s|$)")  # a later finding or round
         self.assertNotIn("%s9-feature__mul" % os.sep, res.stdout)
+
+    def test_what_cannot_be_listed_is_said_without_a_traceback(self):
+        res = self.run_tool([BUILDER, "--list", os.path.join(self.tmp, "no-such-archive")])
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertNotIn("Traceback", res.stderr)
+        self.assertIn("no-such-archive", res.stdout + res.stderr)
+        # a round that cannot be read changes the order: the PR is named, the rest is listed
+        broken = self.archive(pr=7)
+        with open(os.path.join(broken, "review-2.json"), "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        self.archive(pr=12)
+        res = self.run_tool([BUILDER, "--list", self.archive_root])
+        self.assertNotIn("Traceback", res.stderr)
+        self.assertIn("%s12-feature__mul" % os.sep, res.stdout)
+        self.assertNotIn("%s7-feature__mul" % os.sep, res.stdout)
+        self.assertIn("7-feature__mul", res.stderr)

@@ -39,6 +39,7 @@ class DirsCase(RepoCase):
         self.base = git(["rev-parse", "main"], self.repo).strip()
         self.head = git(["rev-parse", "feature/mul"], self.repo).strip()
         self.runs = 0
+        self.env = None  # the tool's environment, when a test needs its own
 
     def make_case(self, root, name, head=None, config=None):
         path = os.path.join(root, name)
@@ -92,6 +93,7 @@ class DirsCase(RepoCase):
         res = subprocess.run(
             [sys.executable, TOOL, "--out", out] + list(argv),
             cwd=self.tmp,
+            env=self.env,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -205,6 +207,50 @@ class Directories(DirsCase):
                 self.assertNotIn("Traceback", res.stderr)
                 self.assertIn("b-two", res.stderr)
                 self.assertEqual(cases, {})  # no case was started
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_a_cases_directory_that_is_not_there_stops_the_run(self):
+        # every directory's cases run in one invocation: a directory that cannot be read
+        # must not be dropped while the others report "ready" or a rate for part of the set
+        missing = os.path.join(self.tmp, "no-such-cases")
+        for extra in (["--dry-run"], ["--budget-usd", "5"]):
+            with self.subTest(extra=extra):
+                res, cases, _ = self.bench("--cases", self.public, "--cases", missing, *extra)
+                self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+                self.assertNotIn("Traceback", res.stderr)
+                self.assertIn("no-such-cases", res.stderr)
+                self.assertEqual(cases, {})  # no case was started
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_a_named_case_is_looked_up_in_every_directory(self):
+        res, cases, _ = self.bench(
+            "--dry-run", "--cases", self.public, "--cases", self.private, "c-three"
+        )
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertEqual({n: c["outcome"] for n, c in cases.items()}, {"c-three": "ready"})
+        # a name present in two directories is refused when it is named, too
+        self.make_case(self.private, "b-two")
+        res, cases, _ = self.bench(
+            "--dry-run", "--cases", self.public, "--cases", self.private, "b-two"
+        )
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertNotIn("Traceback", res.stderr)
+        self.assertIn("b-two", res.stderr)
+        self.assertEqual(cases, {})
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_a_tilde_in_a_cases_value_is_the_home_directory(self):
+        # the private cases live in ~/.revali/bench/cases; a shell that leaves `~` alone
+        # (cmd.exe, a quoted argument) hands the tool the literal value
+        home = os.path.join(self.tmp, "home")
+        self.make_case(os.path.join(home, "kept", "cases"), "d-four")
+        self.env = dict(os.environ, HOME=home, USERPROFILE=home)
+        res, cases, _ = self.bench("--dry-run", "--cases", self.public, "--cases", "~/kept/cases")
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertEqual(
+            {n: c["outcome"] for n, c in cases.items()},
+            {"a-one": "ready", "b-two": "ready", "d-four": "ready"},
+        )
         self.assertEqual(self.fake_calls("claude"), [])
 
 
