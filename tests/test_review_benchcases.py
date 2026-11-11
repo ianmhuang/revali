@@ -84,7 +84,10 @@ class MalformedCases(RepoCase):
         os.makedirs(path)
         if toml is None:
             toml = "\n".join(self.toml_lines()) + "\n"
-        if toml is not False:
+        if isinstance(toml, bytes):
+            with open(os.path.join(path, "case.toml"), "wb") as fh:
+                fh.write(toml)
+        elif toml is not False:
             with open(os.path.join(path, "case.toml"), "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(toml)
         if isinstance(change_md, bytes):
@@ -171,6 +174,14 @@ class MalformedCases(RepoCase):
         self.make_case("m-not-toml", toml="[case\nrepo = \n")
         # round 1 F2: a description that is not UTF-8 is a refusal, not a traceback
         self.make_case("m-not-utf8-change-md", change_md=b"## Request\n\xff\xfe mul\n")
+        # round 2 F10: the same for a case.toml saved in a legacy code page; every field is
+        # there, one byte of the description is not UTF-8. It sorts before the case above,
+        # so that case being reported shows the run went on.
+        legacy = ("\n".join(self.toml_lines()) + "\n").encode("utf-8")
+        self.assertIn(b"mul is wrong", legacy)
+        self.make_case(
+            "m-not-utf8-case-toml", toml=legacy.replace(b"mul is wrong", b"mul is wr\xf3ng")
+        )
         res, cases, summary = self.bench()
         self.assertNotEqual(res.returncode, 0, res.stdout)
         self.assertNotIn("Traceback", res.stderr)
@@ -180,6 +191,7 @@ class MalformedCases(RepoCase):
             ("m-not-utf8-change-md", "change.md"),
             ("m-no-case-toml", "case.toml"),
             ("m-not-toml", "case.toml"),
+            ("m-not-utf8-case-toml", "case.toml"),
         ):
             with self.subTest(case=name):
                 self.assertEqual(cases[name]["outcome"], "malformed")
