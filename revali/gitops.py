@@ -278,13 +278,15 @@ def worktree_holding(branch: str, cwd: str) -> str:
 
 
 def is_linked_worktree(cwd: str) -> bool:
-    """True in a worktree added with `git worktree add`; False in the tree that owns `.git`."""
+    """True in a worktree added with `git worktree add`; False in the tree that owns `.git`.
+    git answers one of the two relative to `cwd` and the other absolute in its own (long)
+    form, so both are compared as real paths: an 8.3 short `cwd` must not make them differ."""
     git_dir = _git(["rev-parse", "--git-dir"], cwd)
     common = _git(["rev-parse", "--git-common-dir"], cwd)
     if not git_dir.ok or not common.ok:
         return False
-    a = os.path.normcase(os.path.normpath(os.path.join(cwd, git_dir.stdout.strip())))
-    b = os.path.normcase(os.path.normpath(os.path.join(cwd, common.stdout.strip())))
+    a = os.path.normcase(os.path.realpath(os.path.join(cwd, git_dir.stdout.strip())))
+    b = os.path.normcase(os.path.realpath(os.path.join(cwd, common.stdout.strip())))
     return a != b
 
 
