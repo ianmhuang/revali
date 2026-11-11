@@ -1,0 +1,19 @@
+# Built from the archived round 1 of PR #69 (finding F1): the head commit the
+# reviewer saw, the change.md from that round's prompt.
+
+[case]
+repo = "https://github.com/ianmhuang/revali"
+fetch = ["refs/pull/69/head"]
+base = "f05d210cf85e85c5ca5714129c8fc7d273897969"
+head = "392677b37a49f2f5cbfde072f6ad70d8d9432860"
+branch = "feature/state-dir-untracked"
+
+[expected]
+file = "revali/preflight.py"
+lines = [188, 188]
+description = "The check reads the index only (`git ls-files`), and `check_tree` skips every status entry under `<state_dir>/`, staged deletions included"
+
+[source]
+pr = 69
+round = 1
+finding = "F1"

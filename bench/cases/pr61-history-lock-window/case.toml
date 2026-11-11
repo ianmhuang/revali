@@ -1,0 +1,19 @@
+# Built from the archived round 1 of PR #61 (finding F1): the head commit the
+# reviewer saw, the change.md from that round's prompt.
+
+[case]
+repo = "https://github.com/ianmhuang/revali"
+fetch = ["refs/pull/61/head"]
+base = "6e6f38f699d04377e26caf53c86be0543df2001c"
+head = "b9adace8c1f660694ef90ee6566e0702669c93ae"
+branch = "fix/history-append-lock"
+
+[expected]
+file = "revali/state.py"
+lines = [492, 492]
+description = "The history lock window is resolved with `write_retry_s(path)`, which walks up from the file to a `.git` entry and reads that repository's layered config, else returns the defaults.toml value"
+
+[source]
+pr = 61
+round = 1
+finding = "F1"
