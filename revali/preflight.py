@@ -177,6 +177,51 @@ def check_tree(ctx: Context, tolerate: Sequence[str] = ()) -> None:
         raise Stop(EXIT_ERROR, problem)
 
 
+TRACKED_SHOWN = 20  # files listed in the refusal; the rest are counted
+
+
+def check_state_dir_untracked(ctx: Context) -> None:
+    """Refuse while git tracks anything under the state directory (a forced add, or a base
+    that already carries one): revali writes and archives that directory on its own, and a
+    tracked copy would reach the base with the next merge. Both the index and HEAD count:
+    the clean-tree check skips the state directory, so a removal only staged would pass the
+    index alone while the push still carries the files. Runs before any network call."""
+    state_dir = ctx.cfg.paths.state_dir
+    index = gitops.tracked_under(ctx.repo_root, state_dir)
+    head = gitops.committed_under(ctx.repo_root, state_dir)
+    tracked = sorted(set(index) | set(head))
+    if not tracked:
+        return
+    staged_removal = len(set(head) - set(index))
+    shown = tracked[:TRACKED_SHOWN]
+    more = len(tracked) - len(shown)
+    if not index:
+        # nothing is left in the index, so `git rm --cached` would fail: name it as done and
+        # ask for the commit
+        fix = "the removal (`git rm -r --cached %s`) is staged but not committed: commit it" % (
+            state_dir
+        )
+    else:
+        fix = "remove them from the index with `git rm -r --cached %s` and commit" % state_dir
+        if staged_removal:
+            fix += " (%d %s out of the index already)" % (
+                staged_removal,
+                "is" if staged_removal == 1 else "are",
+            )
+    raise Stop(
+        EXIT_ACTION,
+        "git tracks %d file(s) under %s/, revali's state directory:\n  %s%s\n"
+        "%s; the directory itself belongs in .gitignore (revali adds it there)"
+        % (
+            len(tracked),
+            state_dir,
+            "\n  ".join(shown),
+            "\n  ... and %d more" % more if more else "",
+            fix,
+        ),
+    )
+
+
 def check_github(ctx: Context) -> None:
     if not gitops.gh_available():
         raise Stop(EXIT_ERROR, "gh (GitHub CLI) not found on PATH")
@@ -329,6 +374,7 @@ def preflight(
     if before_tree is not None:
         before_tree(ctx)
     check_tree(ctx, tolerate)
+    check_state_dir_untracked(ctx)
     check_github(ctx)
     ctx.say(
         "GitHub: %s/%s (%s), base %s"
