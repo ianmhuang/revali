@@ -3,8 +3,11 @@ under the state directory and says how to fix it (AC-1), before anything leaves 
 (AC-2), and only for files git tracks under that very directory (AC-3).
 
 Black box: the `revali` commands run in the fixture repository with the fake gh and claude;
-git is real. Every test ends in a refusal, so each fails on a base without the check; the
+git is real. Every test holds a refusal, so each fails on a base without the check; the
 AC-3 tests first show that preflight passes, then track one file to show the check was live.
+
+Round 2: a removal that is staged but not committed leaves the files in HEAD, which is what
+a push carries, so it is refused as well; once the removal is committed preflight passes.
 """
 
 import os
@@ -64,6 +67,28 @@ class Refused(TrackedCase):
         self.track(".revali/feature__mul/notes.md", commit=False)
         code, out = run_cli(["preflight"])
         self.assert_refused(code, out, [".revali/feature__mul/notes.md"])
+
+    def test_a_removal_staged_but_not_committed_is_still_refused(self):
+        # half of the fix the message names: the index is empty, HEAD still carries the file
+        stray = ".revali/feature__mul/stray.md"
+        self.track(stray)
+        git(["rm", "-r", "-q", "--cached", "--", ".revali"], self.repo)
+        self.assertEqual(git(["ls-files", "--", ".revali"], self.repo), "")
+        code, out = run_cli(["preflight"])
+        self.assert_refused(code, out, [stray])
+        # the other half: committed, nothing is tracked there any more
+        git(["commit", "-q", "-m", "untrack the state directory"], self.repo)
+        self.assertTrue(self.exists(stray))  # --cached left the file on disk
+        self.assert_passes()
+
+    def test_a_partly_staged_removal_lists_the_files_of_index_and_head(self):
+        kept = ".revali/feature__mul/kept.md"
+        removed = ".revali/feature__mul/removed.md"
+        self.track(kept)
+        self.track(removed)
+        git(["rm", "-q", "--cached", "--", removed], self.repo)
+        code, out = run_cli(["preflight"])
+        self.assert_refused(code, out, [kept, removed])
 
     def many(self, count):
         for i in range(count):
@@ -125,6 +150,15 @@ class NothingLeavesTheMachine(TrackedCase):
         self.track(".revali/feature__mul/stray.md", commit=False)
         code, out = run_cli(["preflight"])
         self.assert_refused(code, out, [".revali/feature__mul/stray.md"])
+        self.assert_nothing_left()
+
+    def test_a_staged_removal_stops_a_run_as_early(self):
+        # round 1 F1: this run used to pass preflight and push the commit that holds the file
+        stray = ".revali/feature__mul/stray.md"
+        self.track(stray)
+        git(["rm", "-r", "-q", "--cached", "--", ".revali"], self.repo)
+        code, out = run_cli(["run", "--foreground"])
+        self.assert_refused(code, out, [stray])
         self.assert_nothing_left()
 
     def test_run_stops_there_and_wait_and_status_report_it(self):
