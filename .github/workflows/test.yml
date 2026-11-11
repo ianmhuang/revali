@@ -1,7 +1,8 @@
 # Lint and the whole suite on every push, on Linux and Windows (no macOS leg). Push only:
 # revali opens a draft PR for each review, so a pull_request trigger would run every push
-# twice. `revali merge` waits for these checks; the Windows leg takes 27 to 44 minutes, so
-# revali.toml raises checks_timeout_min above the job's timeout-minutes.
+# twice. `revali merge` waits for these checks; the Windows leg is the slow one, and
+# revali.toml raises checks_timeout_min above the job's timeout-minutes (its comment has the
+# measured times).
 name: test
 
 on:

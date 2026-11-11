@@ -57,7 +57,9 @@ M3.2.2 (#66), merged.
   leg hangs: a normal run ends when its legs do, and `revali merge` waits only that long.
   Making the Windows leg faster is the author's next task (M3.2.4), not this change.
 - CONVENTIONS.md, docs/workflow.md: CI runs the suite on Linux and Windows; workflow.md also
-  gives the 75 / timeout-minutes reason.
+  says why the merge wait is above the job timeout. The measured leg times (28, 37, 44
+  minutes) are written only in the revali.toml comment; workflow.md and the workflow header
+  point there (round 1 F1).
 - Tests: `tests/test_ci_workflow.py` `test_matrix_legs` expects the three legs, the docs test
   the new wording, and a new `test_a_hung_leg_ends_before_merge_stops_waiting` (AC-2) pins one
   `timeout-minutes` on the job below revali.toml's 75 and the 30 in the defaults and the

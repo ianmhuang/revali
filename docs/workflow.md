@@ -172,8 +172,9 @@ normal new round.
 
 revali's own CI ([.github/workflows/test.yml](../.github/workflows/test.yml)) runs lint and the
 suite on Linux and Windows on every push, and `revali merge` waits for it as it waits for
-any project's checks. The Windows leg takes 27 to 44 minutes, so revali's own
-`revali.toml` sets `checks_timeout_min = 75`, above the job's `timeout-minutes`.
+any project's checks. The Windows leg is the slow one, so revali's own
+`revali.toml` raises `checks_timeout_min` above the job's `timeout-minutes`; its comment has
+the measured times.
 
 ## Project setup
 
