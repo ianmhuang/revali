@@ -13,8 +13,10 @@ test_file_pattern = "test_review_{topic}.py"
 budget_usd = 8.0                  # a 700-line refactor took 26 turns and more than 4.0
 checklist = "CONVENTIONS.md"
 exclude = []
-max_diff_lines = 1200             # the ssh-runner PR reached 855 after its round-1 fixes;
-                                  # the README -> docs/ split was 1097, ~620 of them a verbatim move
+max_diff_lines = 1500             # the ssh-runner PR reached 855 after its round-1 fixes;
+                                  # the README -> docs/ split was 1097, ~620 of them a verbatim move;
+                                  # the review benchmark was 1413 after its round-1 fixes, ~300 of
+                                  # them case data
 
 [validate]
 budget_usd = 1.0

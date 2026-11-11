@@ -1,0 +1,19 @@
+# Built from the archived round 1 of PR #43 (finding F1): the head commit the
+# reviewer saw, the change.md from that round's prompt.
+
+[case]
+repo = "https://github.com/ianmhuang/revali"
+fetch = ["refs/pull/43/head"]
+base = "50bbbc1f008033e2c6a6057271dc748ee27c2293"
+head = "5c78fc48e3b12993a3cf2eef40aeedb6b710de2b"
+branch = "feature/pr-body-no-request"
+
+[expected]
+file = "revali/pr.py"
+lines = [122, 122]
+description = "_REQUEST_SECTION only matches the heading as `## Request` followed by optional spaces/tabs and a bare newline"
+
+[source]
+pr = 43
+round = 1
+finding = "F1"

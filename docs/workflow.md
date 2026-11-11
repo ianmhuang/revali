@@ -188,6 +188,10 @@ the measured times. The Windows leg's time depends on the runner it lands on, so
 prints the CPU model and the logical processor count before the suite
 ([.github/runner_facts.py](../.github/runner_facts.py)).
 
+How often the reviewer finds a bug it is known to have found before is measured by
+[tools/review_bench.py](../tools/review_bench.py), which replays archived round-1 reviews;
+[bench/README.md](../bench/README.md) says how to run it and build a case.
+
 ## Project setup
 
 Copy [templates/revali.toml](../templates/revali.toml) to the repo root and edit the commands; copy
