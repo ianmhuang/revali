@@ -42,6 +42,13 @@ def _rel(root: str, path: str) -> str:
     return os.path.relpath(path, root).replace(os.sep, "/")
 
 
+def _inside(root: str, path: str) -> bool:
+    try:
+        return os.path.commonpath([root, path]) == root
+    except ValueError:  # Windows: another drive, or a UNC path (`\\server\x.md`)
+        return False
+
+
 def _lines(text: str) -> List[str]:
     """Split on "\\n" only, so a line number is the editor's (splitlines also splits on a
     form feed or U+2028)."""
@@ -108,7 +115,7 @@ def build(root: str, roots: Sequence[str]) -> Graph:
                 full = os.path.normpath(os.path.join(root, target.lstrip("/")))
             else:
                 full = os.path.normpath(os.path.join(os.path.dirname(path), target))
-            if os.path.commonpath([root, full]) != root:
+            if not _inside(root, full):
                 graph.outside.append((rel, no, target))
                 continue
             if not os.path.exists(full):

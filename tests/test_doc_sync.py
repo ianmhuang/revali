@@ -46,7 +46,9 @@ def default_keys():
 
 def template_section(section):
     """A template's `[validate.<platform>]` table holds the keys defaults.toml keeps under
-    `[validate.platform]`."""
+    `[validate.platform]`. This holds while `platform` is the only sub-table of
+    `[validate]` in defaults.toml; Repository.test_validate_has_one_sub_table says when it
+    stops holding."""
     if section.startswith("validate.") and section.count(".") == 1:
         return "validate.platform"
     return section
@@ -94,14 +96,25 @@ def usage_block(readme):
 
 
 def tracked_markdown():
-    """The Markdown files git tracks or would add (untracked, not ignored)."""
-    out = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.md"],
-        cwd=ROOT,
-        capture_output=True,
-        check=True,
-    ).stdout.decode("utf-8")
-    return sorted({f for f in out.split("\0") if f and os.path.exists(os.path.join(ROOT, f))})
+    """The Markdown files git tracks or would add (untracked, not ignored); None when ROOT
+    is not a checkout git can read, and the orphan check then walks every file."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    # the extension is filtered here, not by a pathspec, so `NOTES.MD` counts too
+    return sorted(
+        {
+            f
+            for f in out.split("\0")
+            if f.lower().endswith(".md") and os.path.exists(os.path.join(ROOT, f))
+        }
+    )
 
 
 def commands():
@@ -219,6 +232,13 @@ class Graph(TempTree):
             ],
         )
 
+    def test_a_unc_target_is_reported_not_raised(self):
+        # Windows: another drive for os.path.commonpath; elsewhere a relative name
+        self.put("README.md", "[share](\\\\server\\docs\\x.md)\n")
+        g = docgraph.build(self.root, ["README.md"])
+        self.assertEqual(list(g.nodes), ["README.md"])
+        self.assertEqual(g.broken + g.outside, [("README.md", 1, "\\\\server\\docs\\x.md")])
+
     def test_line_numbers_count_newlines_only(self):
         self.put("README.md", "a\x0cb   c\n[gone](gone.md)\n")
         g = docgraph.build(self.root, ["README.md"])
@@ -334,7 +354,8 @@ class Repository(unittest.TestCase):
     def test_no_markdown_file_is_outside_the_graph(self):
         # AC-3; the candidates are what git tracks or would add, not an ignored venv/
         files = tracked_markdown()
-        self.assertIn("README.md", files)
+        if files is not None:
+            self.assertIn("README.md", files)
         self.assertEqual(docgraph.orphans(ROOT, self.graph, exclude=NOT_DOCS, files=files), [])
 
     def test_every_default_key_is_documented(self):
@@ -345,6 +366,12 @@ class Repository(unittest.TestCase):
         ]
         self.assertEqual(missing, [])  # AC-4
         self.assertEqual([k for k in UNDOCUMENTED if k not in default_keys()], [])
+
+    def test_validate_has_one_sub_table(self):
+        with open(os.path.join(ROOT, "defaults.toml"), "rb") as fh:
+            validate = tomllib.load(fh)["validate"]
+        subs = [k for k, v in validate.items() if isinstance(v, dict)]
+        self.assertEqual(subs, ["platform"], "template_section maps every [validate.<x>]")
 
     def test_every_command_is_in_the_usage_block(self):
         names = commands()
