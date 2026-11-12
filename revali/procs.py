@@ -272,12 +272,6 @@ def spawn_detached(cmd: list, cwd: str, log_path: str, env: Optional[dict] = Non
 _DETACHED = []
 
 
-def _kernel32():
-    import ctypes
-
-    return ctypes.windll.kernel32
-
-
 def pid_alive(pid: int) -> bool:
     """Whether a process with this pid exists. On Windows a process is alive until its
     process object is signalled: its exit code is set earlier, while it is still exiting, so
@@ -289,7 +283,7 @@ def pid_alive(pid: int) -> bool:
     if os.name == "nt":
         import ctypes
 
-        kernel32 = _kernel32()
+        kernel32 = ctypes.windll.kernel32
         handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
         if handle:
             try:

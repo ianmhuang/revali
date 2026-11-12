@@ -3,12 +3,13 @@
 process that is still exiting used to read as dead, and `revali stop` returned while the run
 it killed was still exiting."""
 
-import ctypes  # noqa: F401  imported before os.name is patched: ctypes reads it on import
+import ctypes  # imported before os.name is patched: ctypes reads it on import
 import os
 import subprocess
 import sys
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from revali import procs
@@ -26,12 +27,17 @@ def dead_pid():
     return 2**31 - 1  # above any pid range on Windows and Linux
 
 
-class FakeKernel32:
-    """The four kernel32 calls pid_alive makes. `opens` maps an access mask to the handle
-    OpenProcess returns for it (0 = refused)."""
+HANDLES = {SYNCHRONIZE: 7, QUERY_LIMITED: 9}
 
-    def __init__(self, opens, wait=WAIT_TIMEOUT, code=STILL_ACTIVE, code_ok=True):
-        self.opens = opens
+
+class FakeKernel32:
+    """The four kernel32 calls pid_alive makes, for one process. OpenProcess grants each
+    access mask its own handle (HANDLES) unless the mask is in `refuse`. Both the exit code
+    and the wait are served, so a function that reads either one gets an answer, and the
+    old exit-code reading gives the wrong one where the cases below say so."""
+
+    def __init__(self, refuse=(), wait=WAIT_TIMEOUT, code=STILL_ACTIVE, code_ok=True):
+        self.refuse = set(refuse)
         self.wait = wait
         self.code = code
         self.code_ok = code_ok
@@ -40,7 +46,7 @@ class FakeKernel32:
 
     def OpenProcess(self, access, inherit, pid):
         self.calls.append(("OpenProcess", access, pid))
-        return self.opens.get(access, 0)
+        return 0 if access in self.refuse else HANDLES.get(access, 0)
 
     def WaitForSingleObject(self, handle, ms):
         self.calls.append(("WaitForSingleObject", handle, ms))
@@ -60,14 +66,21 @@ class FakeKernel32:
 
 
 class WithFakeKernel32(unittest.TestCase):
-    """The Windows branch with kernel32 replaced, so it runs on every platform."""
+    """The Windows branch with `ctypes.windll` replaced, so it runs on every platform. The
+    first three cases fail against the old function with a wrong answer: it read the exit
+    code, which a process that is still exiting already has."""
 
     def alive(self, k32, pid=4242):
-        with mock.patch("os.name", "nt"), mock.patch.object(procs, "_kernel32", lambda: k32):
+        windll = SimpleNamespace(kernel32=k32)
+        with (
+            mock.patch("os.name", "nt"),
+            mock.patch.object(ctypes, "windll", windll, create=True),
+        ):
             return procs.pid_alive(pid)
 
     def test_an_unsignalled_handle_is_alive_whatever_the_exit_code(self):
-        k32 = FakeKernel32({SYNCHRONIZE: 7}, wait=WAIT_TIMEOUT, code=0)
+        # the exit code is already set while the process is still exiting
+        k32 = FakeKernel32(wait=WAIT_TIMEOUT, code=0)
         self.assertTrue(self.alive(k32))
         self.assertEqual(k32.calls[0], ("OpenProcess", SYNCHRONIZE, 4242))
         self.assertEqual(k32.calls[1], ("WaitForSingleObject", 7, 0))
@@ -76,36 +89,37 @@ class WithFakeKernel32(unittest.TestCase):
 
     def test_a_signalled_handle_is_dead_even_if_the_exit_code_said_active(self):
         # an exit code of 259 is also a code a process may exit with
-        k32 = FakeKernel32({SYNCHRONIZE: 7}, wait=WAIT_OBJECT_0, code=STILL_ACTIVE)
+        k32 = FakeKernel32(wait=WAIT_OBJECT_0, code=STILL_ACTIVE)
         self.assertFalse(self.alive(k32))
         self.assertEqual(k32.closed, [7])
 
     def test_a_failed_wait_is_dead(self):
-        k32 = FakeKernel32({SYNCHRONIZE: 7}, wait=WAIT_FAILED)
+        k32 = FakeKernel32(wait=WAIT_FAILED, code=STILL_ACTIVE)
         self.assertFalse(self.alive(k32))
         self.assertEqual(k32.closed, [7])
 
     def test_without_synchronize_access_the_exit_code_decides_as_before(self):
-        k32 = FakeKernel32({QUERY_LIMITED: 9}, code=STILL_ACTIVE)
+        k32 = FakeKernel32(refuse={SYNCHRONIZE}, code=STILL_ACTIVE)
         self.assertTrue(self.alive(k32))
         self.assertEqual(k32.names(), ["OpenProcess", "OpenProcess", "GetExitCodeProcess"])
+        self.assertEqual(k32.calls[1], ("OpenProcess", QUERY_LIMITED, 4242))
         self.assertEqual(k32.closed, [9])
-        k32 = FakeKernel32({QUERY_LIMITED: 9}, code=1)
+        k32 = FakeKernel32(refuse={SYNCHRONIZE}, code=1)
         self.assertFalse(self.alive(k32))
         self.assertEqual(k32.closed, [9])
-        k32 = FakeKernel32({QUERY_LIMITED: 9}, code_ok=False)
+        k32 = FakeKernel32(refuse={SYNCHRONIZE}, code_ok=False)
         self.assertFalse(self.alive(k32))
         self.assertEqual(k32.closed, [9])
 
     def test_a_process_that_cannot_be_opened_is_dead(self):
-        k32 = FakeKernel32({})
+        k32 = FakeKernel32(refuse={SYNCHRONIZE, QUERY_LIMITED})
         self.assertFalse(self.alive(k32))
         self.assertEqual(k32.names(), ["OpenProcess", "OpenProcess"])
         self.assertEqual(k32.closed, [])
 
     def test_a_pid_of_zero_or_below_is_dead_without_a_call(self):
         for pid in (0, -1):
-            k32 = FakeKernel32({SYNCHRONIZE: 7})
+            k32 = FakeKernel32()
             self.assertFalse(self.alive(k32, pid))
             self.assertEqual(k32.calls, [])
 
