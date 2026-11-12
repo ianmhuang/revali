@@ -109,7 +109,8 @@ class WorkflowCase(unittest.TestCase):
 
 class Legs(WorkflowCase):
     def test_linux_on_the_target_and_latest_windows_on_latest(self):
-        # AC-1: exactly three legs; the pinned one is pyproject's target
+        # AC-1: exactly three legs (six jobs since ci-windows-shards: the Windows leg is
+        # four shards); the pinned one is pyproject's target
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(len(target), 1)
         m = re.fullmatch(r"py(\d)(\d+)", target[0])
@@ -186,7 +187,8 @@ class Timeouts(WorkflowCase):
 
 
 class LegTests(unittest.TestCase):
-    """AC-3: the two tests that pin the legs pass on three legs and fail on two."""
+    """AC-3: the two tests that pin the legs pass on the workflow (two Ubuntu legs and four
+    Windows shards since ci-windows-shards) and fail with the Windows legs removed."""
 
     def run_named(self, module, name):
         suite = unittest.TestLoader().loadTestsFromName("%s.%s" % (module, name))

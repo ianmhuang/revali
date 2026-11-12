@@ -75,6 +75,9 @@ class Tree:
 
     def run(self, *extra, env=None):
         environ = {k: v for k, v in os.environ.items() if k not in ("RUN_PARALLEL_JOBS", SHARD_ENV)}
+        # the output is read back as UTF-8, so the child writes UTF-8 whatever the console's
+        # code page (a refused "١/4" is echoed as is, not as an escape)
+        environ["PYTHONIOENCODING"] = "utf-8"
         environ.update(env or {})
         res = subprocess.run(
             [sys.executable, RUNNER, "-s", self.tests, "-t", self.root] + list(extra),
