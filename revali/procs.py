@@ -273,12 +273,23 @@ _DETACHED = []
 
 
 def pid_alive(pid: int) -> bool:
+    """Whether a process with this pid exists. On Windows a process is alive until its
+    process object is signalled: its exit code is set earlier, while it is still exiting, so
+    reading the exit code let `revali stop` return before the run it killed had exited
+    (fix/windows-pid-alive). A process that grants no SYNCHRONIZE access is judged by its exit
+    code, as before."""
     if pid <= 0:
         return False
     if os.name == "nt":
         import ctypes
 
         kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if handle:
+            try:
+                return kernel32.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT
+            finally:
+                kernel32.CloseHandle(handle)
         handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
             return False
