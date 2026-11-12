@@ -30,6 +30,24 @@ that moves it.
 Branch `feature/x` maps to directory `feature__x`. `~/.revali/` itself moves
 with the `REVALI_HOME` environment variable.
 
+`stage` in `state.json`, also the `stage` line of `revali status` and the
+history row, is one of:
+
+| Stage | Meaning |
+|---|---|
+| `preflight` | the checks before anything is pushed, then the baseline; with `[validate] parallel_baseline` (the default) the baseline only starts here and runs on during `pr` and `review`. A finished `run --dry-run` stays here |
+| `pr` | pushing the branch and opening or updating the draft PR |
+| `review` | a Reviewer round, then the checks on its tests and their commit |
+| `validate` | the sandbox run after an APPROVE, and the base rerun and diagnosis on a FAIL |
+| `ready_to_merge` | done: APPROVE and PASS, exit 0; `revali merge` may run |
+| `merged` | `revali merge` merged the PR |
+| `needs_action` | exit 2: the Developer must fix, answer or rebase, then run again |
+| `needs_human` | exit 3: a human must decide |
+| `error` | exit 1: the pipeline failed (not a verdict) |
+| `stopped` | `revali stop` ended the run, or closed one that had died |
+
+The first four are a run in progress, the other six a result.
+
 `state.json` is revali's own file, but a hand edit is read as follows. A
 field set to `null` takes its default, mostly an empty list, `0`, `""` or
 `false`. Five fields default to something else: `stage` reads as
