@@ -130,5 +130,20 @@ one below the top for diagnosis. `fallback_model = "auto"` is the tiers
 below the chosen one, strongest first. Any explicit model name passes
 through unchanged. The chosen model and the reason are printed at spawn
 time and recorded in the review and diagnosis headers.
+`[review] effort` and `[validate] effort` (default `high` for both) are the
+effort level the Reviewer and the diagnosis session run at.
+`[engines.claude] helper_prefix` (default `claude-haiku`) tells which rows
+of a session's model usage are the CLI's own helper calls: the model that
+did the work, recorded as `model_actual` and checked for a fallback, is
+picked among the other rows.
+
+Reserved keys: defaults.toml carries a few keys this version accepts but
+does not act on, so a configuration that sets them stays valid.
+`[project] change_source` only accepts `manual` (any other value is a
+configuration error); `[merge] auto_merge = true` is ignored with a warning,
+merges stay manual; `[project] context_files`, `[review] small_max_lines`,
+`[review] security_paths`, `[validate.platform] network` and
+`[validate.platform] check_name` are read and not used. `[review] strategy`
+is reserved the same way.
 
 `REVALI_DISABLE=1` in the environment switches revali off entirely.
