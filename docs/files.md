@@ -35,7 +35,7 @@ history row, is one of:
 
 | Stage | Meaning |
 |---|---|
-| `preflight` | the checks before anything is pushed, ending with the baseline (a finished `run --dry-run` stays here) |
+| `preflight` | the checks before anything is pushed, then the baseline; with `[validate] parallel_baseline` (the default) the baseline only starts here and runs on during `pr` and `review`. A finished `run --dry-run` stays here |
 | `pr` | pushing the branch and opening or updating the draft PR |
 | `review` | a Reviewer round, then the checks on its tests and their commit |
 | `validate` | the sandbox run after an APPROVE, and the base rerun and diagnosis on a FAIL |

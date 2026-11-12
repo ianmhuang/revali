@@ -3,18 +3,21 @@
 From a few root files, every file reachable through relative Markdown links, at any
 depth: Markdown files are read and followed, any other file (code, TOML, LICENSE) is a
 leaf. Links inside fenced code blocks or code spans, URLs, `mailto:` and bare anchors are
-not followed; a link to a file that does not exist is recorded as broken.
+not followed; a link to a file that does not exist is recorded as broken, and one that
+leaves the repository root as outside, neither followed. A target starting with `/` is
+relative to the repository root, as GitHub reads it.
 """
 
 import os
 import re
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import unquote
 
 INLINE_LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
-REFERENCE_DEF = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*<?(\S+?)>?(?:\s+.*)?$")
+# a footnote definition (`[^1]: text`) is not a link
+REFERENCE_DEF = re.compile(r"^\s{0,3}\[(?!\^)[^\]]+\]:\s*<?(\S+?)>?(?:\s+.*)?$")
 CODE_SPAN = re.compile(r"`[^`\n]*`")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 TOML_HEADER = re.compile(r"^\s*#?\s*\[\s*([A-Za-z0-9_.-]+)\s*\]\s*(?:#.*)?$")
@@ -32,16 +35,23 @@ class Node:
 class Graph:
     nodes: Dict[str, Node] = field(default_factory=dict)  # in the order they were reached
     broken: List[Tuple[str, int, str]] = field(default_factory=list)  # (page, line, target)
+    outside: List[Tuple[str, int, str]] = field(default_factory=list)  # leaves the root
 
 
 def _rel(root: str, path: str) -> str:
     return os.path.relpath(path, root).replace(os.sep, "/")
 
 
+def _lines(text: str) -> List[str]:
+    """Split on "\\n" only, so a line number is the editor's (splitlines also splits on a
+    form feed or U+2028)."""
+    return [line.rstrip("\r") for line in text.split("\n")]
+
+
 def prose_lines(text: str) -> Iterable[Tuple[int, str]]:
     """(line number, line) outside fenced code blocks, code spans blanked."""
     fence = ""
-    for no, line in enumerate(text.splitlines(), 1):
+    for no, line in enumerate(_lines(text), 1):
         mark = line.strip()[:3]
         if mark in ("```", "~~~"):
             if not fence:
@@ -94,7 +104,13 @@ def build(root: str, roots: Sequence[str]) -> Graph:
         with open(path, encoding="utf-8", errors="replace") as fh:
             text = fh.read()
         for no, target in page_links(text):
-            full = os.path.normpath(os.path.join(os.path.dirname(path), target))
+            if target.startswith("/"):
+                full = os.path.normpath(os.path.join(root, target.lstrip("/")))
+            else:
+                full = os.path.normpath(os.path.join(os.path.dirname(path), target))
+            if os.path.commonpath([root, full]) != root:
+                graph.outside.append((rel, no, target))
+                continue
             if not os.path.exists(full):
                 graph.broken.append((rel, no, target))
                 continue
@@ -109,23 +125,46 @@ def build(root: str, roots: Sequence[str]) -> Graph:
 
 
 def broken_links(graph: Graph) -> List[str]:
-    return ["%s:%d missing: %s" % b for b in graph.broken]
+    """Links to a missing file, and links that leave the repository (a reader of the
+    repository on its own, or on GitHub, cannot follow them)."""
+    return ["%s:%d missing: %s" % b for b in graph.broken] + [
+        "%s:%d outside the repository: %s" % o for o in graph.outside
+    ]
 
 
-def orphans(root: str, graph: Graph, exclude: Sequence[str] = ()) -> List[str]:
-    """Markdown files under `root` that are not in the graph. Directories whose name starts
-    with a dot, and the `exclude` paths (relative, "/" separated), are not searched."""
+def orphans(
+    root: str,
+    graph: Graph,
+    exclude: Sequence[str] = (),
+    files: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """Markdown files that are not in the graph. `files` (paths relative to `root`, "/"
+    separated; say, what git tracks) are the candidates; without it every file under `root`
+    is, untracked and ignored ones included. Directories whose name starts with a dot, and
+    the `exclude` paths, are never candidates."""
     root = os.path.abspath(root)
     skip = {e.strip("/") for e in exclude}
+    if files is not None:
+
+        def excluded(rel):
+            parts = rel.split("/")[:-1]
+            prefixes = ["/".join(parts[: i + 1]) for i in range(len(parts))]
+            return any(p.startswith(".") for p in parts) or any(p in skip for p in prefixes)
+
+        return sorted(
+            f
+            for f in files
+            if f.lower().endswith(".md") and not excluded(f) and f not in graph.nodes
+        )
     found = []
-    for directory, dirs, files in os.walk(root):
+    for directory, dirs, files_here in os.walk(root):
         rel_dir = _rel(root, directory)
         dirs[:] = sorted(
             d
             for d in dirs
             if not d.startswith(".") and (d if rel_dir == "." else rel_dir + "/" + d) not in skip
         )
-        for name in files:
+        for name in files_here:
             if name.lower().endswith(".md"):
                 rel = name if rel_dir == "." else rel_dir + "/" + name
                 if rel not in graph.nodes:
@@ -137,10 +176,13 @@ def code_spans(text: str) -> List[str]:
     return [m.group(0)[1:-1] for m in CODE_SPAN.finditer(text)]
 
 
-def missing_names(names: Sequence[str], texts: Sequence[str]) -> List[str]:
-    """The names that no text holds as a word inside a code span (`name`, `[section] name`,
-    `name = 1`)."""
+def missing_names(names: Sequence[str], texts: Sequence[str], exact: bool = False) -> List[str]:
+    """The names that no text holds in a code span: as the whole span with `exact`, else as
+    a word inside one (`name`, `[section] name`, `name = 1`)."""
     spans = [s for t in texts for s in code_spans(t)]
+    if exact:
+        held = {s.strip() for s in spans}
+        return [name for name in names if name not in held]
     missing = []
     for name in names:
         word = re.compile(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(name))
@@ -153,7 +195,7 @@ def toml_keys(text: str) -> List[Tuple[str, str]]:
     """(section, key) of every `key =` line in a TOML file, commented-out ones included (a
     template documents optional keys as comments); "" is the top level."""
     section, keys = "", []
-    for line in text.splitlines():
+    for line in _lines(text):
         header = TOML_HEADER.match(line)
         if header:
             section = header.group(1)

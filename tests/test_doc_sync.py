@@ -6,6 +6,7 @@ import glob
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import tomllib
 import unittest
@@ -51,25 +52,56 @@ def template_section(section):
     return section
 
 
+SECTION_SPAN = re.compile(r"^\[([^\]]+)\]\s+(.*)$")
+
+
+def doc_section(section):
+    """A document's `[validate.<platform>]` (any name in angle brackets) is
+    `[validate.platform]`."""
+    return template_section(re.sub(r"<[^>]*>", "platform", section))
+
+
+def documented_in(dotted, spans):
+    """A span names the key: `[section] key ...` with the key's own section, or the key as a
+    word in a span that names no section."""
+    section, _, name = dotted.rpartition(".")
+    word = re.compile(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(name))
+    for span in spans:
+        m = SECTION_SPAN.match(span.strip())
+        if m:
+            if doc_section(m.group(1).strip()) == section and word.search(m.group(2)):
+                return True
+        elif word.search(span):
+            return True
+    return False
+
+
 def undocumented_keys(keys, docs, templates):
-    """The dotted keys named neither in a document (the key name in backticks) nor under
-    their own section in a template (`name =`, commented or not)."""
+    """The dotted keys named neither in a document (in backticks, under its own section
+    when the span names one) nor under their own section in a template (`name =`,
+    commented or not)."""
     in_templates = set()
     for text in templates:
         for section, key in docgraph.toml_keys(text):
             in_templates.add(template_section(section) + "." + key)
-    missing = []
-    for dotted in keys:
-        if dotted in in_templates:
-            continue
-        if docgraph.missing_names([dotted.rsplit(".", 1)[-1]], docs):
-            missing.append(dotted)
-    return missing
+    spans = [s for text in docs for s in docgraph.code_spans(text)]
+    return [k for k in keys if k not in in_templates and not documented_in(k, spans)]
 
 
 def usage_block(readme):
     section = readme.split("\n## Usage\n", 1)[1].split("\n## ", 1)[0]
     return section.split("```", 2)[1]
+
+
+def tracked_markdown():
+    """The Markdown files git tracks or would add (untracked, not ignored)."""
+    out = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.md"],
+        cwd=ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout.decode("utf-8")
+    return sorted({f for f in out.split("\0") if f and os.path.exists(os.path.join(ROOT, f))})
 
 
 def commands():
@@ -81,7 +113,13 @@ def commands():
 
 
 def missing_commands(names, usage):
-    return [n for n in names if not re.search(r"\b%s\b" % re.escape(n), usage)]
+    """A command counts as a token of its own: between spaces, `|` or the line's ends (not
+    inside `--version` or `<branch>`)."""
+    return [
+        n
+        for n in names
+        if not re.search(r"(?:^|(?<=[\s|]))%s(?=$|[\s|])" % re.escape(n), usage, re.M)
+    ]
 
 
 class TempTree(unittest.TestCase):
@@ -150,6 +188,42 @@ class Graph(TempTree):
         self.assertEqual(set(g.nodes), {"README.md", "a.md", "my notes.md", "docs"})
         self.assertEqual(g.broken, [])
 
+    def test_a_footnote_is_not_a_link(self):
+        self.put("README.md", "Text[^1] and [a][ref].\n\n[^1]: See the note\n[ref]: a.md\n")
+        self.put("a.md")
+        g = docgraph.build(self.root, ["README.md"])
+        self.assertEqual(list(g.nodes), ["README.md", "a.md"])
+        self.assertEqual(g.broken, [])
+
+    def test_a_link_out_of_the_root_is_reported_not_followed(self):
+        os.makedirs(os.path.join(self.root, "repo", "docs"))
+        self.put("other/README.md", "[deeper](deeper.md)\n")
+        self.put("other/deeper.md")
+        self.put("repo/README.md", "[up](../other/README.md)\n[docs](docs/a.md)\n")
+        self.put("repo/docs/a.md", "[rooted](/LICENSE) [far](/../other/README.md)\n")
+        self.put("repo/LICENSE", "MIT\n")
+        repo = os.path.join(self.root, "repo")
+        g = docgraph.build(repo, ["README.md"])
+        self.assertEqual(list(g.nodes), ["README.md", "docs/a.md", "LICENSE"])
+        self.assertEqual(g.nodes["LICENSE"].linked_from, [("docs/a.md", 1)])  # "/" is the root
+        self.assertEqual(
+            g.outside,
+            [("README.md", 1, "../other/README.md"), ("docs/a.md", 1, "/../other/README.md")],
+        )
+        self.assertEqual(g.broken, [])
+        self.assertEqual(
+            docgraph.broken_links(g),
+            [
+                "README.md:1 outside the repository: ../other/README.md",
+                "docs/a.md:1 outside the repository: /../other/README.md",
+            ],
+        )
+
+    def test_line_numbers_count_newlines_only(self):
+        self.put("README.md", "a\x0cb   c\n[gone](gone.md)\n")
+        g = docgraph.build(self.root, ["README.md"])
+        self.assertEqual(g.broken, [("README.md", 2, "gone.md")])
+
     def test_several_roots_and_a_missing_root(self):
         self.put("README.md", "x\n")
         self.put("CONVENTIONS.md", "[a](a.md)\n")
@@ -180,6 +254,14 @@ class Checks(TempTree):
         self.assertEqual(
             docgraph.orphans(self.root, g, exclude=("tests",)), ["docs/lost-too.md", "lost.md"]
         )
+        # given the candidates (what git tracks), a file outside them is not one
+        self.put("venv/lib/README.md")
+        tracked = ["README.md", "a.md", "lost.md", "tests/fixture.md", ".hidden/notes.md"]
+        tracked += ["bench/cases/x/change.md", "tool.py"]
+        self.assertEqual(
+            docgraph.orphans(self.root, g, exclude=("tests", "bench/cases"), files=tracked),
+            ["lost.md"],
+        )
 
     def test_an_undocumented_key(self):
         docs = ["`max_diff_lines` is the limit", "[review] budget"]
@@ -192,15 +274,39 @@ class Checks(TempTree):
             undocumented_keys(["validate.platform.distro"], [], ["[validate.linux]\ndistro = 'U'"]),
             [],
         )
+        # a span that names a section counts for that section's key only
+        docs = ["`[review] effort`, `[review] tests`, `[validate.<platform>] sandbox_dir`"]
+        self.assertEqual(
+            undocumented_keys(
+                [
+                    "review.effort",
+                    "validate.effort",
+                    "validate.tests",
+                    "validate.platform.sandbox_dir",
+                ],
+                docs,
+                [],
+            ),
+            ["validate.effort", "validate.tests"],
+        )
 
     def test_a_missing_command(self):
         self.assertEqual(missing_commands(["run", "zap"], "revali.py run  # x\n"), ["zap"])
         self.assertEqual(missing_commands(["run"], "revali.py rerun\n"), ["run"])
+        self.assertEqual(missing_commands(["version"], "revali.py --version\n"), ["version"])
+        self.assertEqual(missing_commands(["branch"], "revali.py clean <branch>\n"), ["branch"])
+        self.assertEqual(missing_commands(["stop", "version"], "x status | stop | version\n"), [])
 
     def test_a_missing_stage(self):
         self.assertEqual(
             docgraph.missing_names(["review", "merged"], ["the `review` stage", "merged"]),
             ["merged"],
+        )
+        # a stage is named only by a span of its own, not inside a key or a path
+        spans = ["`[validate] effort`, `logs/issue-1-merged.md`, `$pr`, ` review `"]
+        self.assertEqual(
+            docgraph.missing_names(["validate", "merged", "pr", "review"], spans, exact=True),
+            ["validate", "merged", "pr"],
         )
 
     def test_toml_keys(self):
@@ -226,7 +332,10 @@ class Repository(unittest.TestCase):
         self.assertGreaterEqual(self.graph.nodes["bench/README.md"].depth, 2)
 
     def test_no_markdown_file_is_outside_the_graph(self):
-        self.assertEqual(docgraph.orphans(ROOT, self.graph, exclude=NOT_DOCS), [])  # AC-3
+        # AC-3; the candidates are what git tracks or would add, not an ignored venv/
+        files = tracked_markdown()
+        self.assertIn("README.md", files)
+        self.assertEqual(docgraph.orphans(ROOT, self.graph, exclude=NOT_DOCS, files=files), [])
 
     def test_every_default_key_is_documented(self):
         docs = [read(p) for p in KEY_DOCS]
@@ -246,7 +355,7 @@ class Repository(unittest.TestCase):
         docs = [
             read(os.path.relpath(p, ROOT)) for p in glob.glob(os.path.join(ROOT, "docs", "*.md"))
         ]
-        self.assertEqual(docgraph.missing_names(list(STAGES), docs), [])  # AC-6
+        self.assertEqual(docgraph.missing_names(list(STAGES), docs, exact=True), [])  # AC-6
 
 
 if __name__ == "__main__":
