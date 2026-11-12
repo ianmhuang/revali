@@ -254,11 +254,11 @@ def check_runner(ctx: Context) -> None:
     first that cannot start is named (`validate.windows: ...`)."""
     if ctx.dry_run:
         return
-    from revali import runners
+    from revali.runners import probe_runner
 
     names = ctx.cfg.project.platforms
     for name in names:
-        problem = runners.probe_runner(ctx.cfg.validate.platforms[name], log=ctx.detail)
+        problem = probe_runner(ctx.cfg.validate.platforms[name], log=ctx.detail)
         if problem:
             raise Stop(
                 EXIT_ERROR, problem if len(names) == 1 else "validate.%s: %s" % (name, problem)

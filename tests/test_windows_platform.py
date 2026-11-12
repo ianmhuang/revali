@@ -97,6 +97,23 @@ class PlatformNames(unittest.TestCase):
         found = problems(config(["linux", "windows"], LINUX), host_nt=True)
         self.assertIn("missing [validate.windows] section for listed platform", found)
 
+    def test_a_name_listed_twice_is_refused(self):
+        # round 1 F2: the note would contradict itself and the probe would run twice
+        for order in (["linux", "linux"], ["linux", "windows", "linux"]):
+            with self.subTest(order=order):
+                found = problems(config(order, LINUX, WINDOWS_LOCAL), host_nt=True)
+                self.assertEqual(found, ["project.platforms lists 'linux' more than once"])
+        found = problems(
+            config(["windows", "linux", "windows", "linux"], LINUX, WINDOWS_LOCAL), host_nt=True
+        )
+        self.assertEqual(
+            found,
+            [
+                "project.platforms lists 'linux' more than once",
+                "project.platforms lists 'windows' more than once",
+            ],
+        )
+
 
 class RunnerRules(unittest.TestCase):
     """AC-2"""
@@ -197,6 +214,8 @@ class OnlyTheFirstIsValidated(unittest.TestCase):
         self.assertIn("'linux'", notes[0])
         self.assertIn("not validated", notes[0])
         self.assertLess(notes[0].index("'windows'"), notes[0].index("'linux'"))
+        # round 1 F3: printed on a dry run too, which probes nothing, so it claims no probe
+        self.assertNotIn("probed", notes[0])
 
     def test_one_platform_gets_no_note(self):
         self.assertEqual(self.notes(load(config(["linux"], LINUX))), [])
