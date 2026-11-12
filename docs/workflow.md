@@ -182,7 +182,10 @@ normal new round.
 
 revali's own CI ([.github/workflows/test.yml](../.github/workflows/test.yml)) runs lint and the
 suite on Linux and Windows on every push, and `revali merge` waits for it as it waits for
-any project's checks. The Windows leg is the slow one, so revali's own
+any project's checks. The Windows leg is the slow one: it runs as four jobs in parallel,
+each one shard of the suite (`RUN_PARALLEL_SHARD=K/4`, the same as
+`tests/run_parallel.py --shard K/4`), which together run every test once, and `revali merge`
+waits for all four. revali's own
 `revali.toml` raises `checks_timeout_min` above the job's `timeout-minutes`; its comment has
 the measured times. The Windows leg's time depends on the runner it lands on, so every leg
 prints the CPU model and the logical processor count before the suite

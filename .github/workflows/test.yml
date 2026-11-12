@@ -1,8 +1,9 @@
 # Lint and the whole suite on every push, on Linux and Windows (no macOS leg). Push only:
 # revali opens a draft PR for each review, so a pull_request trigger would run every push
-# twice. `revali merge` waits for these checks; the Windows leg is the slow one, and
-# revali.toml raises checks_timeout_min above the job's timeout-minutes (its comment has the
-# measured times).
+# twice. `revali merge` waits for these checks; the Windows leg is the slow one, so it runs
+# as four jobs, each one shard of the suite (`RUN_PARALLEL_SHARD`, see tests/run_parallel.py),
+# which together run every test once. revali.toml raises checks_timeout_min above the job's
+# timeout-minutes (its comment has the measured times).
 name: test
 
 on:
@@ -17,9 +18,12 @@ concurrency:
 
 jobs:
   test:
-    name: ${{ matrix.os }} / python ${{ matrix.python }}${{ matrix.lint && ' / lint' || '' }}
+    name: ${{ matrix.os }} / python ${{ matrix.python }}${{ matrix.lint && ' / lint' || '' }}${{ matrix.shard && format(' / shard {0} of {1}', matrix.shard, matrix.shards) || '' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 70
+    env:
+      # the Windows jobs' shard, read by the suite step; empty on Ubuntu (the whole suite)
+      RUN_PARALLEL_SHARD: ${{ matrix.shard && format('{0}/{1}', matrix.shard, matrix.shards) || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +35,20 @@ jobs:
             lint: true
           - os: windows-latest
             python: "3.x"
+            shard: 1
+            shards: 4
+          - os: windows-latest
+            python: "3.x"
+            shard: 2
+            shards: 4
+          - os: windows-latest
+            python: "3.x"
+            shard: 3
+            shards: 4
+          - os: windows-latest
+            python: "3.x"
+            shard: 4
+            shards: 4
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

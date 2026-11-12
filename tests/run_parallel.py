@@ -21,6 +21,13 @@ its CPUs, bounds the suite sets it once instead of editing the committed `test` 
 else the CPU count. `--list` prints the collected test ids and exits; `-s DIR -t DIR`
 change the discovery start and top-level directories (the defaults are this repository's
 `tests/` and root).
+
+`--shard K/N`, else the environment variable RUN_PARALLEL_SHARD, runs only shard K of N:
+the collected classes are split into N shards the way they are split over workers, so N
+runs with K = 1..N on the same tree run every test exactly once (CI runs the Windows leg
+as four jobs this way). A module that does not import is reported by shard 1 only. The
+variable is not passed on to the workers, so a test that starts this runner itself is not
+sharded by it.
 """
 
 import argparse
@@ -38,6 +45,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 JOBS_ENV = "RUN_PARALLEL_JOBS"
+SHARD_ENV = "RUN_PARALLEL_SHARD"
 COUNT_KEYS = ("failures", "errors", "skipped", "expected failures", "unexpected successes")
 FAILING_KEYS = ("failures", "errors", "unexpected successes")
 
@@ -83,6 +91,32 @@ def shard(ids: Sequence[str], workers: int) -> List[List[str]]:
     for members in sorted(groups.values(), key=len, reverse=True):
         min(buckets, key=len).extend(members)
     return [b for b in buckets if b]
+
+
+def select_shard(ids: Sequence[str], k: int, n: int) -> List[str]:
+    """Shard k (1-based) of n: the k-th bucket `shard` makes for n workers, or nothing when
+    there are fewer classes than shards. Deterministic for the same ids in the same order."""
+    buckets = shard(ids, n)
+    return buckets[k - 1] if k <= len(buckets) else []
+
+
+def parse_shard(raw: str, source: str) -> Tuple[int, int]:
+    """`K/N` in plain decimal digits with 1 <= K <= N; anything else is refused, naming the
+    value and where it came from."""
+    text = raw.strip()
+    k, sep, n = text.partition("/")
+    plain = all(p.isascii() and p.isdigit() for p in (k, n))
+    if not sep or not plain or not 1 <= int(k) <= int(n):
+        raise SystemExit("%s%r: expected K/N with 1 <= K <= N, e.g. 2/4" % (source, raw))
+    return int(k), int(n)
+
+
+def default_shard(environ=os.environ) -> Optional[Tuple[int, int]]:
+    """RUN_PARALLEL_SHARD when set and not blank, else None (the whole suite)."""
+    raw = environ.get(SHARD_ENV)
+    if raw is None or not raw.strip():
+        return None
+    return parse_shard(raw, "%s=" % SHARD_ENV)
 
 
 def counts_of(result: unittest.TestResult) -> Dict[str, int]:
@@ -178,6 +212,11 @@ def main(argv=None) -> int:
     parser.add_argument("-s", "--start-dir", default=HERE)
     parser.add_argument("-t", "--top-level-dir", default=ROOT)
     parser.add_argument("--list", action="store_true", help="print the test ids and exit")
+    parser.add_argument(
+        "--shard",
+        metavar="K/N",
+        help="run only shard K of N (default: %s, else the whole suite)" % SHARD_ENV,
+    )
     parser.add_argument("--worker", metavar="IDS_FILE", help=argparse.SUPPRESS)
     parser.add_argument("names", nargs="*", help="test names, as for `python -m unittest`")
     args = parser.parse_args(argv)
@@ -186,16 +225,22 @@ def main(argv=None) -> int:
         return run_worker_mode(args.worker, top)
     if args.jobs is None:
         args.jobs = default_jobs()
+    part = parse_shard(args.shard, "--shard ") if args.shard is not None else default_shard()
 
     started = time.monotonic()
     tests = collect(os.path.abspath(args.start_dir), top, args.names)
-    if args.list:
-        for test in tests:
-            print(test.id())
-        return 0
-    out = _utf8_stdout()
     broken = [t for t in tests if is_failed_import(t)]
     ids = [t.id() for t in tests if not is_failed_import(t)]
+    collected = len(ids)
+    if part:
+        ids = select_shard(ids, *part)
+        if part[0] != 1:
+            broken = []
+    if args.list:
+        for tid in [t.id() for t in broken] + ids:
+            print(tid)
+        return 0
+    out = _utf8_stdout()
     counts = {key: 0 for key in COUNT_KEYS}
     total_ran = 0
     if broken:
@@ -206,6 +251,7 @@ def main(argv=None) -> int:
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"  # the logs are read back as UTF-8
     env["PYTHONUTF8"] = "1"
+    env.pop(SHARD_ENV, None)  # this run's shard, not the shard of a runner a test starts
     buckets = shard(ids, args.jobs)
     procs: List[Tuple[int, subprocess.Popen, str, str, int]] = []
     tmp = tempfile.mkdtemp(prefix="run_parallel-")
@@ -233,7 +279,13 @@ def main(argv=None) -> int:
                     start_new_session=(os.name != "nt"),
                 )
             procs.append((index, proc, ids_path + ".json", log_path, len(bucket)))
-        out.write("%d tests in %d worker(s)\n" % (len(ids), len(procs)))
+        if part:
+            out.write(
+                "%d of %d tests in %d worker(s) (shard %d of %d)\n"
+                % (len(ids), collected, len(procs), part[0], part[1])
+            )
+        else:
+            out.write("%d tests in %d worker(s)\n" % (len(ids), len(procs)))
         out.flush()
         for index, proc, result_path, log_path, size in procs:
             code = proc.wait()
@@ -282,7 +334,8 @@ def main(argv=None) -> int:
         except OSError:
             pass
 
-    out.write("\nRan %d tests in %.1fs\n\n" % (total_ran, time.monotonic() - started))
+    tail = " (shard %d of %d)" % part if part else ""
+    out.write("\nRan %d tests in %.1fs%s\n\n" % (total_ran, time.monotonic() - started, tail))
     verdict = format_verdict(counts)
     out.write(verdict + "\n")
     return 0 if verdict.startswith("OK") else 1

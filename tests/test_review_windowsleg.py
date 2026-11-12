@@ -20,8 +20,9 @@ OWN_WAIT_MIN = 75  # AC-2: revali's own revali.toml
 OTHERS_WAIT_MIN = 30  # AC-2: defaults.toml and templates/revali.toml
 LEG_TESTS = (
     ("tests.test_ci_workflow", "Workflow.test_matrix_legs"),
-    ("tests.test_review_ciworkflow", "Matrix.test_three_legs"),
+    ("tests.test_review_ciworkflow", "Matrix.test_legs"),  # renamed by ci-windows-shards
 )
+SHARD_KEYS = ("shard", "shards")  # ci-windows-shards: the Windows leg as four jobs
 
 
 def read(*parts):
@@ -114,17 +115,20 @@ class Legs(WorkflowCase):
         m = re.fullmatch(r"py(\d)(\d+)", target[0])
         pinned = "%s.%s" % (m.group(1), m.group(2))
         self.assertEqual(pinned, "3.11")
+        # ci-windows-shards (author's change): the Windows leg is four jobs, one per shard
         self.assertCountEqual(
             [(leg.get("os"), leg.get("python")) for leg in self.legs],
-            [("ubuntu-latest", pinned), ("ubuntu-latest", "3.x"), ("windows-latest", "3.x")],
+            [("ubuntu-latest", pinned), ("ubuntu-latest", "3.x")] + [("windows-latest", "3.x")] * 4,
         )
 
     def test_lint_stays_on_the_one_ubuntu_leg(self):
         # AC-1: the Windows leg carries no lint marker; the steps that install or run the
-        # linters are guarded by a marker only ubuntu / 3.x has
-        self.assertEqual(len(self.windows), 1, "one Windows leg")
-        self.assertEqual(sorted(self.windows[0]), ["os", "python"])
-        markers = {k for leg in self.legs for k in leg if k not in ("os", "python")}
+        # linters are guarded by a marker only ubuntu / 3.x has. ci-windows-shards (author's
+        # change): four Windows jobs, each carrying only its shard keys besides os / python
+        self.assertEqual(len(self.windows), 4, "four Windows shards")
+        for leg in self.windows:
+            self.assertEqual(sorted(leg), ["os", "python", "shard", "shards"])
+        markers = {k for leg in self.legs for k in leg if k not in ("os", "python") + SHARD_KEYS}
         self.assertEqual(len(markers), 1, "one marker picks the lint leg: %r" % markers)
         flag = markers.pop()
         marked = [leg for leg in self.legs if leg.get(flag) not in (None, "", "false")]
@@ -137,8 +141,9 @@ class Legs(WorkflowCase):
 
     def test_the_windows_leg_runs_the_suite_and_can_fail_the_run(self):
         # AC-1: one unconditional suite step shared by every leg, nothing that skips a leg
-        # or lets it fail quietly, and fail-fast stays false
-        self.assertEqual(len(self.windows), 1, "one Windows leg")
+        # or lets it fail quietly, and fail-fast stays false (ci-windows-shards, author's
+        # change: the leg is four shard jobs)
+        self.assertEqual(len(self.windows), 4, "four Windows shards")
         suite = self.suite_steps()
         self.assertEqual(len(suite), 1, "one suite step")
         self.assertNotIn("if", suite[0])
