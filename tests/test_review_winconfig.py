@@ -1,7 +1,8 @@
 """AC-1 and AC-2 of feature/windows-platform: `project.platforms` takes `linux` and
 `windows`, any other name is refused with a message listing both, and a `windows` table is
 refused with `runner = "wsl"` (WSL runs Linux) or with `runner = "local"` on a host that is
-not Windows, while `runner = "ssh"` loads on any host and `linux` keeps its rules.
+not Windows, while `runner = "ssh"` loads on any host and `linux` keeps its rules. A name
+listed more than once is refused too (round 1 F2).
 
 AC-2 words the host rule as `os.name != "nt"`, so the host is chosen by patching `os.name`
 around the parse; every other case goes through the parser or the CLI unpatched.
@@ -83,6 +84,30 @@ class PlatformNames(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("validate.windows", problems[0])
         self.assertNotIn("not supported", problems[0])
+
+    def test_a_name_listed_twice_is_refused_by_name(self):
+        # a list is one entry per platform: a repeat would be probed, and later run, twice
+        cases = (
+            (["linux", "linux"], "linux"),
+            (["windows", "windows"], "windows"),
+            (["linux", "windows", "linux"], "linux"),
+            (["windows", "linux", "windows"], "windows"),
+        )
+        for names, repeated in cases:
+            with self.subTest(names=names):
+                cfg, problems = parse(toml(names, LINUX_WSL, WINDOWS_SSH))
+                self.assertIsNone(cfg)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn("project.platforms", problems[0])
+                self.assertIn("'%s'" % repeated, problems[0])
+                self.assertNotIn("not supported", problems[0])
+
+    def test_each_name_once_is_not_a_repeat(self):
+        for names in (["linux", "windows"], ["windows", "linux"]):
+            with self.subTest(names=names):
+                cfg, problems = parse(toml(names, LINUX_WSL, WINDOWS_SSH))
+                self.assertEqual(problems, [])
+                self.assertEqual(sorted(cfg.validate.platforms), ["linux", "windows"])
 
 
 class WindowsRunnerRules(unittest.TestCase):
@@ -185,6 +210,18 @@ class ThroughTheCli(RepoCase):
         self.assertIn("validate.windows", out)
         self.assertIn("wsl", out)
         self.assertNotIn("not supported", out)
+
+    def test_a_repeated_name_stops_the_run(self):
+        before = self.read("revali.toml")
+        after = before.replace('platforms = ["linux"]', 'platforms = ["linux", "linux"]')
+        self.assertNotEqual(before, after, "fixture platforms line not found")
+        self.write("revali.toml", after)
+        self.commit_all("list linux twice")
+        code, out = run_cli(["run", "--dry-run"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("project.platforms", out)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("not validated", out)
 
     def test_windows_local_follows_the_real_host(self):
         self.list_windows(WINDOWS_LOCAL)
