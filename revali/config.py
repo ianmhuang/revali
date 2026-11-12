@@ -8,6 +8,7 @@ in defaults.toml.
 """
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -399,6 +400,16 @@ def parse_project_config(
         if plat.runner not in RUNNERS:
             problems.append("validate.%s.runner must be one of %s" % (name, ", ".join(RUNNERS)))
             continue
+        if name == "windows" and plat.runner == "wsl":
+            problems.append(
+                'validate.windows.runner cannot be "wsl": WSL runs Linux; use "local" on a '
+                'Windows host or "ssh" to a Windows machine'
+            )
+        if name == "windows" and plat.runner == "local" and os.name != "nt":
+            problems.append(
+                'validate.windows.runner = "local" needs a Windows host; this host is %s'
+                % sys.platform
+            )
         if plat.runner == "ssh" and not plat.host.strip():
             problems.append(
                 "validate.%s.host is required for the ssh runner "
@@ -463,6 +474,16 @@ def parse_project_config(
     if validate.issue_assignee not in ("author", ""):
         problems.append(
             'validate.issue_assignee must be "author" or "" (got %r)' % validate.issue_assignee
+        )
+    if len(project.platforms) > 1:
+        warnings.append(
+            "project.platforms: this version validates on '%s' only; %s probed by preflight "
+            "but not validated"
+            % (
+                project.platforms[0],
+                ", ".join("'%s'" % p for p in project.platforms[1:])
+                + (" is" if len(project.platforms) == 2 else " are"),
+            )
         )
     if merge.auto_merge:
         warnings.append("merge.auto_merge is ignored in this version; merges stay manual")

@@ -45,16 +45,17 @@ class ConfigTests(unittest.TestCase):
             parse_project_config(MINIMAL + "\n[deploy]\nx = 1\n")
         self.assertTrue(any("unknown section [deploy]" in p for p in cm.exception.problems))
 
-    def test_windows_platform_rejected_in_v1(self):
+    def test_unsupported_platform_rejected(self):
+        # windows is supported since feature/windows-platform; macos is not
         text = MINIMAL.replace(
-            "[validate.linux]", '[project]\nplatforms = ["linux", "windows"]\n[validate.linux]'
+            "[validate.linux]", '[project]\nplatforms = ["linux", "macos"]\n[validate.linux]'
         )
         text = text.replace(
             "[project]\nconfig_version = 1\n[project]", "[project]\nconfig_version = 1"
         )
         with self.assertRaises(ConfigError) as cm:
             parse_project_config(text)
-        self.assertTrue(any("windows" in p and "not supported" in p for p in cm.exception.problems))
+        self.assertTrue(any("macos" in p and "not supported" in p for p in cm.exception.problems))
 
     def test_new_test_required(self):
         with self.assertRaises(ConfigError) as cm:

@@ -14,4 +14,4 @@ EXIT_HUMAN = 3  # a human must decide
 
 V1_KINDS = ("feature", "fix", "docs")
 ALL_KINDS = ("feature", "fix", "docs", "refactor", "hotfix", "small")
-V1_PLATFORMS = ("linux",)
+V1_PLATFORMS = ("linux", "windows")
