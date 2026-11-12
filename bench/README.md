@@ -38,9 +38,39 @@ budget, and its line says the cost is unknown. `--model` sets the reviewer model
 case; without it the case repository's own configuration chooses, as `revali run` would.
 
 A case that fails in any way is reported as `error` and the next case runs. Each case's line
-is printed and `results.json` rewritten as soon as the case ends, so a run stopped with
-Ctrl-C keeps what it already paid for (the interrupted case is `error`, the rest `not-run`).
-No case found (a mistyped `--cases`) is exit 1.
+is printed and `results.json` rewritten as soon as the case ends, and once more just before
+its session starts, with the case marked `started` and its session cap charged. A run stopped
+with Ctrl-C marks the case `interrupted` (its cap charged if the session had started, since
+the session never reports what it spent) and the rest `not-run`; a run that ends without
+Python noticing (the machine shuts down) leaves the case `started`. No case found (a
+mistyped `--cases`) is exit 1, and so is a case named twice on the command line.
+
+## Continuing a stopped run
+
+```
+python tools/review_bench.py --resume ../bench-out --budget-usd 95
+```
+
+`--resume DIR` continues the run whose `results.json` is in DIR and writes to the same
+directory. Cases that ended with a result (`caught-strict`, `caught-loose`, `missed`,
+`error`, `malformed`) are kept and reported as kept; cases that are `started`,
+`interrupted` or `not-run`, and cases in the case directories that the file does not list,
+run. A `started` or `interrupted` case keeps the cap already charged for it, said in its
+message, and runs again. To run an `error` case again, run it by name into a new output
+directory.
+
+`--budget-usd` is the total of every invocation: what `results.json` already charges counts
+against it before the first new session. The model, session cap, line margin and case
+directories come from `results.json`; given on the command line they must match it, and so
+must `PROMPT_VERSION`, or the run is refused before anything starts (a set measured with two
+settings has no single rate). `--out` and `--dry-run` cannot go with `--resume`. The case
+directories are recorded as absolute paths, so a resume may start from any directory. Case
+names narrow the run as usual; the cases not named stay in `results.json` as they were, and
+the summary always covers every case the file holds. A name that is neither in the earlier
+run nor a directory with a `case.toml` is refused before anything runs, instead of becoming a
+`malformed` entry every later resume would keep. `results.json` is written to a temporary
+file and moved into place (retried while Windows refuses the rename because another program
+has the file open), so a run killed while writing it leaves the previous version whole.
 
 ## What a run does
 
@@ -72,8 +102,8 @@ A case is **caught** when a finding of kind correctness or security names the ex
 file at a line inside the expected range widened by `--line-margin` (15 by default).
 It is **strict** when that finding is medium or high and the verdict is
 `CHANGES_REQUESTED`, **loose** otherwise. Other findings are listed under the case, not
-scored. The summary line gives both rates over the cases that were scored (not `error`,
-`malformed` or `not-run`) and the total cost.
+scored. The summary line gives both rates over the cases that ended as caught or missed
+(not `error`, `malformed`, `not-run`, `interrupted` or `started`) and the total cost.
 
 What the number does not say:
 

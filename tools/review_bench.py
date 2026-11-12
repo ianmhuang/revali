@@ -15,10 +15,12 @@ answer stay under the output directory.
                                  [--session-budget-usd N] [--line-margin N] [--out DIR]
                                  [case ...]
     python tools/review_bench.py --dry-run [--cases DIR ...] [case ...]
+    python tools/review_bench.py --resume DIR --budget-usd TOTAL [case ...]
 
-Exit 0 when every case that ran was scored (caught or missed), 1 when a case was malformed,
-failed, or was not run for the budget. With --dry-run no session runs: exit 0 when every
-case got as far as its prompt.
+Exit 0 when every case was scored (caught or missed), 1 when a case was malformed, failed,
+was interrupted, or was not run for the budget. With --dry-run no session runs: exit 0 when
+every case got as far as its prompt. --resume continues a stopped run in DIR with the
+settings recorded there: cases with a result are kept, the others run.
 """
 
 import argparse
@@ -31,7 +33,7 @@ import sys
 import tempfile
 import time
 import tomllib
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import List, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,7 +43,7 @@ sys.path.insert(0, ROOT)
 from revali import PROMPT_VERSION, VERSION, gitops  # noqa: E402
 from revali.preflight import Stop, locate  # noqa: E402
 from revali.review import CHANGES_REQUESTED, build_prompt, spawn_reviewer  # noqa: E402
-from revali.state import State, safe_branch  # noqa: E402
+from revali.state import State, safe_branch, write_json_atomic  # noqa: E402
 
 CASES_DIR = os.path.join(ROOT, "bench", "cases")
 CASE_FILE = "case.toml"
@@ -51,6 +53,8 @@ SCORED_KINDS = ("correctness", "security")
 STRONG = ("medium", "high")
 DEFAULT_MARGIN = 15
 READY = "ready"  # --dry-run: the case would run
+RERUN = ("started", "interrupted", "not-run")  # --resume runs these again
+STARTED = "session started; if the run ends here, its cap counts and --resume runs it again"
 
 
 class CaseError(Exception):
@@ -79,7 +83,9 @@ class Case:
 @dataclass
 class Result:
     case: str
-    outcome: str  # caught-strict | caught-loose | missed | error | not-run | malformed | ready
+    # caught-strict | caught-loose | missed | error | malformed | ready (--dry-run)
+    # | not-run | started (a session in progress) | interrupted (Ctrl-C)
+    outcome: str
     finding: str = ""
     severity: str = ""
     verdict: str = ""
@@ -292,11 +298,12 @@ def isolate(clone: str, branch: str, base_branch: str, base: str) -> None:
     _git(["reflog", "expire", "--expire=now", "--all"], clone)
 
 
-def run_case(case: Case, args, spent: float, out_dir: str) -> Result:
+def run_case(case: Case, args, spent: float, out_dir: str, on_session=None) -> Result:
+    """One case. `on_session(cap)` is called just before the session starts."""
     started = time.monotonic()
     tmp = tempfile.mkdtemp(prefix="revali bench ")
     try:
-        result = _run_in(case, args, spent, out_dir, tmp)
+        result = _run_in(case, args, spent, out_dir, tmp, on_session)
     finally:
         _rmtree(tmp)
     result.duration_s = time.monotonic() - started
@@ -305,7 +312,7 @@ def run_case(case: Case, args, spent: float, out_dir: str) -> Result:
     return result
 
 
-def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str) -> Result:
+def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str, on_session=None) -> Result:
     cap = args.session_budget_usd
     if not args.dry_run and cap and spent + cap > args.budget_usd:  # known before the clone
         return _not_run(case, spent, cap, args)
@@ -326,6 +333,8 @@ def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str) -> Result:
         _write(os.path.join(case_out, "prompt.md"), prompt)
         if args.dry_run:  # everything a session needs is in place; nothing is spent
             return Result(case.name, READY, message="prompt.md %d lines" % prompt.count("\n"))
+        if on_session:
+            on_session(cap)
         session = True
         try:
             rr = spawn_reviewer(ctx, prompt, ctx.rdir, 1, 1, None)
@@ -461,6 +470,103 @@ def _pct(n: Optional[float]) -> str:
     return "n/a" if n is None else "%.0f%%" % (100 * n)
 
 
+def _key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _same_dirs(a: List[str], b: List[str]) -> bool:
+    def norm(dirs):
+        return [os.path.normcase(os.path.abspath(os.path.expanduser(d))) for d in dirs]
+
+    return norm(a) == norm(b)
+
+
+def _prior_results(path: str):
+    """The cases of an earlier run's results.json as Results, in their order; (None, reason)
+    when the file cannot be resumed."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            prior = json.load(fh)
+    except FileNotFoundError:
+        return None, "no results.json in %s; nothing to resume" % os.path.dirname(path)
+    except (OSError, ValueError) as exc:
+        return None, "cannot read %s: %s" % (path, exc)
+    known = {f.name for f in fields(Result)}
+    entries = prior.get("cases") if isinstance(prior, dict) else None
+    dirs = prior.get("cases_dirs") if isinstance(prior, dict) else None
+    ok = (
+        isinstance(entries, list)
+        and isinstance(dirs, list)
+        and all(isinstance(d, str) for d in dirs)
+        and all(
+            isinstance(c, dict)
+            and isinstance(c.get("case"), str)
+            and isinstance(c.get("outcome"), str)
+            and all(
+                isinstance(c.get(k, 0), (int, float)) and not isinstance(c.get(k), bool)
+                for k in ("cost", "charged", "duration_s")
+            )
+            for c in entries
+        )
+        and isinstance(prior.get("model") or "", str)
+        and isinstance(prior.get("session_budget_usd") or 0.0, (int, float))
+        and isinstance(prior.get("line_margin", DEFAULT_MARGIN), int)
+        and not any(isinstance(prior.get(k), bool) for k in ("session_budget_usd", "line_margin"))
+    )
+    if not ok:
+        return None, "%s is not a benchmark results.json" % path
+    if prior.get("dry_run"):
+        return None, "%s is from a dry run; nothing to resume" % path
+    results = {}
+    for c in entries:
+        results[c["case"]] = Result(**{k: v for k, v in c.items() if k in known})
+    return (prior, results), ""
+
+
+def resume_from(args):
+    """Check `--resume DIR` against the run recorded there and fill in what the command
+    line left out; ({case: Result}, "") or (None, why it cannot resume)."""
+    if args.out:
+        return None, "--resume writes to the directory it continues; --out cannot go with it"
+    if args.dry_run:
+        return None, "--resume continues a paid run; --dry-run cannot go with it"
+    loaded, problem = _prior_results(os.path.join(args.resume, "results.json"))
+    if problem:
+        return None, problem
+    prior, results = loaded
+    if str(prior.get("prompt_version")) != str(PROMPT_VERSION):
+        return None, (
+            "the earlier run used PROMPT_VERSION %s and this revali has %s; start a new run"
+            % (prior.get("prompt_version"), PROMPT_VERSION)
+        )
+    recorded = {
+        "model": prior.get("model") or "",
+        "session_budget_usd": prior.get("session_budget_usd") or 0.0,
+        "line_margin": prior.get("line_margin", DEFAULT_MARGIN),
+        "cases_dir": prior["cases_dirs"],
+    }
+    labels = {
+        "model": "model",
+        "session_budget_usd": "session cap",
+        "line_margin": "line margin",
+        "cases_dir": "case directories",
+    }
+    differ = []
+    for attr, label in labels.items():
+        given, earlier = getattr(args, attr), recorded[attr]
+        if given is None:
+            setattr(args, attr, earlier)
+        elif attr == "cases_dir":
+            if not _same_dirs(given, earlier):
+                differ.append("%s %s (earlier run: %s)" % (label, given, earlier))
+        elif given != earlier:
+            differ.append("%s %r (earlier run: %r)" % (label, given, earlier))
+    if differ:
+        return None, "cannot resume %s with a different %s" % (args.resume, "; ".join(differ))
+    args.out = args.resume
+    return results, ""
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="reviewer catch-rate benchmark")
     parser.add_argument("cases", nargs="*", help="case names (under --cases) or directories")
@@ -470,31 +576,55 @@ def main(argv=None) -> int:
         action="append",
         help="a directory of cases; may be given more than once (default: bench/cases/)",
     )
-    parser.add_argument("--budget-usd", type=float, help="required unless --dry-run")
+    parser.add_argument(
+        "--budget-usd",
+        type=float,
+        help="required unless --dry-run; with --resume, the total of every invocation",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="clone, isolate and build each prompt; run no session",
     )
-    parser.add_argument("--model", default="", help="reviewer model (default: the case's config)")
+    parser.add_argument("--model", help="reviewer model (default: the case's config)")
     parser.add_argument(
         "--session-budget-usd",
         type=float,
-        default=0.0,
         help="each session's cap (default: the case's [review] budget_usd)",
     )
-    parser.add_argument("--line-margin", type=int, default=DEFAULT_MARGIN)
+    parser.add_argument(
+        "--line-margin",
+        type=int,
+        help="lines either side of the expected range (default %d)" % DEFAULT_MARGIN,
+    )
     parser.add_argument("--out", default="", help="output directory (default: a new temp dir)")
+    parser.add_argument(
+        "--resume",
+        metavar="DIR",
+        help="continue the run whose results.json is in DIR, with its settings",
+    )
     args = parser.parse_args(argv)
-    args.cases_dir = [os.path.expanduser(d) for d in args.cases_dir or [CASES_DIR]]
     if args.budget_usd is None and not args.dry_run:
         parser.error("--budget-usd is required (or --dry-run)")
     if args.budget_usd is not None and args.budget_usd <= 0:
         parser.error("--budget-usd must be more than 0")
-    if args.session_budget_usd < 0:
+    if args.session_budget_usd is not None and args.session_budget_usd < 0:
         parser.error("--session-budget-usd must not be negative")
-    if args.line_margin < 0:
+    if args.line_margin is not None and args.line_margin < 0:
         parser.error("--line-margin must not be negative")
+    if args.cases_dir is not None:  # recorded absolute: a resume may start anywhere
+        args.cases_dir = [os.path.abspath(os.path.expanduser(d)) for d in args.cases_dir]
+    prior = {}
+    if args.resume:
+        args.resume = os.path.expanduser(args.resume)
+        prior, problem = resume_from(args)
+        if problem:
+            print(problem, file=sys.stderr)
+            return 1
+    args.cases_dir = args.cases_dir or [CASES_DIR]
+    args.model = args.model or ""
+    args.session_budget_usd = args.session_budget_usd or 0.0
+    args.line_margin = DEFAULT_MARGIN if args.line_margin is None else args.line_margin
     missing = [d for d in args.cases_dir if not os.path.isdir(d)]
     if missing:  # one of several: the run would cover part of the set and say nothing
         print("no case directory under %s: not a directory" % ", ".join(missing), file=sys.stderr)
@@ -502,6 +632,25 @@ def main(argv=None) -> int:
     paths = case_dirs(args.cases_dir, args.cases)
     if not paths:
         print("no case directory under %s" % ", ".join(args.cases_dir), file=sys.stderr)
+        return 1
+    keys = [_key(p) for p in paths]
+    twice = sorted(
+        {os.path.basename(os.path.normpath(p)) for p in paths if keys.count(_key(p)) > 1}
+    )
+    if twice:  # the same directory twice; two directories of one name are `dup` below
+        print("case named twice: %s" % ", ".join(twice), file=sys.stderr)
+        return 1
+    unknown = [
+        os.path.basename(os.path.normpath(p))
+        for p in paths
+        if not os.path.isfile(os.path.join(p, CASE_FILE))
+        and os.path.basename(os.path.normpath(p)) not in prior
+    ]
+    if prior and args.cases and unknown:  # it would be a `malformed` entry every resume keeps
+        print(
+            "no case %s in the earlier run or the case directories" % ", ".join(unknown),
+            file=sys.stderr,
+        )
         return 1
     dup = duplicate_names(paths)
     if dup:
@@ -513,10 +662,30 @@ def main(argv=None) -> int:
     os.makedirs(out_dir, exist_ok=True)
 
     results: List[Result] = []
-    spent = 0.0
+
+    def save(current: Optional[Result] = None) -> None:
+        """results.json: this run's cases so far, the one in progress, then every case of
+        the earlier run not reached yet, so a run killed at any point loses nothing."""
+        rows = results + ([current] if current else [])
+        done = {r.case for r in rows}
+        _write_results(out_dir, args, rows + [r for n, r in prior.items() if n not in done])
+
+    spent = sum(r.charged for r in prior.values())  # what earlier invocations counted
     stopped = ""
     for path in paths:
         name = os.path.basename(os.path.normpath(path))
+        earlier = prior.get(name)
+        if earlier is not None and earlier.outcome not in RERUN:
+            results.append(earlier)
+            _print_case(earlier, kept=True)
+            continue
+        carried = earlier.charged if earlier is not None else 0.0  # already in `spent`
+        session = {"cap": 0.0}
+
+        def on_session(cap, name=name, carried=carried, session=session):
+            session["cap"] = cap
+            save(Result(name, "started", charged=cap + carried, message=STARTED))
+
         try:
             case = load_case(path)
         except CaseError as exc:
@@ -526,16 +695,34 @@ def main(argv=None) -> int:
                 result = Result(name, "not-run", message=stopped)
             else:
                 try:
-                    result = run_case(case, args, spent, out_dir)
+                    result = run_case(case, args, spent, out_dir, on_session)
                 except KeyboardInterrupt:
-                    result = Result(name, "error", message="interrupted; cost unknown")
+                    result = _interrupted(name, session["cap"])
                     stopped = "the run was interrupted"
-        spent += result.charged
+        if carried:
+            result.charged += carried
+            result.message = "; ".join(
+                m
+                for m in (
+                    result.message,
+                    "includes $%.2f charged for an interrupted earlier session (cost unknown)"
+                    % carried,
+                )
+                if m
+            )
+        spent += result.charged - carried
         if result.outcome == "not-run" and not stopped:
             stopped = result.message
         results.append(result)
         _print_case(result)
-        _write_results(out_dir, args, results)  # an interrupted run keeps what it paid for
+        save()  # an interrupted run keeps what it paid for
+    done = {r.case for r in results}
+    for n, r in prior.items():  # cases of the earlier run not named this time
+        if n not in done:
+            results.append(r)
+            _print_case(r, kept=True)
+    if prior:
+        save()
 
     if args.dry_run:
         ready = sum(r.outcome == READY for r in results)
@@ -564,7 +751,20 @@ def main(argv=None) -> int:
     return 0 if ok else 1
 
 
-def _print_case(r: Result) -> None:
+def _interrupted(name: str, cap: float) -> Result:
+    """Ctrl-C. During the session its cap counts, since what it spent is never reported."""
+    if not cap:
+        return Result(name, "interrupted", message="interrupted before its session")
+    return Result(
+        name,
+        "interrupted",
+        charged=cap,
+        message="interrupted during its session; cost unknown, the session cap $%.2f counts" % cap,
+    )
+
+
+def _print_case(r: Result, kept: bool = False) -> None:
+    message = "; ".join(m for m in (r.message, "kept from the earlier run" if kept else "") if m)
     print(
         "%-32s %-13s %-4s %-6s %-17s %-22s $%6.2f %6.0fs %s"
         % (
@@ -576,30 +776,31 @@ def _print_case(r: Result) -> None:
             r.model or "-",
             r.cost,
             r.duration_s,
-            r.message,
+            message,
         ),
         flush=True,
     )
 
 
 def _write_results(out_dir: str, args, results: List[Result]) -> None:
-    with open(os.path.join(out_dir, "results.json"), "w", encoding="utf-8", newline="") as fh:
-        json.dump(
-            {
-                "revali": VERSION,
-                "prompt_version": PROMPT_VERSION,
-                "model": args.model,
-                "dry_run": args.dry_run,
-                "cases_dirs": args.cases_dir,
-                "budget_usd": args.budget_usd,
-                "session_budget_usd": args.session_budget_usd,
-                "line_margin": args.line_margin,
-                "summary": rates(results),
-                "cases": [asdict(r) for r in results],
-            },
-            fh,
-            indent=1,
-        )
+    """revali's own atomic write: a temporary file renamed over results.json, the rename
+    retried while Windows refuses it to a reader, the temporary file removed on failure. A
+    kill at any point leaves the previous or the new file whole: --resume reads nothing else."""
+    write_json_atomic(
+        os.path.join(out_dir, "results.json"),
+        {
+            "revali": VERSION,
+            "prompt_version": PROMPT_VERSION,
+            "model": args.model,
+            "dry_run": args.dry_run,
+            "cases_dirs": args.cases_dir,
+            "budget_usd": args.budget_usd,
+            "session_budget_usd": args.session_budget_usd,
+            "line_margin": args.line_margin,
+            "summary": rates(results),
+            "cases": [asdict(r) for r in results],
+        },
+    )
 
 
 if __name__ == "__main__":

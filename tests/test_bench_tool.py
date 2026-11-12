@@ -389,7 +389,7 @@ class Failures(BenchCase):
         self.assertEqual(code, 1, out)
         self.assertEqual(
             [cases[n]["outcome"] for n in ("a-one", "b-two", "c-three")],
-            ["caught-strict", "error", "not-run"],
+            ["caught-strict", "interrupted", "not-run"],  # M3.3.3 AC-2: was "error"
         )
         self.assertIn("interrupted", cases["b-two"]["message"])
 
@@ -554,6 +554,395 @@ class DryRunAndDirectories(BenchCase):
             bench.locate_case(bench.load_case(path), clone, "main")
         with open(os.path.join(clone, "revali.toml"), encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "")
+
+    def test_a_case_named_twice_is_refused(self):
+        """M3.3.3 AC-7"""
+        self.make_case("a-one")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = bench.main(["--cases", self.cases, "--budget-usd", "5", "a-one", "a-one"])
+        self.assertEqual(code, 1)
+        self.assertIn("case named twice: a-one", err.getvalue())
+        self.assertNotIn("two directories", err.getvalue())
+        self.assertEqual(self.fake_calls("claude"), [])
+
+    def test_two_directories_of_one_name_are_not_named_twice(self):
+        """PR #72 round 1 F3"""
+        first = self.make_case("x")
+        self.cases = os.path.join(self.tmp, "private")
+        second = self.make_case("x")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = bench.main(["--budget-usd", "5", first, second])
+        self.assertEqual(code, 1)
+        self.assertIn(
+            "a case name is in two directories: x (%s and %s)" % (first, second), err.getvalue()
+        )
+        self.assertNotIn("named twice", err.getvalue())
+
+
+class Resume(BenchCase):
+    """M3.3.3 AC-1 to AC-5: the fixture's session cap is $1.00, each fake session costs $0.50"""
+
+    def results_file(self):
+        with open(os.path.join(self.out, "results.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def killed_at(self, n):
+        """A spawn_reviewer whose n-th call ends the run the way a power cut does: the
+        results.json of that moment is all that is left (no handler runs afterwards)."""
+        real, calls, snapshot = bench.spawn_reviewer, [], {}
+
+        def spawn(*a, **kw):
+            calls.append(1)
+            if len(calls) == n:
+                with open(os.path.join(self.out, "results.json"), encoding="utf-8") as fh:
+                    snapshot["text"] = fh.read()
+                raise KeyboardInterrupt
+            return real(*a, **kw)
+
+        def restore():
+            with open(os.path.join(self.out, "results.json"), "w", encoding="utf-8") as fh:
+                fh.write(snapshot["text"])
+
+        return spawn, restore
+
+    def first_run_killed_at(self, n, *extra, budget="10"):
+        spawn, restore = self.killed_at(n)
+        with mock.patch.object(bench, "spawn_reviewer", spawn):
+            self.run_bench(*extra, budget=budget)
+        restore()
+
+    def resume(self, *extra, budget="10"):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = bench.main(["--resume", self.out, "--budget-usd", budget] + list(extra))
+        self.assert_nothing_pushed()
+        return code, out.getvalue(), err.getvalue()
+
+    def by_name(self, results):
+        return {c["case"]: c for c in results["cases"]}
+
+    def test_a_session_is_recorded_as_started_before_it_runs(self):
+        """AC-1"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        real, seen = bench.spawn_reviewer, []
+
+        def spawn(*a, **kw):
+            seen.append(self.by_name(self.results_file()))
+            return real(*a, **kw)
+
+        with mock.patch.object(bench, "spawn_reviewer", spawn):
+            code, out, cases, _ = self.run_bench()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(list(seen[0]), ["a-one"])
+        self.assertEqual(seen[0]["a-one"]["outcome"], "started")
+        self.assertEqual(seen[0]["a-one"]["charged"], 1.0)
+        self.assertEqual(seen[1]["a-one"]["outcome"], "caught-strict")
+        self.assertEqual(
+            (seen[1]["b-two"]["outcome"], seen[1]["b-two"]["charged"]), ("started", 1.0)
+        )
+        self.assertEqual(
+            [(c["outcome"], c["charged"]) for c in cases.values()],
+            [("caught-strict", 0.5), ("caught-strict", 0.5)],
+        )
+
+    def test_ctrl_c_charges_the_session_cap(self):
+        """AC-2: during the session the cap counts; before it, nothing does"""
+        for name in ("a-one", "b-two", "c-three"):
+            self.make_case(name)
+        self.claude(claude_entry(answer(finding())))
+        spawn, _ = self.killed_at(2)
+        with mock.patch.object(bench, "spawn_reviewer", spawn):
+            code, out, cases, results = self.run_bench()
+        self.assertEqual(code, 1, out)
+        b = cases["b-two"]
+        self.assertEqual((b["outcome"], b["cost"], b["charged"]), ("interrupted", 0, 1.0))
+        self.assertIn("cost unknown", b["message"])
+        self.assertEqual(cases["c-three"]["outcome"], "not-run")
+        self.assertEqual(results["summary"]["charged"], 1.5)
+
+        os.remove(os.path.join(self.out, "results.json"))
+        with mock.patch.object(bench, "prepare_clone", side_effect=KeyboardInterrupt):
+            code, out, cases, _ = self.run_bench()
+        self.assertEqual((cases["a-one"]["outcome"], cases["a-one"]["charged"]), ("interrupted", 0))
+        self.assertNotIn("cost unknown", cases["a-one"]["message"])
+
+    def test_resume_after_the_machine_went_down(self):
+        """AC-3, AC-5: the scored case is kept, the started one charged once and run again"""
+        for name in ("a-one", "b-two", "c-three"):
+            self.make_case(name)
+        self.claude(claude_entry(answer(finding())))
+        self.first_run_killed_at(2)
+        self.assertEqual(self.by_name(self.results_file())["b-two"]["outcome"], "started")
+        before = len(self.fake_calls("claude"))
+        code, out, err = self.resume()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(len(self.fake_calls("claude")) - before, 2)  # b-two and c-three
+        results = self.results_file()
+        cases = self.by_name(results)
+        self.assertEqual(list(cases), ["a-one", "b-two", "c-three"])
+        self.assertTrue(all(c["outcome"] == "caught-strict" for c in cases.values()))
+        b = cases["b-two"]
+        self.assertEqual((b["cost"], b["charged"]), (0.5, 1.5))
+        self.assertIn("interrupted", b["message"])
+        self.assertEqual(results["summary"]["cost"], 1.5)
+        self.assertEqual(results["summary"]["charged"], 2.5)
+        self.assertIn("caught: strict 3/3", out)
+        self.assertIn("counted against the budget $2.50", out)
+        a_line = next(line for line in out.splitlines() if line.startswith("a-one"))
+        self.assertIn("kept from the earlier run", a_line)
+
+    def test_resume_after_ctrl_c_runs_only_what_has_no_result(self):
+        """AC-3: error, malformed and missed are kept; interrupted, not-run and new cases run"""
+        self.make_case("a-err")
+        self.make_case("b-missed")
+        self.make_case("c-bad", drop=("expected.file",))
+        self.make_case("d-cut")
+        self.make_case("e-later")
+        self.claude(
+            claude_entry(is_error=True, cost=0.25, write_tests=False),
+            claude_entry(answer(finding(file="src/other.py"))),
+            claude_entry(answer(finding())),
+        )
+        spawn, _ = self.killed_at(3)
+        with mock.patch.object(bench, "spawn_reviewer", spawn):
+            self.run_bench()
+        outcomes = {n: c["outcome"] for n, c in self.by_name(self.results_file()).items()}
+        self.assertEqual(
+            outcomes,
+            {
+                "a-err": "error",
+                "b-missed": "missed",
+                "c-bad": "malformed",
+                "d-cut": "interrupted",
+                "e-later": "not-run",
+            },
+        )
+        self.make_case("f-new")
+        before = len(self.fake_calls("claude"))
+        code, out, err = self.resume()
+        self.assertEqual(code, 1, out + err)  # a-err and c-bad are still not scored
+        self.assertEqual(len(self.fake_calls("claude")) - before, 3)  # d, e, f
+        cases = self.by_name(self.results_file())
+        self.assertEqual(cases["a-err"]["outcome"], "error")
+        self.assertEqual(cases["b-missed"]["outcome"], "missed")
+        for name in ("d-cut", "e-later", "f-new"):
+            self.assertEqual(cases[name]["outcome"], "caught-strict", name)
+        self.assertEqual(cases["d-cut"]["charged"], 1.5)
+        self.assertIn("caught: strict 3/4", out)
+
+    def test_the_earlier_charge_counts_against_the_budget(self):
+        """AC-3: --budget-usd is the total of every invocation"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        self.first_run_killed_at(2)  # a-one $0.50, b-two started with its $1.00 cap
+        before = len(self.fake_calls("claude"))
+        code, out, _ = self.resume(budget="2.4")  # 1.5 spent + 1.0 cap > 2.4
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(self.fake_calls("claude")), before)
+        b = self.by_name(self.results_file())["b-two"]
+        self.assertEqual((b["outcome"], b["charged"]), ("not-run", 1.0))  # still charged once
+        code, out, _ = self.resume(budget="2.5")
+        self.assertEqual(code, 0, out)
+        results = self.results_file()
+        self.assertEqual(self.by_name(results)["b-two"]["charged"], 1.5)
+        self.assertEqual(results["summary"]["charged"], 2.0)
+        self.assertEqual(results["budget_usd"], 2.5)
+
+    def test_named_cases_narrow_the_run_and_the_rest_stay(self):
+        """AC-4"""
+        for name in ("a-one", "b-two", "c-three"):
+            self.make_case(name)
+        self.claude(claude_entry(answer(finding())))
+        spawn, _ = self.killed_at(2)  # Ctrl-C: b-two interrupted, c-three not-run in the file
+        with mock.patch.object(bench, "spawn_reviewer", spawn):
+            self.run_bench()
+        before = len(self.fake_calls("claude"))
+        code, out, _ = self.resume("b-two")
+        self.assertEqual(len(self.fake_calls("claude")) - before, 1)
+        cases = self.by_name(self.results_file())
+        self.assertEqual(
+            {n: c["outcome"] for n, c in cases.items()},
+            {"a-one": "caught-strict", "b-two": "caught-strict", "c-three": "not-run"},
+        )
+        self.assertEqual(code, 1, out)  # c-three is still not run
+        before = len(self.fake_calls("claude"))
+        self.resume("a-one")  # kept: reported, not run
+        self.assertEqual(len(self.fake_calls("claude")), before)
+
+    def test_settings_come_from_the_earlier_run(self):
+        """AC-4: what is not given is taken from results.json"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        self.first_run_killed_at(
+            2, "--model", "claude-sonnet-5-5", "--session-budget-usd", "0.6", "--line-margin", "3"
+        )
+        code, out, err = self.resume()
+        self.assertEqual(code, 0, out + err)
+        argv = self.fake_calls("claude")[-1]["argv"]
+        self.assertEqual(argv[argv.index("--model") + 1], "claude-sonnet-5-5")
+        self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "0.6")
+        results = self.results_file()
+        self.assertEqual(
+            (results["model"], results["session_budget_usd"], results["line_margin"]),
+            ("claude-sonnet-5-5", 0.6, 3),
+        )
+        self.assertEqual(results["cases_dirs"], [self.cases])
+
+    def test_refusals(self):
+        """AC-4: exit 1, the reason named, no session"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        self.first_run_killed_at(2)
+        other = os.path.join(self.tmp, "other-cases")
+        os.makedirs(other)
+        before = len(self.fake_calls("claude"))
+        for extra, needle in (
+            (["--model", "claude-opus-5-5"], "model"),
+            (["--session-budget-usd", "2"], "session cap"),
+            (["--line-margin", "5"], "line margin"),
+            (["--cases", other], "case directories"),
+            (["--out", other], "--out"),
+            (["--dry-run"], "--dry-run"),
+        ):
+            with self.subTest(needle=needle):
+                code, out, err = self.resume(*extra)
+                self.assertEqual(code, 1, out)
+                self.assertIn(needle, err)
+        text = json.dumps(dict(self.results_file(), prompt_version="0"))
+        with open(os.path.join(self.out, "results.json"), "w", encoding="utf-8") as fh:
+            fh.write(text)
+        code, _, err = self.resume()
+        self.assertEqual(code, 1)
+        self.assertIn("PROMPT_VERSION", err)
+        self.assertEqual(len(self.fake_calls("claude")), before)
+
+    def test_a_failed_write_leaves_the_previous_file_whole(self):
+        """PR #72 round 1 F1"""
+        self.make_case("a-one")
+        self.claude(claude_entry(answer(finding())))
+        self.run_bench()
+        before = self.results_file()
+        args = mock.Mock(
+            model="",
+            dry_run=False,
+            cases_dir=[self.cases],
+            budget_usd=1.0,
+            session_budget_usd=0.0,
+            line_margin=15,
+        )
+        with mock.patch.object(bench.json, "dump", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                bench._write_results(self.out, args, [])
+        self.assertEqual(self.results_file(), before)
+        self.assertEqual(sorted(os.listdir(self.out)), ["a-one", "results.json"])  # round 2 F6
+
+    def test_a_refused_rename_is_retried(self):
+        """PR #72 round 2 F6: Windows refuses the rename while a reader has the file open"""
+        self.make_case("a-one")
+        self.claude(claude_entry(answer(finding())))
+        real, calls = os.replace, []
+
+        def refused_twice(src, dst):
+            calls.append(dst)
+            if len(calls) <= 2:
+                raise PermissionError(13, "Access is denied", dst)
+            real(src, dst)
+
+        with mock.patch("revali.state.os.replace", refused_twice):
+            code, out, cases, _ = self.run_bench()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(cases["a-one"]["outcome"], "caught-strict")
+        self.assertGreater(len(calls), 2)
+        self.assertEqual(sorted(os.listdir(self.out)), ["a-one", "results.json"])
+
+    def test_a_resume_from_another_directory(self):
+        """PR #72 round 1 F2: relative --cases are recorded absolute"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.tmp)
+        spawn, restore = self.killed_at(2)
+        with mock.patch.object(bench, "spawn_reviewer", spawn):
+            with contextlib.redirect_stdout(io.StringIO()):
+                bench.main(["--cases", "cases", "--out", self.out, "--budget-usd", "10"])
+        restore()
+        self.assertEqual(self.results_file()["cases_dirs"], [os.path.abspath(self.cases)])
+        os.chdir(self.repo)
+        code, out, err = self.resume()
+        self.assertEqual(code, 0, out + err)
+        code, out, err = self.resume("--cases", self.cases)  # the same directory, given again
+        self.assertEqual(code, 0, out + err)
+
+    def test_a_mistyped_name_on_resume_is_refused(self):
+        """PR #72 round 1 F4"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        self.first_run_killed_at(2)
+        before, calls = self.results_file(), len(self.fake_calls("claude"))
+        code, _, err = self.resume("b-tow")
+        self.assertEqual(code, 1)
+        self.assertIn("no case b-tow in the earlier run or the case directories", err)
+        stray = os.path.join(self.cases, "notes")  # round 2 follow-up: a directory, no case.toml
+        os.makedirs(stray)
+        code, _, err = self.resume(stray)
+        self.assertEqual(code, 1)
+        self.assertIn("no case notes in the earlier run", err)
+        self.assertEqual(self.results_file(), before)
+        self.assertEqual(len(self.fake_calls("claude")), calls)
+
+    def test_a_tilde_in_the_resume_value_and_bad_settings(self):
+        """PR #72 round 1 follow-ups"""
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(claude_entry(answer(finding())))
+        self.first_run_killed_at(2)
+        home = os.path.dirname(self.out)
+        with mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = bench.main(
+                    ["--resume", "~/" + os.path.basename(self.out), "--budget-usd", "10"]
+                )
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        good = self.results_file()
+        for key, value in (("model", 5), ("session_budget_usd", "8"), ("line_margin", True)):
+            with self.subTest(key=key):
+                with open(os.path.join(self.out, "results.json"), "w", encoding="utf-8") as fh:
+                    json.dump(dict(good, **{key: value}), fh)
+                code, _, err = self.resume()
+                self.assertEqual(code, 1)
+                self.assertIn("not a benchmark results.json", err)
+
+    def test_no_usable_results_file_is_refused(self):
+        """AC-4"""
+        self.make_case("a-one")
+        os.makedirs(self.out)
+        code, _, err = self.resume()
+        self.assertEqual(code, 1)
+        self.assertIn("results.json", err)
+        for text in ("{not json", "[]", '{"cases": "x"}'):
+            with self.subTest(text=text):
+                with open(os.path.join(self.out, "results.json"), "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                code, _, err = self.resume()
+                self.assertEqual(code, 1)
+                self.assertIn("results.json", err)
+        with contextlib.redirect_stdout(io.StringIO()):
+            bench.main(["--dry-run", "--cases", self.cases, "--out", self.out])
+        code, _, err = self.resume()
+        self.assertEqual(code, 1)
+        self.assertIn("dry run", err)
+        self.assertEqual(self.fake_calls("claude"), [])
 
 
 class ScoreUnit(unittest.TestCase):

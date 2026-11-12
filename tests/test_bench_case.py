@@ -8,6 +8,7 @@ import io
 import json
 import os
 import sys
+from unittest import mock
 
 from tests.helpers import ROOT, RepoCase, git
 
@@ -263,6 +264,80 @@ class Refusals(Archive):
             )
         self.assertEqual(code, 1)
         self.assertIn("refused: round 1 has no finding F9", err.getvalue())
+
+    def test_an_output_that_cannot_be_written(self):
+        """M3.3.3 AC-6: a parent that is a file, a write that fails half way"""
+        d = self.archive()
+        os.makedirs(self.out)
+        blocker = os.path.join(self.out, "file")
+        self.write(blocker, "x")
+        with self.assertRaises(builder.BuildError) as cm:
+            builder.build(d, 1, "F1", os.path.join(blocker, "c"), repo=self.repo)
+        self.assertIn("cannot write", str(cm.exception))
+        real, calls = bench._write, []
+
+        def second_fails(path, text):
+            calls.append(path)
+            if len(calls) == 2:
+                raise PermissionError(13, "Permission denied", path)
+            real(path, text)
+
+        with mock.patch.object(bench, "_write", second_fails):
+            self.refused(d, "Permission denied")
+        self.assertEqual(len(calls), 2)
+
+    def test_archive_fields_of_the_wrong_type(self):
+        """M3.3.3 AC-6"""
+        for key, value, needle in (
+            ("repo", ["owner/sample"], "state.json's repo"),
+            ("branch", 7, "state.json's branch"),
+            ("base", {"name": "main"}, "state.json's base"),
+        ):
+            with self.subTest(key=key):
+                self.root = os.path.join(self.tmp, "archive-" + key)
+                d = self.archive()
+                with open(os.path.join(d, "state.json"), encoding="utf-8") as fh:
+                    state = json.load(fh)
+                state[key] = value
+                self.write(os.path.join(d, "state.json"), state)
+                self.refused(d, needle)
+        for head, needle in ((12345, "head_sha"), (None, "head_sha")):
+            with self.subTest(head=head):
+                self.root = os.path.join(self.tmp, "archive-head-%s" % head)
+                d = self.archive()
+                path = os.path.join(d, "review-1.json")
+                with open(path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                data["head_sha"] = head
+                self.write(path, data)
+                self.refused(d, needle)
+        self.root = os.path.join(self.tmp, "archive-data")
+        d = self.archive()
+        path = os.path.join(d, "review-1.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["data"] = "not an object"
+        self.write(path, data)
+        self.refused(d, "review-1.json")
+
+    def test_the_command_line_never_shows_a_traceback(self):
+        """M3.3.3 AC-6: build and --list"""
+        d = self.archive()
+        with open(os.path.join(d, "state.json"), encoding="utf-8") as fh:
+            state = json.load(fh)
+        state["base"] = 3
+        self.write(os.path.join(d, "state.json"), state)
+        self.write(os.path.join(d, "review-2.json"), {"data": ["not", "an", "object"]})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = builder.main(
+                [d, "--round", "1", "--finding", "F1", "--out", os.path.join(self.out, "c")]
+            )
+            self.assertEqual(builder.main(["--list", self.root]), 0)
+        self.assertEqual(code, 1)
+        self.assertIn("refused: state.json's base", err.getvalue())
+        self.assertIn("skipped round 1 of %s" % d, err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
 
 
 class Candidates(Archive):

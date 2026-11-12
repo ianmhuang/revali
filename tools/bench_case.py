@@ -59,7 +59,18 @@ def _load(path: str) -> dict:
 
 
 def review(archive: str, round_no: int) -> dict:
-    return _load(os.path.join(archive, "review-%d.json" % round_no))
+    """review-N.json; BuildError when its `data` is there but not an object."""
+    name = "review-%d.json" % round_no
+    data = _load(os.path.join(archive, name))
+    if not isinstance(data.get("data") or {}, dict):
+        raise BuildError("%s: data is not a JSON object" % name)
+    return data
+
+
+def findings(data: dict) -> list:
+    """The findings of one review-N.json; a value that is not a list holds none."""
+    found = (data.get("data") or {}).get("findings")
+    return [f for f in found if isinstance(f, dict)] if isinstance(found, list) else []
 
 
 def qualifies(f: dict) -> bool:
@@ -77,10 +88,11 @@ def qualifies(f: dict) -> bool:
 
 def resolved_next(archive: str, round_no: int, fid: str) -> bool:
     """Whether review round_no + 1 lists the finding as resolved."""
-    path = os.path.join(archive, "review-%d.json" % (round_no + 1))
-    if not os.path.isfile(path):
+    if not os.path.isfile(os.path.join(archive, "review-%d.json" % (round_no + 1))):
         return False
-    prev = (_load(path).get("data") or {}).get("previous_findings") or []
+    prev = (review(archive, round_no + 1).get("data") or {}).get("previous_findings") or []
+    if not isinstance(prev, list):
+        return False
     return any(
         isinstance(p, dict) and p.get("id") == fid and p.get("status") == "resolved" for p in prev
     )
@@ -99,9 +111,8 @@ def first_candidate(archive: str) -> Optional[Tuple[int, str]]:
     """(round, finding id) of the first qualifying, resolved finding of the earliest round."""
     for n in rounds(archive):
         try:
-            data = review(archive, n)
-            for f in (data.get("data") or {}).get("findings") or []:
-                if isinstance(f, dict) and qualifies(f) and resolved_next(archive, n, f.get("id")):
+            for f in findings(review(archive, n)):
+                if qualifies(f) and resolved_next(archive, n, f.get("id")):
                     return n, f["id"]
         except BuildError as exc:  # the order changes: say so
             print("skipped round %d of %s: %s" % (n, archive, exc), file=sys.stderr)
@@ -205,15 +216,11 @@ def build(
     missing = [k for k in ("repo", "branch", "base", "pr_number") if not state.get(k)]
     if missing:
         raise BuildError("state.json lacks %s" % ", ".join(missing))
+    for key in ("repo", "branch", "base"):
+        if not isinstance(state[key], str):
+            raise BuildError("state.json's %s is %r, not a string" % (key, state[key]))
     data = review(archive, round_no)
-    finding = next(
-        (
-            f
-            for f in (data.get("data") or {}).get("findings") or []
-            if isinstance(f, dict) and f.get("id") == fid
-        ),
-        None,
-    )
+    finding = next((f for f in findings(data) if f.get("id") == fid), None)
     if finding is None:
         raise BuildError("round %d has no finding %s" % (round_no, fid))
     if not qualifies(finding):
@@ -224,8 +231,8 @@ def build(
         )
     if not resolved_next(archive, round_no, fid):
         raise BuildError("round %d does not mark %s resolved" % (round_no + 1, fid))
-    head = data.get("head_sha") or ""
-    if not re.fullmatch(r"[0-9a-f]{40}", head):
+    head = data.get("head_sha")
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
         raise BuildError("review-%d.json has no head_sha" % round_no)
     prompt_path = os.path.join(archive, "logs", "prompt-r%d-1.md" % round_no)
     try:
@@ -269,11 +276,18 @@ def build(
             s(fid),
         )
     )
-    os.makedirs(out)
-    bench._write(os.path.join(out, bench.CASE_FILE), toml)
-    bench._write(os.path.join(out, bench.CHANGE_FILE), change_md)
-    if config_text is not None:
-        bench._write(os.path.join(out, bench.CONFIG_FILE), config_text)
+    try:
+        os.makedirs(out)
+    except OSError as exc:
+        raise BuildError("cannot write %s: %s" % (out, exc)) from exc
+    try:
+        bench._write(os.path.join(out, bench.CASE_FILE), toml)
+        bench._write(os.path.join(out, bench.CHANGE_FILE), change_md)
+        if config_text is not None:
+            bench._write(os.path.join(out, bench.CONFIG_FILE), config_text)
+    except OSError as exc:
+        bench._rmtree(out)
+        raise BuildError("cannot write %s: %s" % (out, exc)) from exc
     try:
         bench.load_case(out)
     except bench.CaseError as exc:
@@ -310,7 +324,7 @@ def main(argv=None) -> int:
         path = build(
             args.archive, args.round, args.finding, args.out, args.repo, args.request, args.config
         )
-    except BuildError as exc:
+    except (BuildError, OSError) as exc:  # OSError: the temporary clone's directory
         print("refused: %s" % exc, file=sys.stderr)
         return 1
     print("case written: %s" % path)
