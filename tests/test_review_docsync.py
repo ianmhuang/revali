@@ -8,6 +8,7 @@ import glob
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import tomllib
 import unittest
@@ -87,6 +88,20 @@ def usage_block(readme):
     return section.split("```", 2)[1]
 
 
+def repository_markdown():
+    """AC-3 is about the Markdown files in the repository: what git tracks or would add.
+    None when ROOT is not a git checkout, so the caller walks the tree instead."""
+    listing = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+    try:
+        done = subprocess.run(
+            listing + ["--", "*.md"], cwd=ROOT, capture_output=True, check=True, timeout=60
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    names = done.stdout.decode("utf-8", "replace").split("\0")
+    return sorted(n for n in names if n and os.path.exists(os.path.join(ROOT, *n.split("/"))))
+
+
 class TreeCase(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="revali review sync ")
@@ -124,7 +139,11 @@ class ThisRepository(unittest.TestCase):
         self.assertEqual(gone, [])
 
     def test_no_markdown_file_is_outside_the_graph(self):
-        self.assertEqual(list(docgraph.orphans(ROOT, self.graph, exclude=NOT_COUNTED)), [])  # AC-3
+        files = repository_markdown()
+        if files is not None:
+            self.assertIn("README.md", files)
+        found = docgraph.orphans(ROOT, self.graph, exclude=NOT_COUNTED, files=files)
+        self.assertEqual(list(found), [])  # AC-3
 
     def test_every_key_of_defaults_toml_is_named(self):
         docs = [read(p) for p in KEY_DOCS]
@@ -169,9 +188,9 @@ class ThisRepository(unittest.TestCase):
         self.assertIn("run", names)
         self.assertIn("merge", names)
         usage = usage_block(read("README.md"))
-        # the command as a word of its own: `--version` is a flag, not the `version` command
+        # the command as a token of its own: `--version` is a flag and `<branch>` an argument
         missing = [
-            n for n in names if not re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(n), usage)
+            n for n in names if not re.search(r"(?<![^\s|])%s(?![^\s|])" % re.escape(n), usage)
         ]
         self.assertEqual(missing, [])  # AC-5
 
@@ -184,7 +203,7 @@ class ThisRepository(unittest.TestCase):
         spans = {span for d in docs for span in SPAN.findall(d)}
         missing = [s for s in STAGES if "`%s`" % s not in spans]
         self.assertEqual(missing, [])  # AC-6
-        self.assertEqual(list(docgraph.missing_names(list(STAGES), docs)), [])
+        self.assertEqual(list(docgraph.missing_names(list(STAGES), docs, exact=True)), [])
 
 
 class BrokenInputs(TreeCase):
@@ -229,6 +248,26 @@ class BrokenInputs(TreeCase):
         self.assertEqual(list(docgraph.missing_names(["needs_human", "merged"], texts)), ["merged"])
         self.assertEqual(list(docgraph.missing_names(["needs_human"], texts)), [])
 
+    def test_a_stage_inside_a_longer_span_is_still_missing(self):
+        # AC-6: the stage in backticks, not a key or a path that happens to hold the word
+        texts = ["`[validate] effort` and `logs/issue-1-merged.md`, then `review` on its own"]
+        self.assertEqual(
+            list(docgraph.missing_names(["validate", "merged", "review"], texts, exact=True)),
+            ["validate", "merged"],
+        )
+
+    def test_given_the_repository_files_only_those_are_candidates(self):
+        self.put("README.md", "[a](docs/a.md)\n")
+        self.put("docs/a.md", "x\n")
+        self.put("docs/lost.md", "in the repository, linked from nowhere\n")
+        self.put("venv/lib/site/README.md", "on disk, ignored by git\n")
+
+        graph = docgraph.build(self.root, ["README.md"])
+        tracked = ["README.md", "docs/a.md", "docs/lost.md", "revali/docgraph.py"]
+        tracked += ["tests/fixtures/sample.md", "bench/cases/case-1/change.md"]
+        found = docgraph.orphans(self.root, graph, exclude=NOT_COUNTED, files=tracked)
+        self.assertEqual(list(found), ["docs/lost.md"])
+
     def test_a_name_inside_a_longer_word_does_not_count(self):
         texts = ["`max_diff_lines_total` and `premerged`"]
         self.assertEqual(
@@ -258,6 +297,12 @@ class BrokenInputs(TreeCase):
         self.assertEqual(
             list(author.missing_commands(["run", "zap"], "python revali.py run   # detached\n")),
             ["zap"],
+        )
+        # AC-5: a flag or an argument that holds the command's name is not the command
+        usage = "python revali.py status | clean <branch>\npython revali.py --version\n"
+        self.assertEqual(
+            list(author.missing_commands(["status", "clean", "version", "branch"], usage)),
+            ["version", "branch"],
         )
 
 

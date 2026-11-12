@@ -137,6 +137,48 @@ class NotFollowed(TreeCase):
         self.assertEqual(linkers(found["a.md"]), ["README.md", "a.md", "b.md"])
 
 
+class RootBoundary(TreeCase):
+    """Round 2: a node's path is relative to the repository root, so nothing outside the
+    root is a node, and a target starting with "/" is read from the root."""
+
+    def test_a_link_that_leaves_the_root_is_reported_and_not_followed(self):
+        self.put("elsewhere/README.md", "[more](more.md) [gone](gone-outside.md)\n")
+        self.put("elsewhere/more.md", "x\n")
+        self.put("repo/README.md", "[up](../elsewhere/README.md)\n[in](docs/a.md)\n")
+        self.put("repo/docs/a.md", "x\n")
+
+        graph = docgraph.build(os.path.join(self.root, "repo"), ["README.md"])
+        self.assertEqual(set(nodes(graph)), {"README.md", "docs/a.md"})
+
+        messages = docgraph.broken_links(graph)
+        self.assertEqual(len(messages), 1, messages)  # the page outside is not read
+        self.assertRegex(messages[0], r"README\.md\D{0,10}1(?!\d)")
+        self.assertIn("../elsewhere/README.md", messages[0])
+
+    def test_a_target_starting_with_a_slash_is_relative_to_the_root(self):
+        self.put("README.md", "[a](docs/a.md)\n")
+        self.put("docs/a.md", "[licence](/LICENSE) [gone](/docs/gone.md)\n")
+        self.put("LICENSE", "MIT\n")
+
+        graph = self.build("README.md")
+        found = nodes(graph)
+        self.assertEqual(set(found), {"README.md", "docs/a.md", "LICENSE"})
+        self.assertEqual(linkers(found["LICENSE"]), ["docs/a.md"])
+
+        messages = docgraph.broken_links(graph)
+        self.assertEqual(len(messages), 1, messages)
+        self.assertRegex(messages[0], r"docs/a\.md\D{0,10}1(?!\d)")
+        self.assertIn("gone.md", messages[0])
+
+    def test_a_footnote_definition_is_not_a_link(self):
+        self.put("README.md", "Text[^1] and [a][ref].\n\n[^1]: See the note below\n[ref]: a.md\n")
+        self.put("a.md", "x\n")
+
+        graph = self.build("README.md")
+        self.assertEqual(set(nodes(graph)), {"README.md", "a.md"})
+        self.assertEqual(docgraph.broken_links(graph), [])
+
+
 class MissingTarget(TreeCase):
     def test_a_missing_file_is_reported_with_page_and_line_and_not_followed(self):
         # the page with the bad link is two links from the root (AC-2: any page of the graph)
