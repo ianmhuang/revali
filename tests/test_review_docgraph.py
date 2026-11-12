@@ -178,6 +178,26 @@ class RootBoundary(TreeCase):
         self.assertEqual(set(nodes(graph)), {"README.md", "a.md"})
         self.assertEqual(docgraph.broken_links(graph), [])
 
+    def test_a_target_on_another_drive_or_a_share_is_reported_not_raised(self):
+        # Round 3: on Windows the first target is a UNC path and the second another drive
+        # (the root check cannot compare them with the root); elsewhere both are names of
+        # files that do not exist. Either way each is reported once and the walk goes on.
+        self.put(
+            "README.md",
+            "[share](" + r"\\server\docs\x.md" + ")\n[drive](/Z:/elsewhere/x.md)\n[ok](a.md)\n",
+        )
+        self.put("a.md", "x\n")
+
+        graph = self.build("README.md")
+        self.assertEqual(set(nodes(graph)), {"README.md", "a.md"})
+
+        messages = sorted(docgraph.broken_links(graph), key=lambda m: "elsewhere" in m)
+        self.assertEqual(len(messages), 2, messages)
+        self.assertRegex(messages[0], r"README\.md\D{0,10}1(?!\d)")
+        self.assertIn("server", messages[0])
+        self.assertRegex(messages[1], r"README\.md\D{0,10}2(?!\d)")
+        self.assertIn("elsewhere", messages[1])
+
 
 class MissingTarget(TreeCase):
     def test_a_missing_file_is_reported_with_page_and_line_and_not_followed(self):

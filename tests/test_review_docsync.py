@@ -93,13 +93,16 @@ def repository_markdown():
     None when ROOT is not a git checkout, so the caller walks the tree instead."""
     listing = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
     try:
-        done = subprocess.run(
-            listing + ["--", "*.md"], cwd=ROOT, capture_output=True, check=True, timeout=60
-        )
+        done = subprocess.run(listing, cwd=ROOT, capture_output=True, check=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return None
+    # the extension is matched here, in any case: a pathspec `*.md` would skip `NOTES.MD`
     names = done.stdout.decode("utf-8", "replace").split("\0")
-    return sorted(n for n in names if n and os.path.exists(os.path.join(ROOT, *n.split("/"))))
+    return sorted(
+        n
+        for n in names
+        if n.lower().endswith(".md") and os.path.exists(os.path.join(ROOT, *n.split("/")))
+    )
 
 
 class TreeCase(unittest.TestCase):
