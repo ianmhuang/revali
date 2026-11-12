@@ -54,7 +54,8 @@ class Workflow(unittest.TestCase):
         self.assertRegex(concurrency, r"cancel-in-progress:\s*true")
 
     def test_matrix_legs(self):
-        # AC-2; ci/windows-job AC-1 added the Windows leg
+        # AC-2; ci/windows-job AC-1 added the Windows leg; ci-windows-shards AC-3 runs it as
+        # four shards
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(target, ["py311"])
         self.assertEqual(
@@ -62,10 +63,43 @@ class Workflow(unittest.TestCase):
             [
                 ("ubuntu-latest", "3.11"),
                 ("ubuntu-latest", "3.x"),
-                ("windows-latest", "3.x"),
-            ],
+            ]
+            + [("windows-latest", "3.x")] * 4,
         )
         self.assertRegex(self.text, r"fail-fast:\s*false")
+
+    def test_the_windows_shards_cover_the_suite_once(self):
+        # ci-windows-shards AC-3, AC-4: shards 1..N of one N, each once, only on Windows;
+        # the suite step hands the leg's shard to the runner, and the job name shows it
+        windows = [leg for leg in legs(self.text) if leg["os"].startswith("windows")]
+        self.assertEqual({leg.get("shards") for leg in windows}, {"4"})
+        self.assertEqual(sorted(int(leg["shard"]) for leg in windows), [1, 2, 3, 4])
+        others = [leg for leg in legs(self.text) if not leg["os"].startswith("windows")]
+        self.assertFalse([leg for leg in others if "shard" in leg or "shards" in leg])
+        job = block(block(self.text, "jobs"), "  test")
+        self.assertRegex(
+            job.split("steps:", 1)[0],
+            r"RUN_PARALLEL_SHARD: \$\{\{ matrix\.shard && "
+            r"format\('\{0\}/\{1\}', matrix\.shard, matrix\.shards\) \|\| '' \}\}",
+        )
+        self.assertIn(
+            "format(' / shard {0} of {1}', matrix.shard, matrix.shards)", job.splitlines()[0]
+        )
+
+    def test_a_broken_shard_list_fails_the_coverage_check(self):
+        # ci-windows-shards AC-4: the check above, fed a workflow whose shards are wrong
+        good = self.text
+        broken = {
+            "a shard missing": good.replace("shard: 4\n", "shard: 3\n"),
+            "two Ns": good.replace("shards: 4\n", "shards: 5\n", 1),
+        }
+        for what, text in broken.items():
+            with self.subTest(what=what):
+                self.assertNotEqual(text, good)
+                self.text = text
+                with self.assertRaises(AssertionError):
+                    self.test_the_windows_shards_cover_the_suite_once()
+        self.text = good
 
     def test_a_hung_leg_ends_before_merge_stops_waiting(self):
         # ci/windows-job AC-2: the job's timeout-minutes is below revali's own

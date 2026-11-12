@@ -37,7 +37,10 @@ new_test = "python3 -m unittest {files}"
 [merge]
 method = "squash"
 # The Windows CI leg (job time) took 28, 37 and 44 minutes on the same runner image
-# (2026-11-11); the docs and the workflow point here instead of repeating the figures.
+# (2026-11-11), as one job. Since ci-windows-shards (PR #74) it runs as four shard jobs in
+# parallel: 11.1, 10.1, 9.6 and 12.6 minutes (run 43141327194, 2026-11-12), so merge waits
+# for the slowest, about 13. The docs and the workflow point here instead of repeating the
+# figures.
 # Keep this above the job's timeout-minutes in .github/workflows/test.yml, so a hung leg is
 # cancelled and reported as failed before merge stops waiting.
 checks_timeout_min = 75

@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from tests.helpers import ROOT, rmtree_force
+from tests.run_parallel import SHARD_ENV, select_shard
 
 RUNNER = os.path.join(ROOT, "tests", "run_parallel.py")
 
@@ -73,7 +74,10 @@ class Tree:
             fh.write(text)
 
     def run(self, *extra, env=None):
-        environ = {k: v for k, v in os.environ.items() if k != "RUN_PARALLEL_JOBS"}
+        environ = {k: v for k, v in os.environ.items() if k not in ("RUN_PARALLEL_JOBS", SHARD_ENV)}
+        # the output is read back as UTF-8, so the child writes UTF-8 whatever the console's
+        # code page (a refused "١/4" is echoed as is, not as an escape)
+        environ["PYTHONIOENCODING"] = "utf-8"
         environ.update(env or {})
         res = subprocess.run(
             [sys.executable, RUNNER, "-s", self.tests, "-t", self.root] + list(extra),
@@ -225,6 +229,162 @@ class RunParallel(unittest.TestCase):
         code, out = t.run("tests.test_fail")
         self.assertEqual(code, 1, out)
         self.assertRegex(last_lines(out)[0], r"^Ran 2 tests in ")
+
+
+MORE = """
+import unittest
+
+
+class ACase(unittest.TestCase):
+    def test_a1(self):
+        pass
+
+    def test_a2(self):
+        pass
+
+    def test_a3(self):
+        pass
+
+
+class BCase(unittest.TestCase):
+    def test_b1(self):
+        pass
+
+
+class CCase(unittest.TestCase):
+    def test_c1(self):
+        pass
+
+    def test_c2(self):
+        pass
+"""
+
+NO_SHARD_IN_WORKERS = """
+import os
+import unittest
+
+
+class EnvCase(unittest.TestCase):
+    def test_the_shard_variable_stops_at_the_runner(self):
+        self.assertNotIn("RUN_PARALLEL_SHARD", os.environ)
+"""
+
+
+def listed(out):
+    return [line for line in out.splitlines() if line.strip()]
+
+
+class Shards(unittest.TestCase):
+    """feature/ci-windows-shards AC-1, AC-2"""
+
+    def tree(self, **modules):
+        t = Tree(modules)
+        self.addCleanup(t.cleanup)
+        return t
+
+    def test_the_shards_of_any_n_hold_every_test_once(self):
+        t = self.tree(test_pass=PASSING, test_fail=FAILING, test_more=MORE)
+        code, out = t.run("--list")
+        self.assertEqual(code, 0, out)
+        everything = listed(out)
+        self.assertEqual(len(everything), 12)
+        for n in range(1, 6):
+            parts = []
+            for k in range(1, n + 1):
+                code, out = t.run("--list", "--shard", "%d/%d" % (k, n))
+                self.assertEqual(code, 0, out)
+                parts.append(listed(out))
+            with self.subTest(n=n):
+                flat = [tid for part in parts for tid in part]
+                self.assertEqual(sorted(flat), sorted(everything))  # all, and none twice
+                for part in parts:  # whole classes
+                    classes = {tid.rsplit(".", 1)[0] for tid in part}
+                    for other in parts:
+                        if other is not part:
+                            self.assertFalse(classes & {x.rsplit(".", 1)[0] for x in other})
+
+    def test_a_shard_runs_its_part_and_says_so(self):
+        t = self.tree(test_pass=PASSING, test_more=MORE)
+        expected = {}
+        for k in (1, 2):
+            code, out = t.run("--list", "--shard", "%d/2" % k)
+            expected[k] = len(listed(out))
+        self.assertEqual(expected[1] + expected[2], 10)
+        code, out = t.run("-j", "2", "--shard", "2/2")
+        self.assertEqual(code, 0, out)
+        ran, verdict = last_lines(out)
+        self.assertRegex(ran, r"^Ran %d tests in \d+\.\d+s \(shard 2 of 2\)$" % expected[2])
+        self.assertIn("%d of 10 tests in" % expected[2], out)
+        # the variable does the same, and the flag beats it
+        code, env_out = t.run("-j", "2", env={SHARD_ENV: "2/2"})
+        self.assertEqual(last_lines(env_out)[0].split(" in ")[0], ran.split(" in ")[0])
+        code, out = t.run("-j", "2", "--shard", "1/2", env={SHARD_ENV: "2/2"})
+        self.assertRegex(last_lines(out)[0], r"^Ran %d tests in .*\(shard 1 of 2\)$" % expected[1])
+        code, out = t.run("-j", "2", env={SHARD_ENV: "  "})  # blank: the whole suite
+        self.assertRegex(last_lines(out)[0], r"^Ran 10 tests in \d+\.\d+s$")
+
+    def test_a_broken_import_is_reported_by_shard_one_only(self):
+        t = self.tree(test_pass=PASSING, test_more=MORE, test_broken=BROKEN)
+        results = {}
+        for k in (1, 2, 3):
+            results[k] = t.run("--shard", "%d/3" % k)
+        self.assertEqual(results[1][0], 1, results[1][1])
+        self.assertIn("module_that_does_not_exist_anywhere", results[1][1])
+        for k in (2, 3):
+            code, out = results[k]
+            self.assertEqual(code, 0, out)
+            self.assertNotIn("module_that_does_not_exist_anywhere", out)
+
+    def test_a_shard_with_no_class_runs_nothing(self):
+        t = self.tree(test_pass=PASSING)  # two classes
+        code, out = t.run("--shard", "3/4")
+        self.assertEqual(code, 0, out)
+        ran, verdict = last_lines(out)
+        self.assertRegex(ran, r"^Ran 0 tests in .*\(shard 3 of 4\)$")
+        self.assertEqual(verdict, "OK")
+
+    def test_a_bad_value_is_refused_before_anything_runs(self):
+        t = self.tree(test_pass=PASSING)
+        for bad in ("0/4", "5/4", "2", "a/b", "1_0/4", "1/0", "2/4/6", "-1/4", "١/4", ""):
+            for how in ("flag", "env"):
+                with self.subTest(value=bad, how=how):
+                    if how == "flag":
+                        code, out = t.run("--shard=" + bad)  # "-1/4" is a value, not a flag
+                        source = "--shard"
+                    else:
+                        if not bad.strip():
+                            continue  # blank in the variable means unset
+                        code, out = t.run(env={SHARD_ENV: bad})
+                        source = SHARD_ENV
+                    self.assertEqual(code, 1, out)
+                    self.assertIn(source, out)
+                    self.assertIn(repr(bad), out)
+                    self.assertNotIn("worker(s)", out)
+
+    def test_the_variable_is_not_passed_to_the_workers(self):
+        t = self.tree(test_env=NO_SHARD_IN_WORKERS)
+        code, out = t.run(env={SHARD_ENV: "1/1"})
+        self.assertEqual(code, 0, out)
+        self.assertRegex(last_lines(out)[0], r"^Ran 1 tests in .*\(shard 1 of 1\)$")
+
+    def test_this_repositorys_suite_splits_into_shards_that_hold_it_once(self):
+        res = subprocess.run(
+            [sys.executable, RUNNER, "--list"],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=ROOT,
+            env={k: v for k, v in os.environ.items() if k != SHARD_ENV},
+        )
+        self.assertEqual(res.returncode, 0, res.stderr)
+        everything = listed(res.stdout)
+        self.assertGreater(len(everything), 1000)
+        for n in range(1, 6):
+            with self.subTest(n=n):
+                flat = [tid for k in range(1, n + 1) for tid in select_shard(everything, k, n)]
+                self.assertEqual(sorted(flat), sorted(everything))
+                if n <= 4:  # every shard CI runs has work
+                    self.assertTrue(all(select_shard(everything, k, n) for k in range(1, n + 1)))
 
 
 class RepositoryWiring(unittest.TestCase):

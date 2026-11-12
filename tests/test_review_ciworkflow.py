@@ -131,11 +131,13 @@ class Trigger(WorkflowCase):
 
 
 class Matrix(WorkflowCase):
-    def test_three_legs(self):
+    def test_legs(self):
         # AC-2 (amended after round 1, author's change to this reviewer test): ubuntu on
         # the pyproject target and on the latest 3.x; the windows and macos legs were dropped.
         # ci/windows-job AC-3 (author's change, renamed from test_two_legs): windows on the
         # latest 3.x is back.
+        # ci-windows-shards AC-4 (author's change, renamed from test_three_legs): the
+        # Windows leg runs as four jobs, one shard of the suite each.
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(len(target), 1)
         m = re.fullmatch(r"py(\d)(\d+)", target[0])
@@ -145,8 +147,8 @@ class Matrix(WorkflowCase):
             [
                 ("ubuntu-latest", pinned),
                 ("ubuntu-latest", "3.x"),
-                ("windows-latest", "3.x"),
-            ],
+            ]
+            + [("windows-latest", "3.x")] * 4,
         )
 
     def test_legs_drive_runner_and_interpreter(self):
@@ -165,8 +167,11 @@ class Matrix(WorkflowCase):
 
 class Lint(WorkflowCase):
     def flag(self):
-        """The one matrix key besides os / python, and the legs carrying it."""
-        extra = {k for leg in self.legs for k in leg if k not in ("os", "python")}
+        """The one matrix key besides os / python, and the legs carrying it (the shard keys
+        of the Windows legs, ci-windows-shards, are not a lint marker; author's change)."""
+        extra = {
+            k for leg in self.legs for k in leg if k not in ("os", "python", "shard", "shards")
+        }
         self.assertEqual(len(extra), 1, "one marker picks the lint leg: %r" % extra)
         flag = extra.pop()
         return flag, [leg for leg in self.legs if leg.get(flag) not in (None, "", "false")]
