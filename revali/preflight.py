@@ -249,15 +249,20 @@ def check_github(ctx: Context) -> None:
 
 
 def check_runner(ctx: Context) -> None:
-    """The sandbox runner must be reachable before anything is pushed (skipped on dry runs)."""
+    """The sandbox runner of every listed platform must be reachable before anything is
+    pushed, probed in list order (skipped on dry runs). With more than one platform the
+    first that cannot start is named (`validate.windows: ...`)."""
     if ctx.dry_run:
         return
     from revali.runners import probe_runner
 
-    plat = ctx.cfg.validate.platforms[ctx.cfg.project.platforms[0]]
-    problem = probe_runner(plat, log=ctx.detail)
-    if problem:
-        raise Stop(EXIT_ERROR, problem)
+    names = ctx.cfg.project.platforms
+    for name in names:
+        problem = probe_runner(ctx.cfg.validate.platforms[name], log=ctx.detail)
+        if problem:
+            raise Stop(
+                EXIT_ERROR, problem if len(names) == 1 else "validate.%s: %s" % (name, problem)
+            )
 
 
 def check_base(ctx: Context) -> None:

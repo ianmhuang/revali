@@ -10,7 +10,7 @@
 [project]
 config_version = 1
 base_branch = "main"              # empty = the repo's default branch (via gh)
-platforms = ["linux"]             # v1.0 supports linux only
+platforms = ["linux"]             # linux and/or windows, each with a [validate.<name>] table
 lint = ""                         # e.g. "ruff check . && black --check ."; also run on the reviewer's
                                   # test files before they are committed; a failure blocks the run
 format = ""                       # e.g. "black {files}"; formats the reviewer's new test files

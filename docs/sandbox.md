@@ -124,7 +124,8 @@ sets neither limit.
 `runner = "local"` uses a git worktree on the host with no isolation.
 
 `runner = "ssh"` with `host = "<destination>"` does the same as `wsl` on a Linux
-host reached over ssh: the branch travels as a git bundle (the host needs no
+host reached over ssh (a Windows host only with bash as its ssh shell; see
+[docs/configuration.md](configuration.md)): the branch travels as a git bundle (the host needs no
 GitHub access), the sandbox script and the step commands go up with scp, the
 per-step logs come back the same way, and the staging directories under
 `sandbox_dir` are removed afterwards (the repository's directory name is

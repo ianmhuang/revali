@@ -19,6 +19,21 @@ Unknown keys are errors in every layer. `[review] engine` and
 (`prompt`, `schema`, `checklist_builtin`) are relative to the project
 root; empty means the file revali ships with. `[validate.platform]` in
 any layer sets the defaults for every `[validate.<name>]` table.
+`[project] platforms` lists `linux`, `windows` or both, each with its own
+`[validate.<name>]` table; any other name, or a name listed twice, is a
+configuration error. A `windows` table needs `runner = "local"` on a
+Windows host or `runner = "ssh"`: `runner = "wsl"` (the default) is
+refused there, since WSL runs Linux, and so is `local` on a host that is
+not Windows. The ssh runner hands its commands to the remote login shell,
+so a Windows machine over ssh needs bash as sshd's default shell (Git Bash,
+say) with git and coreutils `timeout` on its PATH, which is what
+preflight's probe checks; revali does not check the remote system itself,
+and has not been run against such a host. A `linux` table takes any
+runner, `local` on a Windows host included. Preflight probes the runner of
+every listed platform in list order (a dry run probes none) and stops at
+the first that cannot start, naming it. This version validates on the
+first platform only: with more than one listed, preflight prints a note
+naming the platforms that are not validated.
 For `runner = "wsl"`, a `wsl.exe` call whose output carries one of
 `wsl_transient_errors` (default `["Wsl/Service/WSAETIMEDOUT"]`, matched after
 the NUL bytes of wsl.exe's UTF-16 messages are removed) is tried again after
