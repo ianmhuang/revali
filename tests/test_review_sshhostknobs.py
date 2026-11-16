@@ -100,6 +100,17 @@ class Down(KnobCase):
         self.assertEqual(up.returncode, 0, up.stderr)
         self.assertTrue(os.path.isfile(os.path.join(self.work, "down.txt")))
 
+    def test_scp_naming_no_host_is_refused_by_one_only(self):
+        # round 2: today's value keeps today's reach, a call that names no remote host
+        # included; a host list acts on the hosts it names, and this call names none
+        with open(os.path.join(self.work, "up.txt"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("payload\n")
+        every = self.scp("up.txt", "copy.txt", REVALI_FAKE_SSH_DOWN="1")
+        self.assertEqual(every.returncode, 255, every.stderr)
+        named = self.scp("up.txt", "copy.txt", REVALI_FAKE_SSH_DOWN="winbox")
+        self.assertNotEqual(named.returncode, 255, named.stderr)
+        self.assertNotIn("Connection refused", named.stderr)
+
 
 class BashFails(KnobCase):
     def test_one_still_fails_bash_on_every_host(self):
