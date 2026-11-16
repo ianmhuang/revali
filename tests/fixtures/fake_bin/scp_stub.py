@@ -63,7 +63,8 @@ def main(argv):
         return 1
     srcs, dst = rest[:-1], rest[-1]
     hosts = {s.split(":", 1)[0] for s in srcs + [dst] if is_remote(s)}
-    if any(knob("REVALI_FAKE_SSH_DOWN", h) for h in hosts):
+    # `1` refuses every call, one naming no remote host included, as before host lists
+    if any(knob("REVALI_FAKE_SSH_DOWN", h) for h in hosts or {""}):
         print("ssh: connect to host: Connection refused", file=sys.stderr)
         return 255
     if is_remote(dst):

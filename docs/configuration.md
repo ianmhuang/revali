@@ -54,7 +54,10 @@ sandbox; see [docs/sandbox.md](sandbox.md).
 `[validate] reuse_baseline` (default true) lets validation skip the
 existing suite (`test`) when the baseline already ran it on the same tree:
 every commit since the baseline carries the reviewer's `Revali-Round`
-trailer and touches only `test_dir`. A fix round, an author commit or a
+trailer and touches only `test_dir`, and the baseline ran on every platform
+listed now (a state file that does not record the platforms, written
+before validation covered every platform, counts as the first platform
+only). A fix round, an author commit or a
 rebase brings the full suite back; `revali reset` makes the next run redo
 the baseline, after which validation may reuse it again. Set the key to
 false to run the suite every time.
