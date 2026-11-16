@@ -15,17 +15,19 @@ import re
 import unittest
 
 from revali import EXIT_ACTION, PROMPT_VERSION
-from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, toml_str
-from tests.helpers import RepoCase, claude_entry, run_cli
+from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, PY, toml_str
+from tests.helpers import RepoCase, approve_response, claude_entry, run_cli
 
 RDIR = ".revali/feature__mul"
 LOGS = RDIR + "/logs"
 TESTS_MD = RDIR + "/tests.md"
 TEST_ID = "tests/test_review_mul.py::MulTests::test_product"
 
-WINDOWS_TABLE = '\n[validate.windows]\nrunner = "ssh"\nhost = "winbox"\n' + (
-    "test = %s\nnew_test = %s\n" % (toml_str(LOCAL_TEST), toml_str(LOCAL_NEW_TEST))
-)
+
+def windows_table(new_test=LOCAL_NEW_TEST):
+    return '\n[validate.windows]\nrunner = "ssh"\nhost = "winbox"\n' + (
+        "test = %s\nnew_test = %s\n" % (toml_str(LOCAL_TEST), toml_str(new_test))
+    )
 
 
 def diagnosis(introduced_by="branch"):
@@ -50,13 +52,13 @@ def lines_with(text, *words):
 
 
 class Case(RepoCase):
-    def two_platforms(self, order=("linux", "windows")):
+    def two_platforms(self, order=("linux", "windows"), windows_new_test=LOCAL_NEW_TEST):
         before = self.read("revali.toml")
         after = before.replace(
             'platforms = ["linux"]', "platforms = [%s]" % ", ".join('"%s"' % p for p in order)
         )
         self.assertNotEqual(before, after, "fixture platforms line not found")
-        self.write("revali.toml", after + WINDOWS_TABLE)
+        self.write("revali.toml", after + windows_table(windows_new_test))
         self.commit_all("list %s" % ", ".join(order))
 
     def validate_key(self, line):
@@ -202,6 +204,39 @@ class PromptTwoPlatforms(Case):
         self.assertNotIn("base-r1-linux", self.labels())
         self.assertTrue(lines_with(self.intro("1-linux"), "linux"))
         self.assertTrue(lines_with(self.intro("1-linux"), "local"))
+
+
+class OtherPlatformThatRanNothing(Case):
+    def test_a_platform_where_no_step_ran_is_listed_but_not_as_pass(self):
+        # round 1 F1. windows names the reviewer's files with `{files}` and the reviewer wrote
+        # none, the suite is the baseline's, so no step runs there; linux runs its pattern
+        # `new_test` and fails. AC-2 lists the result of every other platform, and windows
+        # has none: it is in the list, and not as a PASS.
+        self.two_platforms(windows_new_test=PY + " -m unittest {files}")
+        self.runner_scenario({"default": 0, "results": {"validate-r1-linux": {"new_test": 1}}})
+        no_files = approve_response(
+            tests=[],
+            not_testable=[
+                {"ac": "AC-1", "reason": "checked by hand"},
+                {"ac": "AC-2", "reason": "checked by hand"},
+            ],
+        )
+        self.claude(
+            claude_entry(no_files, write_tests=False),
+            claude_entry(diagnosis(), write_tests=False),
+        )
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assertNotIn("Traceback", out)
+        self.assertIn("validate-r1-linux", self.labels())
+        self.assertNotIn("validate-r1-windows", self.labels())  # no session ran on windows
+        intro = self.intro("1-linux")
+        self.assertTrue(lines_with(intro, "linux"), intro)
+        self.assertTrue(lines_with(intro, "local"), intro)
+        self.assertTrue(lines_with(intro, "windows"), intro)
+        self.assertFalse(lines_with(intro, "windows", "PASS"), intro)
+        self.assertFalse(lines_with(intro, "windows", "FAIL"), intro)
+        self.assertNotRegex(self.prompt("1-linux"), r"\$[a-z_]+")
 
 
 class IssueBody(Case):
