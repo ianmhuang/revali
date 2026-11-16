@@ -472,7 +472,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     def baseline_hook(ctx):
         if not ctx.cfg.validate.parallel_baseline:
             validate.baseline(ctx, state, rdir, log)
-        elif validate.baseline_steps(ctx) is not None:
+        elif validate.baseline_plan(ctx) is not None:
             jobs.append(validate.BaselineJob.start(ctx, log))
         else:
             validate.run_baseline(ctx, ctx.head_sha, log)  # logs why there is none
@@ -688,7 +688,7 @@ def _validate_and_finish(
             rdir,
             log,
             "needs_action",
-            "validation %d failed at %s (%s)" % (vout.number, vout.failed_step, counts),
+            "validation %d failed at %s (%s)" % (vout.number, validate.failed_where(vout), counts),
             EXIT_ACTION,
         )
         prstage.update_body(ctx, state, rdir, log)

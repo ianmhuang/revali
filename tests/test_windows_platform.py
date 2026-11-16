@@ -201,21 +201,15 @@ class Probes(unittest.TestCase):
 
 
 class OnlyTheFirstIsValidated(unittest.TestCase):
-    """AC-4"""
+    """AC-4, reversed by feature/validate-every-platform (M3.7.2, AC-7): every listed platform
+    is validated, so no config gets the note."""
 
     def notes(self, cfg):
         return [w for w in cfg.warnings if "validated" in w]
 
-    def test_more_than_one_platform_gets_a_note_naming_the_others(self):
+    def test_more_than_one_platform_gets_no_note(self):
         cfg = load(config(["windows", "linux"], LINUX, WINDOWS_LOCAL))
-        notes = self.notes(cfg)
-        self.assertEqual(len(notes), 1, cfg.warnings)
-        self.assertIn("'windows'", notes[0])
-        self.assertIn("'linux'", notes[0])
-        self.assertIn("not validated", notes[0])
-        self.assertLess(notes[0].index("'windows'"), notes[0].index("'linux'"))
-        # round 1 F3: printed on a dry run too, which probes nothing, so it claims no probe
-        self.assertNotIn("probed", notes[0])
+        self.assertEqual(self.notes(cfg), [], cfg.warnings)
 
     def test_one_platform_gets_no_note(self):
         self.assertEqual(self.notes(load(config(["linux"], LINUX))), [])
@@ -223,9 +217,9 @@ class OnlyTheFirstIsValidated(unittest.TestCase):
 
 
 class NoteInPreflightOutput(RepoCase):
-    """AC-4 end to end: the note is a `note:` line of the run's output."""
+    """AC-4 end to end, reversed by M3.7.2 AC-7: a dry run prints no such `note:` line."""
 
-    def test_a_dry_run_prints_the_note(self):
+    def test_a_dry_run_prints_no_note(self):
         # ssh loads on any host, so the case runs on Linux and Windows alike
         self.write(
             "revali.toml",
@@ -238,8 +232,7 @@ class NoteInPreflightOutput(RepoCase):
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)
         notes = [ln for ln in out.splitlines() if "note:" in ln and "not validated" in ln]
-        self.assertEqual(len(notes), 1, out)
-        self.assertIn("'windows'", notes[0])
+        self.assertEqual(notes, [], out)
 
 
 class Docs(unittest.TestCase):

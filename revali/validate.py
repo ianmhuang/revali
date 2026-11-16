@@ -4,8 +4,8 @@ import os
 import string
 import threading
 import time
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field, replace
+from typing import List, Optional
 
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.config import PlatformCfg
@@ -87,19 +87,62 @@ class ValidationOutcome:
     suite_note: str = ""  # why the existing suite was not rerun, when it was not
     base_rerun: Optional[BaseRerun] = None  # set on FAIL
     issue: Optional[IssueRef] = None  # the issue for a pre-existing bug, when one applies
+    # the platform this outcome is for, set only when several are listed; it names the
+    # sandbox labels and the diagnosis files
+    platform: str = ""
+    took: Optional[float] = None  # seconds in the sandbox, when a session ran
+    # the run as a whole: one outcome per listed platform, in list order; the whole run's own
+    # fields are those of the first platform that failed (or the first platform)
+    platforms: List["ValidationOutcome"] = field(default_factory=list, compare=False)
 
     @property
     def introduced_by(self) -> str:
         return (self.diagnosis or {}).get("introduced_by", "")
 
+    @property
+    def tag(self) -> str:
+        """`<number>`, or `<number>-<platform>`: the file names of this outcome's diagnosis."""
+        return "%d-%s" % (self.number, self.platform) if self.platform else "%d" % self.number
 
-def platform(ctx: Context) -> PlatformCfg:
-    return ctx.cfg.validate.platforms[ctx.cfg.project.platforms[0]]
+    @property
+    def failed_at(self) -> str:
+        """The failed step, with ` on <platform>` when several platforms are listed."""
+        if self.platform and self.failed_step:
+            return "%s on %s" % (self.failed_step, self.platform)
+        return self.failed_step
+
+    @property
+    def failing(self) -> List["ValidationOutcome"]:
+        return [p for p in self.platforms if p.result == FAIL]
 
 
-def _runner(ctx: Context):
+def failed_where(o: ValidationOutcome) -> str:
+    """Where the run failed: the step, or `<step> on <platform>` for every failing platform."""
+    return ", ".join(p.failed_at for p in o.failing) or o.failed_at
+
+
+def several(ctx: Context) -> bool:
+    """More than one platform listed: every label and message names its platform."""
+    return len(ctx.cfg.project.platforms) > 1
+
+
+def platform(ctx: Context, name: str = "") -> PlatformCfg:
+    """The `[validate.<name>]` table; the first listed platform's without a name."""
+    return ctx.cfg.validate.platforms[name or ctx.cfg.project.platforms[0]]
+
+
+def suffixed(label: str, name: str) -> str:
+    """`label`, or `label-<name>` when a platform name is given (several are listed)."""
+    return "%s-%s" % (label, name) if name else label
+
+
+def _on(name: str) -> str:
+    return " on %s" % name if name else ""
+
+
+def _runner(ctx: Context, name: str = ""):
     try:
-        return get_runner(platform(ctx))
+        return get_runner(platform(ctx, name))
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, str(exc)) from exc
 
@@ -114,27 +157,49 @@ def baseline(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> No
         state.save(rdir)
 
 
-def baseline_steps(ctx: Context):
-    """The baseline's steps, or None when there is no baseline to run (a docs change, or no
-    existing test command)."""
+def baseline_steps(ctx: Context, name: str = ""):
+    """One platform's baseline steps (the first platform's without a name), or None when it
+    has no baseline to run (a docs change, or no existing test command)."""
     if ctx.doc.kind == "docs":
         return None
-    steps = [s for s in steps_for(platform(ctx), ["setup", "build", "test"]) if s[1].strip()]
-    return steps if any(name == "test" for name, _ in steps) else None
+    steps = [s for s in steps_for(platform(ctx, name), ["setup", "build", "test"]) if s[1].strip()]
+    return steps if any(n == "test" for n, _ in steps) else None
+
+
+def baseline_plan(ctx: Context):
+    """(platform, steps) for every listed platform, in list order, steps None where that
+    platform has no baseline; None when no platform has one."""
+    plan = [(name, baseline_steps(ctx, name)) for name in ctx.cfg.project.platforms]
+    return plan if any(steps is not None for _, steps in plan) else None
 
 
 def run_baseline(ctx: Context, ref: str, log: Optional[RunLog]) -> str:
-    """Run the existing suite on commit `ref` in the sandbox. Returns `ref` when it passed, ""
-    when there was nothing to run; raises Stop when it failed. Touches no state, so it may run
-    on a thread of its own (BaselineJob)."""
-    steps = baseline_steps(ctx)
-    if steps is None:
+    """Run the existing suite on commit `ref` in the sandbox of every listed platform, in list
+    order. Returns `ref` when every one that ran passed, "" when there was nothing to run;
+    raises Stop at the first that failed (the later ones do not run). Touches no state, so it
+    may run on a thread of its own (BaselineJob)."""
+    plan = baseline_plan(ctx)
+    if plan is None:
         if log and ctx.doc.kind != "docs":
             log.stage("preflight", "no existing test command; baseline skipped")
         return ""
-    runner = _runner(ctx)
+    for name, steps in plan:
+        tag = name if several(ctx) else ""
+        if steps is None:
+            if log:
+                log.stage("preflight", "no existing test command on %s; baseline skipped" % name)
+            continue
+        _baseline_on(ctx, ref, tag, steps, log)
+    return ref
+
+
+def _baseline_on(ctx: Context, ref: str, tag: str, steps, log: Optional[RunLog]) -> None:
+    """One platform's baseline; `tag` is its name when several are listed, else ""."""
+    runner = _runner(ctx, tag)
+    label = suffixed("baseline", tag)
+    on = _on(tag)
     if log:
-        log.stage("preflight", "baseline: existing suite on %s" % runner.name)
+        log.stage("preflight", "baseline%s: existing suite on %s" % (on, runner.name))
     started = time.monotonic()
     try:
         report = runner.run(
@@ -143,28 +208,29 @@ def run_baseline(ctx: Context, ref: str, log: Optional[RunLog]) -> str:
             steps,
             {},
             ctx.logs,
-            "baseline",
+            label,
             log.detail if log else None,
             scope=safe_branch(ctx.branch),
             key=sandbox_key(ctx.repo_root, ctx.branch),
         )
     except RunnerError as exc:
-        raise Stop(EXIT_ERROR, "sandbox failed during baseline: %s" % exc) from exc
+        raise Stop(EXIT_ERROR, "sandbox failed during baseline%s: %s" % (on, exc)) from exc
     took = time.monotonic() - started
     if log:
-        log.timing.sandbox("baseline", took)
+        log.timing.sandbox(label, took)
     failed = report.failed
     if log:
         log.stage(
             "preflight",
-            "baseline %s (%s)"
-            % ("passed" if failed is None else "failed at " + failed.name, fmt_duration(took)),
+            "baseline%s %s (%s)"
+            % (on, "passed" if failed is None else "failed at " + failed.name, fmt_duration(took)),
         )
     if failed is not None:
         raise Stop(
             EXIT_ERROR,
-            "branch is broken before review: %s failed (exit %d%s); see %s\n%s"
+            "branch is broken before review%s: %s failed (exit %d%s); see %s\n%s"
             % (
+                on,
                 failed.name,
                 failed.returncode,
                 ", timed out" if failed.timed_out else "",
@@ -172,7 +238,6 @@ def run_baseline(ctx: Context, ref: str, log: Optional[RunLog]) -> str:
                 tail(failed.text, 20),
             ),
         )
-    return ref
 
 
 class BaselineJob:
@@ -279,79 +344,34 @@ def baseline_reusable(ctx: Context, state: State) -> str:
 def run_validation(
     ctx: Context, state: State, rdir: str, log: Optional[RunLog]
 ) -> ValidationOutcome:
+    """Run the suite and the reviewer's tests on every listed platform, in list order, going on
+    after a platform FAILs; then the base rerun, the diagnosis and the issue for each platform
+    that FAILed. A `setup` or `build` failure on any platform stops at once (exit 1), before
+    any diagnosis is spent."""
     number = len(state.validations) + 1
-    outcome = ValidationOutcome(number=number, result=PASS)
-    took = None
     reused = baseline_reusable(ctx, state)
+    suite_note = ""
     if reused:
-        outcome.suite_note = (
+        suite_note = (
             "existing suite not rerun: unchanged since the baseline that passed on %s "
             "(only the reviewer's test commits since)" % reused[:10]
         )
     which = ["setup", "build", "new_test"] if reused else ["setup", "build", "test", "new_test"]
-    steps = []
-    if ctx.doc.kind != "docs":
-        # new_test names every reviewer file on the branch when it asks for {files}
-        steps = steps_with_files(
-            platform(ctx), which, list(state.test_files), log.stage if log else None, "validate"
-        )
-    if ctx.doc.kind == "docs":
-        outcome.skipped_reason = "kind docs: nothing to run"
-    elif not any(name in ("test", "new_test") for name, _ in steps):
-        # `test` is empty and new_test (required by preflight) was skipped: `{files}` had no
-        # file to name
-        if reused:
-            why = outcome.suite_note + " and no new test file"
-        else:
-            why = "no test command and new_test names no test file"
-        outcome.skipped_reason = "nothing to run: " + why
-        if log:
-            log.stage("validate", "run %d: %s" % (number, outcome.skipped_reason))
-    else:
-        runner = _runner(ctx)
-        label = "validate-r%d" % max(1, len(state.rounds))
-        if log:
-            if outcome.suite_note:
-                log.stage("validate", outcome.suite_note)
-            log.stage(
-                "validate",
-                "run %d: %s on %s (%s)"
-                % (number, ", ".join(n for n, _ in steps), runner.name, label),
-            )
-        started = time.monotonic()
-        try:
-            report = runner.run(
-                ctx.repo_root,
-                "HEAD",
-                steps,
-                sandbox_files(ctx, state, rdir),  # archive mode: the files are not in HEAD
-                ctx.logs,
-                label,
-                log.detail if log else None,
-                scope=safe_branch(ctx.branch),
-                key=sandbox_key(ctx.repo_root, ctx.branch),
-            )
-        except RunnerError as exc:
-            raise Stop(EXIT_ERROR, "sandbox failed: %s" % exc) from exc
-        took = time.monotonic() - started
-        if log:
-            log.timing.sandbox(label, took)
-        outcome.report = report
-        failed = report.failed
-        if failed is not None:
-            if failed.name in ("setup", "build"):
-                raise Stop(
-                    EXIT_ERROR,
-                    "sandbox %s step failed (exit %d); this is an environment problem, "
-                    "not a verdict; see %s\n%s"
-                    % (failed.name, failed.returncode, failed.log_path, tail(failed.text, 20)),
-                )
-            outcome.result = FAIL
-            outcome.failed_step = failed.name
-            outcome.base_rerun = rerun_on_base(ctx, state, failed, max(1, len(state.rounds)), log)
-            if not ctx.dry_run:
-                _diagnose(ctx, state, rdir, failed, outcome, log)
-                outcome.issue = maybe_open(ctx, state, rdir, outcome, log)
+    names = list(ctx.cfg.project.platforms)
+    tags = names if several(ctx) else [""]
+    if suite_note and log and several(ctx) and ctx.doc.kind != "docs":
+        log.stage("validate", suite_note)
+    parts = [_validate_on(ctx, state, rdir, log, number, tag, which, suite_note) for tag in tags]
+    round_no = max(1, len(state.rounds))
+    for part in parts:
+        if part.result != FAIL:
+            continue
+        failed = part.report.failed
+        part.base_rerun = rerun_on_base(ctx, state, failed, round_no, log, part.platform)
+        if not ctx.dry_run:
+            _diagnose(ctx, state, rdir, failed, part, log)
+            part.issue = maybe_open(ctx, state, rdir, part, log)
+    outcome = _whole(parts)
     outcome.section_md = render_section(ctx, outcome)
     path = os.path.join(rdir, "tests.md")
     existing = read_text(path) if os.path.isfile(path) else "# Tests\n"
@@ -359,23 +379,22 @@ def run_validation(
     state.validations.append(
         {
             "number": number,
-            "result": outcome.result,
-            "failed_step": outcome.failed_step,
+            **_record(outcome),
             "round": len(state.rounds),
             "head_sha": ctx.head_sha,
-            "cause": (outcome.diagnosis or {}).get("cause", ""),
-            "introduced_by": outcome.introduced_by,
-            "base_rerun": outcome.base_rerun.as_dict() if outcome.base_rerun else None,
-            "issue": outcome.issue.number if outcome.issue else 0,
             "model": outcome.model_actual,
             "fallback": outcome.fallback,
             "cost_usd": outcome.cost,
+            "platforms": [
+                {"name": name, **_record(p)} for name, p in zip(names, parts, strict=True)
+            ],
             "at": now_iso(),
         }
     )
     state.cost_usd += outcome.cost
-    if outcome.model_actual and outcome.model_actual not in state.models_used:
-        state.models_used.append(outcome.model_actual)
+    for part in parts:
+        if part.model_actual and part.model_actual not in state.models_used:
+            state.models_used.append(part.model_actual)
     state.last_verdict = outcome.result
     state.save(rdir)
     if log:
@@ -385,21 +404,136 @@ def run_validation(
             % (
                 number,
                 outcome.result,
+                " (%s)" % failed_where(outcome) if outcome.result == FAIL else "",
+                " (%s)" % fmt_duration(outcome.took) if outcome.took is not None else "",
+            ),
+        )
+    return outcome
+
+
+def _record(o: ValidationOutcome) -> dict:
+    """The fields a validation record and each of its `platforms` entries share."""
+    return {
+        "result": o.result,
+        "failed_step": o.failed_step,
+        "cause": (o.diagnosis or {}).get("cause", ""),
+        "introduced_by": o.introduced_by,
+        "base_rerun": o.base_rerun.as_dict() if o.base_rerun else None,
+        "issue": o.issue.number if o.issue else 0,
+    }
+
+
+def _whole(parts: List[ValidationOutcome]) -> ValidationOutcome:
+    """The run as a whole: the first failing platform's outcome (or the first platform's),
+    FAIL when any platform failed, the cost and the sandbox time of all, `platforms` = parts."""
+    lead = next((p for p in parts if p.result == FAIL), parts[0])
+    if len(parts) == 1:
+        return replace(lead, platforms=list(parts))
+    tooks = [p.took for p in parts if p.took is not None]
+    return replace(
+        lead,
+        result=FAIL if any(p.result == FAIL for p in parts) else PASS,
+        cost=sum(p.cost for p in parts),
+        took=sum(tooks) if tooks else None,
+        skipped_reason=parts[0].skipped_reason if all(p.skipped_reason for p in parts) else "",
+        platforms=list(parts),
+    )
+
+
+def _validate_on(
+    ctx: Context,
+    state: State,
+    rdir: str,
+    log: Optional[RunLog],
+    number: int,
+    tag: str,
+    which: List[str],
+    suite_note: str,
+) -> ValidationOutcome:
+    """One platform's sandbox session; `tag` is its name when several are listed, else ""."""
+    outcome = ValidationOutcome(number=number, result=PASS, platform=tag, suite_note=suite_note)
+    if ctx.doc.kind == "docs":
+        outcome.skipped_reason = "kind docs: nothing to run"
+        return outcome
+    on = _on(tag)
+    # new_test names every reviewer file on the branch when it asks for {files}
+    steps = steps_with_files(
+        platform(ctx, tag), which, list(state.test_files), log.stage if log else None, "validate"
+    )
+    if not any(name in ("test", "new_test") for name, _ in steps):
+        # `test` is empty and new_test (required by preflight) was skipped: `{files}` had no
+        # file to name
+        if suite_note:
+            why = suite_note + " and no new test file"
+        else:
+            why = "no test command and new_test names no test file"
+        outcome.skipped_reason = "nothing to run: " + why
+        if log:
+            log.stage("validate", "run %d%s: %s" % (number, on, outcome.skipped_reason))
+        return outcome
+    runner = _runner(ctx, tag)
+    label = suffixed("validate-r%d" % max(1, len(state.rounds)), tag)
+    if log:
+        if suite_note and not tag:
+            log.stage("validate", suite_note)
+        log.stage(
+            "validate",
+            "run %d: %s on %s (%s)" % (number, ", ".join(n for n, _ in steps), runner.name, label),
+        )
+    started = time.monotonic()
+    try:
+        report = runner.run(
+            ctx.repo_root,
+            "HEAD",
+            steps,
+            sandbox_files(ctx, state, rdir),  # archive mode: the files are not in HEAD
+            ctx.logs,
+            label,
+            log.detail if log else None,
+            scope=safe_branch(ctx.branch),
+            key=sandbox_key(ctx.repo_root, ctx.branch),
+        )
+    except RunnerError as exc:
+        raise Stop(EXIT_ERROR, "sandbox failed%s: %s" % (on, exc)) from exc
+    outcome.took = time.monotonic() - started
+    if log:
+        log.timing.sandbox(label, outcome.took)
+    outcome.report = report
+    failed = report.failed
+    if failed is not None:
+        if failed.name in ("setup", "build"):
+            raise Stop(
+                EXIT_ERROR,
+                "sandbox %s step failed%s (exit %d); this is an environment problem, "
+                "not a verdict; see %s\n%s"
+                % (failed.name, on, failed.returncode, failed.log_path, tail(failed.text, 20)),
+            )
+        outcome.result = FAIL
+        outcome.failed_step = failed.name
+    if log and tag:
+        log.stage(
+            "validate",
+            "run %d on %s: %s%s (%s)"
+            % (
+                number,
+                tag,
+                outcome.result,
                 " (%s)" % outcome.failed_step if outcome.failed_step else "",
-                " (%s)" % fmt_duration(took) if took is not None else "",
+                fmt_duration(outcome.took),
             ),
         )
     return outcome
 
 
 def rerun_on_base(
-    ctx: Context, state: State, failed, round_no: int, log: Optional[RunLog]
+    ctx: Context, state: State, failed, round_no: int, log: Optional[RunLog], tag: str = ""
 ) -> BaseRerun:
     """After the reviewer's tests failed on the branch, run the same files (taken from the
     working tree, or from the archive in archive mode, so they exist on base too) with
     `setup`, `build`, `new_test` on the base tip preflight resolved, under the label
-    `base-r<round>`. Evidence for the diagnosis: whatever goes wrong here is a reason on the
-    result, never a Stop."""
+    `base-r<round>` (`base-r<round>-<platform>` when several platforms are listed, `tag`).
+    Evidence for the diagnosis: whatever goes wrong here is a reason on the result, never a
+    Stop."""
     out = BaseRerun(sha=ctx.base_sha)
     if failed.name != "new_test":
         out.reason = SUITE_FAILED_REASON
@@ -422,13 +556,17 @@ def rerun_on_base(
             out.reason = "no reviewer test file to rerun"
     if out.reason:
         if log:
-            log.stage("validate", "base rerun not run: %s" % out.reason)
+            log.stage("validate", "base rerun%s not run: %s" % (_on(tag), out.reason))
         return out
-    runner = _runner(ctx)
-    label = "base-r%d" % round_no
+    runner = _runner(ctx, tag)
+    label = suffixed("base-r%d" % round_no, tag)
     files = sorted(extra)
     steps = steps_with_files(
-        platform(ctx), ["setup", "build", "new_test"], files, log.stage if log else None, "validate"
+        platform(ctx, tag),
+        ["setup", "build", "new_test"],
+        files,
+        log.stage if log else None,
+        "validate",
     )
     if log:
         log.stage(
@@ -470,8 +608,9 @@ def rerun_on_base(
     if log:
         log.stage(
             "validate",
-            "base rerun: %s (%s)"
+            "base rerun%s: %s (%s)"
             % (
+                _on(tag),
                 (
                     "new_test exit %d" % out.new_test.returncode
                     if out.available
@@ -533,12 +672,13 @@ def _diagnose(
         "base_rerun": _base_rerun_for_prompt(outcome.base_rerun),
     }
     prompt = string.Template(read_text(ctx.diagnose_prompt)).safe_substitute(values)
-    write_text(os.path.join(ctx.logs, "prompt-diagnose-%d.md" % outcome.number), prompt)
+    write_text(os.path.join(ctx.logs, "prompt-diagnose-%s.md" % outcome.tag), prompt)
     if log:
         log.stage(
             "validate",
-            "diagnoser %s%s via %s (budget $%.2f)"
+            "diagnoser%s %s%s via %s (budget $%.2f)"
             % (
+                " for %s" % outcome.platform if outcome.platform else "",
                 model,
                 " (%s)" % chosen.reason if chosen.reason else "",
                 engine.name,
@@ -557,7 +697,7 @@ def _diagnose(
                 budget_usd=cfg.budget_usd,
                 timeout_s=ctx.cfg.review.timeout_min * 60,
                 cwd=ctx.repo_root,
-                raw_path=os.path.join(ctx.logs, "diagnose-%d.raw.json" % outcome.number),
+                raw_path=os.path.join(ctx.logs, "diagnose-%s.raw.json" % outcome.tag),
                 read_only=True,
             ),
             log,
@@ -565,7 +705,9 @@ def _diagnose(
     except Stop as stop:
         outcome.diagnosis_error = stop.message
         if log:
-            log.stage("validate", "diagnosis unavailable: %s" % stop.message)
+            log.stage(
+                "validate", "diagnosis%s unavailable: %s" % (_on(outcome.platform), stop.message)
+            )
         return
     data = result.data
     if (
@@ -580,7 +722,7 @@ def _diagnose(
     outcome.fallback = result.fallback
     outcome.cost = result.cost
     write_text(
-        os.path.join(rdir, "diagnose-%d.json" % outcome.number),
+        os.path.join(rdir, "diagnose-%s.json" % outcome.tag),
         __import__("json").dumps(
             {
                 "meta": {
@@ -631,12 +773,28 @@ def _base_rerun_lines(r: BaseRerun) -> list:
 
 
 def render_section(ctx: Context, o: ValidationOutcome) -> str:
+    """The tests.md section; with several platforms, one `### <platform>: RESULT` block each,
+    whose own headings go one level down."""
     out = ["## Validation %d: %s" % (o.number, o.result), "", "at: %s" % now_iso()]
     if o.skipped_reason:
         out += ["", o.skipped_reason, ""]
         return "\n".join(out)
     if o.suite_note:
         out += ["", o.suite_note]
+    if len(o.platforms) > 1:
+        for p in o.platforms:
+            out += ["", "### %s: %s" % (p.platform, p.result)]
+            out += ["", p.skipped_reason] if p.skipped_reason else _detail_lines(p, "####")
+    else:
+        out += _detail_lines(o, "###")
+    out.append("")
+    return "\n".join(out)
+
+
+def _detail_lines(o: ValidationOutcome, h: str) -> list:
+    """One outcome's steps, failure output, base rerun, diagnosis and issue, under `h`
+    headings."""
+    out = []
     if o.report:
         out += ["", "| step | exit | log |", "|---|---|---|"]
         for s in o.report.steps:
@@ -652,20 +810,20 @@ def render_section(ctx: Context, o: ValidationOutcome) -> str:
     if o.result == FAIL and o.report and o.report.failed:
         out += [
             "",
-            "### Failure output (%s, last 40 lines)" % o.failed_step,
+            "%s Failure output (%s, last 40 lines)" % (h, o.failed_step),
             "",
             "```",
             tail(o.report.failed.text, 40) or "(empty)",
             "```",
         ]
     if o.result == FAIL and o.base_rerun:
-        out += ["", "### Base rerun (%s)" % o.base_rerun.sha[:10], ""]
+        out += ["", "%s Base rerun (%s)" % (h, o.base_rerun.sha[:10]), ""]
         out += _base_rerun_lines(o.base_rerun)
     if o.diagnosis:
         d = o.diagnosis
         out += [
             "",
-            "### Diagnosis (%s%s)" % (o.model_actual, ", fallback" if o.fallback else ""),
+            "%s Diagnosis (%s%s)" % (h, o.model_actual, ", fallback" if o.fallback else ""),
             "",
             "cause: **%s**" % d.get("cause"),
             "introduced by: **%s**" % d.get("introduced_by"),
@@ -683,12 +841,12 @@ def render_section(ctx: Context, o: ValidationOutcome) -> str:
         out += ["", "diagnosis unavailable: %s" % o.diagnosis_error]
     if o.issue:
         out += ["", "pre-existing bug, " + o.issue.line()]
-    out.append("")
-    return "\n".join(out)
+    return out
 
 
 def render_section_summary(o: ValidationOutcome, state_dir: str) -> str:
-    """The PR comment for a non-private repository: result, exit codes, diagnosis cause only."""
+    """The PR comment for a non-private repository: result, exit codes, diagnosis cause only;
+    one `### <platform>: RESULT` block per platform when several are listed."""
     out = [
         "<!-- generated by revali; summary only (non-private repository) -->",
         "",
@@ -700,6 +858,19 @@ def render_section_summary(o: ValidationOutcome, state_dir: str) -> str:
         return "\n".join(out)
     if o.suite_note:
         out += [o.suite_note, ""]
+    if len(o.platforms) > 1:
+        for p in o.platforms:
+            out += ["### %s: %s" % (p.platform, p.result), ""]
+            out += [p.skipped_reason, ""] if p.skipped_reason else _summary_lines(p)
+    else:
+        out += _summary_lines(o)
+    out += ["Full text: `%s/<branch>/tests.md` on the author's machine." % state_dir, ""]
+    return "\n".join(out)
+
+
+def _summary_lines(o: ValidationOutcome) -> list:
+    """One outcome's exit codes and, on FAIL, the step, the base rerun and the cause."""
+    out = []
     if o.report:
         out += ["| step | exit |", "|---|---|"]
         for s in o.report.steps:
@@ -726,12 +897,27 @@ def render_section_summary(o: ValidationOutcome, state_dir: str) -> str:
         if o.issue:
             out.append("pre-existing bug, " + o.issue.line())
         out.append("")
-    out += ["Full text: `%s/<branch>/tests.md` on the author's machine." % state_dir, ""]
-    return "\n".join(out)
+    return out
 
 
 def summary_for_author(o: ValidationOutcome, rdir: str) -> str:
-    lines = ["validation %d FAILED at step %s" % (o.number, o.failed_step)]
+    """The ACTION NEEDED text: the failed step, diagnosis and log; with several platforms,
+    each failing platform's under its name."""
+    failing = o.failing if len(o.platforms) > 1 else []
+    if not failing:
+        lines = ["validation %d FAILED at step %s" % (o.number, o.failed_step)]
+        lines += _author_lines(o)
+    else:
+        lines = ["validation %d FAILED at %s" % (o.number, failed_where(o))]
+        for p in failing:
+            lines.append("%s:" % p.platform)
+            lines += ["  " + line for line in _author_lines(p)]
+    lines.append("details: %s" % os.path.join(rdir, "tests.md"))
+    return "\n".join(lines)
+
+
+def _author_lines(o: ValidationOutcome) -> list:
+    lines = []
     if o.diagnosis:
         lines.append("cause: %s. %s" % (o.diagnosis.get("cause"), o.diagnosis.get("summary", "")))
         lines.append("introduced by: %s" % o.introduced_by)
@@ -742,5 +928,4 @@ def summary_for_author(o: ValidationOutcome, rdir: str) -> str:
         lines.append("pre-existing bug, " + o.issue.line())
     if o.report and o.report.failed:
         lines.append("log: %s" % o.report.failed.log_path)
-    lines.append("details: %s" % os.path.join(rdir, "tests.md"))
-    return "\n".join(lines)
+    return lines

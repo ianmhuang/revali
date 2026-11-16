@@ -295,7 +295,7 @@ def maybe_open(
         )
         if log:
             log.stage("validate", "issue body withheld: possible credential")
-    body_path = os.path.join(ctx.logs, "issue-%d.md" % outcome.number)
+    body_path = os.path.join(ctx.logs, "issue-%s.md" % outcome.tag)  # issue-1, issue-1-windows
     write_text(body_path, body)
 
     labels: List[str] = []

@@ -64,7 +64,7 @@ class State:
     )  # per round: head_sha, base_sha, verdict, model
     validations: List[dict] = field(
         default_factory=list
-    )  # per validation run: result, failed_step, cause
+    )  # per validation run: result, failed_step, cause, platforms (STATE_VERSION 9)
     test_commits: List[str] = field(default_factory=list)
     test_files: List[str] = field(default_factory=list)
     tests_mode: str = ""  # [review] tests the rounds ran with: "commit" | "archive"; "" (a state

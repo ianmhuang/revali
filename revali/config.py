@@ -477,17 +477,6 @@ def parse_project_config(
         )
     for name in sorted({p for p in project.platforms if project.platforms.count(p) > 1}):
         problems.append("project.platforms lists '%s' more than once" % name)
-    if len(set(project.platforms)) > 1:
-        others = project.platforms[1:]
-        warnings.append(
-            "project.platforms: this version validates on '%s' only; %s not validated "
-            "(preflight only checks that %s runner starts)"
-            % (
-                project.platforms[0],
-                ", ".join("'%s'" % p for p in others) + (" is" if len(others) == 1 else " are"),
-                "its" if len(others) == 1 else "their",
-            )
-        )
     if merge.auto_merge:
         warnings.append("merge.auto_merge is ignored in this version; merges stay manual")
         merge.auto_merge = False

@@ -58,7 +58,10 @@ def main(argv):
     if len(rest) < 2:
         return 1
     srcs, dst = rest[:-1], rest[-1]
-    if os.environ.get("REVALI_FAKE_SSH_DOWN"):
+    # REVALI_FAKE_SSH_DOWN as ssh_stub reads it: 1 for every host, or the hosts it names
+    down = os.environ.get("REVALI_FAKE_SSH_DOWN", "")
+    hosts = {s.split(":", 1)[0] for s in srcs + [dst] if is_remote(s)}
+    if down == "1" or (down and hosts & set(down.split(","))):
         print("ssh: connect to host: Connection refused", file=sys.stderr)
         return 255
     if is_remote(dst):

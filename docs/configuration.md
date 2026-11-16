@@ -31,9 +31,14 @@ preflight's probe checks; revali does not check the remote system itself,
 and has not been run against such a host. A `linux` table takes any
 runner, `local` on a Windows host included. Preflight probes the runner of
 every listed platform in list order (a dry run probes none) and stops at
-the first that cannot start, naming it. This version validates on the
-first platform only: with more than one listed, preflight prints a note
-naming the platforms that are not validated.
+the first that cannot start, naming it. The baseline and every validation
+run on every listed platform, one after another in list order: the
+baseline stops at the first platform that fails, validation runs them all
+and FAILs when any of them does, each failing platform with its own base
+rerun and diagnosis. Their times add up. The reviewer's smoke run uses the
+first platform only. With more than one platform listed, the sandbox
+labels, logs and diagnosis files carry the platform's name
+([docs/files.md](files.md)).
 For `runner = "wsl"`, a `wsl.exe` call whose output carries one of
 `wsl_transient_errors` (default `["Wsl/Service/WSAETIMEDOUT"]`, matched after
 the NUL bytes of wsl.exe's UTF-16 messages are removed) is tried again after

@@ -139,26 +139,23 @@ class EveryPlatformIsProbed(ProbeCase):
 
 
 class OnlyTheFirstIsValidated(ProbeCase):
-    """AC-4"""
+    """AC-4, reversed by feature/validate-every-platform (M3.7.2, AC-7): every listed platform
+    is validated now, so no config gets the note any more."""
 
     def notes(self, out):
         return [ln for ln in out.splitlines() if "note:" in ln and "not validated" in ln]
 
-    def test_the_note_names_windows_when_it_comes_second(self):
+    def test_no_note_when_windows_comes_second(self):
         self.platforms(["linux", "windows"])
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)
-        notes = self.notes(out)
-        self.assertEqual(len(notes), 1, out)
-        self.assertIn("windows", notes[0])
+        self.assertEqual(self.notes(out), [], out)
 
-    def test_the_note_names_linux_when_it_comes_second(self):
+    def test_no_note_when_linux_comes_second(self):
         self.platforms(["windows", "linux"])
         code, out = run_cli(["run", "--dry-run"])
         self.assertEqual(code, EXIT_OK, out)
-        notes = self.notes(out)
-        self.assertEqual(len(notes), 1, out)
-        self.assertIn("linux", notes[0])
+        self.assertEqual(self.notes(out), [], out)
 
     def test_one_platform_gets_no_note(self):
         code, out = run_cli(["run", "--dry-run"])

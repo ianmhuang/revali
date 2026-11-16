@@ -36,7 +36,8 @@ When validation fails in `new_test`, the reviewer's test files are run once
 more on the base tip (the commit preflight compared the branch against),
 copied into a sandbox clone of that commit, with `setup` and `build` first,
 under the label `base-r<round>` (`[validate] rerun_on_base = false`
-disables this). The result is evidence for the diagnosis session, which
+disables this). With more than one platform listed, each platform that
+failed gets its own rerun, labelled `base-r<round>-<platform>`. The result is evidence for the diagnosis session, which
 answers `introduced_by` per failure: `branch` when the test passes on base
 or fails there only because the change is absent, `base` when it fails on
 both for the same reason, `unknown` otherwise. The rerun never changes the
@@ -162,3 +163,7 @@ staging directories under `sandbox_dir` were gone afterwards. The WSL runner was
 way on 2026-08-30, and again on 2026-09-04 with two worktrees of one
 repository validating at the same time in separate `<repo>/<branch>/<label>`
 directories.
+
+A Windows host over ssh has not been run end to end: the `windows`
+platform, alone or listed with `linux`, has only been exercised with the
+test suite's stand-ins for ssh and for the sandbox.
