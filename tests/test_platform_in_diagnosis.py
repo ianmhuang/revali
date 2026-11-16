@@ -6,6 +6,7 @@ import re
 import unittest
 
 from revali import EXIT_ACTION, PROMPT_VERSION
+from revali.validate import ValidationOutcome, _other_platforms
 from tests.helpers import ROOT, claude_entry
 from tests.test_every_platform import LOGS, PlatformCase, diagnosis
 
@@ -112,13 +113,43 @@ class Version(unittest.TestCase):
     """AC-4"""
 
     def test_prompt_version_bumped(self):
-        self.assertEqual(PROMPT_VERSION, "10")
+        self.assertGreaterEqual(int(PROMPT_VERSION), 10)  # PR #78 F2: the suite's form
+
+    def docs(self):
+        with open(os.path.join(ROOT, "docs", "configuration.md"), encoding="utf-8") as f:
+            return f.read()
 
     def test_docs_list_the_placeholder(self):
-        with open(os.path.join(ROOT, "docs", "configuration.md"), encoding="utf-8") as f:
-            text = f.read()
-        placeholders = re.search(r"\$placeholder` template \(([^)]*)\)", text).group(1)
+        placeholders = re.search(r"\$placeholder` template \(([^)]*)\)", self.docs()).group(1)
         self.assertIn("`$platform`", placeholders)
+
+    def test_docs_list_every_diagnosis_placeholder(self):
+        """PR #78 follow-up: a project's own `[validate] prompt` needs the names"""
+        with open(os.path.join(ROOT, "prompts", "diagnose.md"), encoding="utf-8") as f:
+            used = set(re.findall(r"\$([a-z_]+)", f.read()))
+        listed = re.search(r"diagnosis prompt's placeholders\s+\(([^)]*)\)", self.docs()).group(1)
+        self.assertEqual(set(re.findall(r"`\$([a-z_]+)`", listed)), used)
+
+
+class OtherPlatforms(unittest.TestCase):
+    """PR #78 F1: a platform where no step ran is not reported as a PASS"""
+
+    def test_each_result(self):
+        others = [
+            ValidationOutcome(number=1, result="PASS", platform="linux"),
+            ValidationOutcome(number=1, result="FAIL", platform="mac", failed_step="test"),
+            ValidationOutcome(
+                number=1, result="PASS", platform="windows", skipped_reason="nothing to run: x"
+            ),
+        ]
+        self.assertEqual(
+            _other_platforms(others),
+            "\n\n" + OTHERS + "\n\n- `linux`: PASS\n- `mac`: FAIL at `test`\n"
+            "- `windows`: not run (nothing to run: x)",
+        )
+
+    def test_none(self):
+        self.assertEqual(_other_platforms([]), "")
 
 
 if __name__ == "__main__":

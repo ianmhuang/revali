@@ -37,11 +37,18 @@ baseline stops at the first platform that fails, validation runs them all
 and FAILs when any of them does, each failing platform with its own base
 rerun and diagnosis. The diagnosis prompt names the platform and runner
 that failed, with one platform listed too, and with more than one lists
-how the other platforms of the same validation went; the issue body for a
-pre-existing bug names the platform and runner as well. Their times add up, and so do their costs: each
-diagnosis has its own `[validate] budget_usd`, so one validation can spend
-up to that budget times the number of failing platforms. The reviewer's smoke run uses the
-first platform only. With more than one platform listed, the sandbox
+how the other platforms of the same validation went (PASS, FAIL at a
+step, or not run and why); the issue body for a pre-existing bug names
+the platform and runner as well. Their times add up, and so do their
+costs: each diagnosis has its own `[validate] budget_usd`, so one
+validation can spend up to that budget times the number of failing
+platforms. The reviewer's smoke run uses the first platform only. A
+project's own `[validate] prompt` gets the diagnosis prompt's placeholders
+(`$branch`, `$base`, `$kind`, `$platform`, `$runner`, `$other_platforms`,
+`$failed_step`, `$failed_cmd`, `$failed_exit`, `$timed_out_note`,
+`$change_md`, `$tests_md`, `$test_files`, `$log_lines`, `$log_tail`,
+`$base_sha`, `$base_rerun`); one written before a placeholder existed
+leaves that text out. With more than one platform listed, the sandbox
 labels, logs and diagnosis files carry the platform's name
 ([docs/files.md](files.md)).
 For `runner = "wsl"`, a `wsl.exe` call whose output carries one of
@@ -87,7 +94,8 @@ repository has that label (revali creates no label), and assigned to the
 author's gh login when `issue_assignee = "author"` (the default; `""`
 leaves it unassigned). Its body is [templates/issue.md](../templates/issue.md) in revali, a
 `$placeholder` template (`$pr`, `$pr_url`, `$round`, `$validation`,
-`$platform`, the platform the failure was seen on, `$version`, `$branch`, `$base`, `$base_sha`, `$tests`, `$evidence`,
+`$platform`, the platform the failure was seen on, `$version`, `$branch`,
+`$base`, `$base_sha`, `$tests`, `$evidence`,
 `$diagnosis`, `$acceptance`, `$fix`); `issue_template` names a project file
 to use instead. On a repository that is not private the output, the
 diagnosis text and the suggested fix are withheld, as in PR comments. One

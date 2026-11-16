@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Set, Tuple
 
 from revali import VERSION, gitops
+from revali.config import listed_platform
 from revali.preflight import Context
 from revali.secretscan import scan_text
 from revali.state import RunLog, State, now_iso, read_text, write_text
@@ -129,15 +130,10 @@ def _acceptance(ctx: Context, state: State, tests: List[str]) -> str:
     return "\n".join(lines) or "(no acceptance criterion could be matched to the failing tests)"
 
 
-def _platform(ctx: Context, outcome) -> str:
-    """The platform the outcome is for: its own name, or the only listed platform's."""
-    return outcome.platform or ctx.cfg.project.platforms[0]
-
-
 def _evidence(ctx: Context, outcome, withhold: bool) -> str:
     rerun = outcome.base_rerun
-    name = _platform(ctx, outcome)
-    where = " Platform `%s`, runner `%s`." % (name, ctx.cfg.validate.platforms[name].runner)
+    seen = listed_platform(ctx.cfg, outcome.platform)
+    where = " Platform `%s`, runner `%s`." % (seen.name, seen.runner)
     lines = []
     branch_step = outcome.report.failed if outcome.report else None
     if branch_step is not None:
@@ -189,7 +185,7 @@ def render_body(ctx: Context, state: State, outcome, failures: List[dict], withh
         "pr_url": state.pr_url or "#%d" % state.pr_number,
         "round": max(1, len(state.rounds)),
         "validation": outcome.number,
-        "platform": _platform(ctx, outcome),
+        "platform": listed_platform(ctx.cfg, outcome.platform).name,
         "version": VERSION,
         "branch": ctx.branch,
         "base": ctx.base,

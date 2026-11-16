@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
 from revali import EXIT_ERROR, engines, gitops, models
-from revali.config import PlatformCfg
+from revali.config import PlatformCfg, listed_platform
 from revali.engines import EngineRequest
 from revali.issues import IssueRef, maybe_open
 from revali.preflight import Context, Stop
@@ -128,7 +128,7 @@ def several(ctx: Context) -> bool:
 
 def platform(ctx: Context, name: str = "") -> PlatformCfg:
     """The `[validate.<name>]` table; the first listed platform's without a name."""
-    return ctx.cfg.validate.platforms[name or ctx.cfg.project.platforms[0]]
+    return listed_platform(ctx.cfg, name)
 
 
 def suffixed(label: str, name: str) -> str:
@@ -665,11 +665,15 @@ def _other_platforms(others: List[ValidationOutcome]) -> str:
     the other listed platforms; empty with one platform listed."""
     if not others:
         return ""
-    lines = [
-        "- `%s`: %s"
-        % (p.platform, "FAIL at `%s`" % p.failed_step if p.result == FAIL else p.result)
-        for p in others
-    ]
+    lines = []
+    for p in others:
+        if p.result == FAIL:
+            how = "FAIL at `%s`" % p.failed_step
+        elif p.skipped_reason:  # no step ran there: not a PASS to weigh against this one
+            how = "not run (%s)" % p.skipped_reason
+        else:
+            how = p.result
+        lines.append("- `%s`: %s" % (p.platform, how))
     return "\n\nThe same validation on the other listed platforms:\n\n" + "\n".join(lines)
 
 
@@ -697,12 +701,13 @@ def _diagnose(
     model = chosen.model
     outcome.model_reason = chosen.reason
     tests_md_path = os.path.join(rdir, "tests.md")
+    where = platform(ctx, outcome.platform)
     values = {
         "branch": ctx.branch,
         "base": ctx.base,
         "kind": ctx.doc.kind,
-        "platform": outcome.platform or ctx.cfg.project.platforms[0],
-        "runner": platform(ctx, outcome.platform).runner,
+        "platform": where.name,
+        "runner": where.runner,
         "other_platforms": _other_platforms(others),
         "failed_step": failed.name,
         "failed_cmd": failed.cmd,
