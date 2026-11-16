@@ -112,7 +112,7 @@ class Decision(RepoCase):
             head_sha=git(["rev-parse", "HEAD"], self.repo).strip(),
             cfg=types.SimpleNamespace(
                 validate=types.SimpleNamespace(reuse_baseline=reuse),
-                project=types.SimpleNamespace(test_dir=test_dir),
+                project=types.SimpleNamespace(test_dir=test_dir, platforms=["linux"]),
             ),
         )
 

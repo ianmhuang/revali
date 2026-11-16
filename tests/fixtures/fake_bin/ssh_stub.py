@@ -50,12 +50,10 @@ def knob(name, host):
     value = os.environ.get(name, "")
     if not value:
         return ""
-    head, at, hosts = value.partition("@")
-    if at:
-        return head if host in hosts.split(",") else ""
-    if name == "REVALI_FAKE_SSH_SCRIPT_DROP" or value == "1":
-        return value
-    return value if host in value.split(",") else ""
+    if name == "REVALI_FAKE_SSH_SCRIPT_DROP":
+        rows, at, hosts = value.partition("@")
+        return rows if not at or host in hosts.split(",") else ""
+    return value if value == "1" or host in value.split(",") else ""
 
 
 def record(argv):

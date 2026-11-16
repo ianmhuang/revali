@@ -154,6 +154,7 @@ def baseline(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> No
     sha = run_baseline(ctx, ctx.head_sha, log)
     if sha:
         state.baseline_sha = sha
+        state.baseline_platforms = list(ctx.cfg.project.platforms)
         state.save(rdir)
 
 
@@ -251,6 +252,7 @@ class BaselineJob:
 
     def __init__(self, ctx: Context, log: Optional[RunLog]):
         self.ref = ctx.head_sha  # what preflight saw; later commits of the run do not count
+        self.platforms = list(ctx.cfg.project.platforms)
         self.failed = threading.Event()
         self.sha = ""
         self.stop: Optional[Stop] = None
@@ -310,6 +312,7 @@ class BaselineJob:
         self._settled = True
         if self.sha:
             state.baseline_sha = self.sha
+            state.baseline_platforms = list(self.platforms)
             state.save(rdir)
 
 
@@ -325,11 +328,16 @@ def with_note(stop: Stop, note: str) -> Stop:
 def baseline_reusable(ctx: Context, state: State) -> str:
     """The baseline commit when the existing suite validation would run is the one the
     baseline already ran: `[validate] reuse_baseline` is on, the baseline passed on a commit
-    HEAD still contains, every commit since carries the reviewer's `Revali-Round` trailer,
-    and every path changed since lies under test_dir. Empty string otherwise."""
+    HEAD still contains and on every platform now listed (a state from before
+    `baseline_platforms` covers the first one only), every commit since carries the
+    reviewer's `Revali-Round` trailer, and every path changed since lies under test_dir.
+    Empty string otherwise."""
     sha = state.baseline_sha
     root = ctx.repo_root
     if not sha or not ctx.cfg.validate.reuse_baseline or not gitops.head_contains(sha, root):
+        return ""
+    covered = state.baseline_platforms or ctx.cfg.project.platforms[:1]
+    if any(name not in covered for name in ctx.cfg.project.platforms):
         return ""
     if sha != ctx.head_sha:
         trailer = {c for c, _ in gitops.trailer_commits(sha, "HEAD", TRAILER, root)}
@@ -386,7 +394,14 @@ def run_validation(
             "fallback": outcome.fallback,
             "cost_usd": outcome.cost,
             "platforms": [
-                {"name": name, **_record(p)} for name, p in zip(names, parts, strict=True)
+                {
+                    "name": name,
+                    **_record(p),
+                    "model": p.model_actual,
+                    "fallback": p.fallback,
+                    "cost_usd": p.cost,
+                }
+                for name, p in zip(names, parts, strict=True)
             ],
             "at": now_iso(),
         }
@@ -425,14 +440,19 @@ def _record(o: ValidationOutcome) -> dict:
 
 def _whole(parts: List[ValidationOutcome]) -> ValidationOutcome:
     """The run as a whole: the first failing platform's outcome (or the first platform's),
-    FAIL when any platform failed, the cost and the sandbox time of all, `platforms` = parts."""
+    FAIL when any platform failed, the cost and the sandbox time of all, a fallback when any
+    diagnosis fell back, the lead's diagnoser model or else the first one that ran,
+    `platforms` = parts."""
     lead = next((p for p in parts if p.result == FAIL), parts[0])
     if len(parts) == 1:
         return replace(lead, platforms=list(parts))
     tooks = [p.took for p in parts if p.took is not None]
+    models = [p.model_actual for p in parts if p.model_actual]
     return replace(
         lead,
         result=FAIL if any(p.result == FAIL for p in parts) else PASS,
+        model_actual=lead.model_actual or (models[0] if models else ""),
+        fallback=any(p.fallback for p in parts),
         cost=sum(p.cost for p in parts),
         took=sum(tooks) if tooks else None,
         skipped_reason=parts[0].skipped_reason if all(p.skipped_reason for p in parts) else "",

@@ -370,6 +370,7 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
             state.fix_due = False  # owed to a round that is gone
             state.tests_mode = ""  # the rounds that fixed the mode are gone with them
             state.baseline_sha = ""  # the tree it passed on is gone; validation runs the suite
+            state.baseline_platforms = []
             state.force_push = True  # the remote still has the dropped commits
             rewritten = True
     if state.rounds:  # still: a restart above dropped them, mode and all

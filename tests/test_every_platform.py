@@ -7,11 +7,13 @@ import os
 import subprocess
 import sys
 import unittest
+from types import SimpleNamespace
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, STATE_VERSION
 from revali.state import State, read_history
+from revali.validate import ValidationOutcome, _whole, baseline_reusable
 from tests.fixtures.make_sample_repo import LOCAL_NEW_TEST, LOCAL_TEST, toml_str
-from tests.helpers import FAKE_BIN, ROOT, RepoCase, claude_entry, run_cli
+from tests.helpers import FAKE_BIN, ROOT, RepoCase, claude_entry, git, run_cli
 
 TESTS_MD = ".revali/feature__mul/tests.md"
 LOGS = ".revali/feature__mul/logs"
@@ -78,6 +80,7 @@ class Baseline(PlatformCase):
         self.assertEqual(labels[:2], ["baseline-linux", "baseline-windows"])
         self.assertEqual(self.steps_of("baseline-windows"), [["test"]])
         self.assertTrue(self.state().baseline_sha)
+        self.assertEqual(self.state().baseline_platforms, ["linux", "windows"])
 
     def test_every_platform_runs_on_the_parallel_thread(self):
         self.platforms(("windows", "linux"))
@@ -87,6 +90,7 @@ class Baseline(PlatformCase):
         base = [lb for lb in self.labels() if lb.startswith("baseline")]
         self.assertEqual(base, ["baseline-windows", "baseline-linux"])
         self.assertTrue(self.state().baseline_sha)
+        self.assertEqual(self.state().baseline_platforms, ["windows", "linux"])
 
     def test_the_first_failure_stops_and_names_the_platform(self):
         self.sequential_baseline()
@@ -220,6 +224,14 @@ class Validation(PlatformCase):
         state = self.state()
         self.assertAlmostEqual(state.validations[0]["cost_usd"], 1.0)
         self.assertAlmostEqual(state.cost_usd, 1.5)  # reviewer 0.5 + 1.0
+        # PR #77 F2: each platform says what its own diagnosis cost and ran on
+        entries = state.validations[0]["platforms"]
+        self.assertEqual([p["cost_usd"] for p in entries], [0.25, 0.75])
+        self.assertTrue(all(p["model"] for p in entries), entries)
+        # the fake claude answers as one model whatever was asked, so both count as fallback
+        self.assertEqual(
+            state.validations[0]["fallback"], any(p["fallback"] for p in entries), entries
+        )
         md = self.read(TESTS_MD)
         self.assertIn("### linux: FAIL", md)
         self.assertIn("### windows: FAIL", md)
@@ -276,6 +288,67 @@ class Validation(PlatformCase):
         state = self.state()
         self.assertEqual(len(state.issues), 1)
         self.assertEqual([p["issue"] for p in state.validations[0]["platforms"]], [41, 41])
+        # the issue flow's log lines say which platform they are about
+        self.assertIn("opened issue #41 for the pre-existing failure on linux", out)
+        self.assertIn("pre-existing failure on windows already has issue #41", out)
+
+
+class Whole(unittest.TestCase):
+    """PR #77 F2: the run's own model and fallback when platforms differ"""
+
+    def part(self, platform, result, model="", fallback=False, cost=0.0):
+        return ValidationOutcome(
+            number=1,
+            result=result,
+            platform=platform,
+            model_actual=model,
+            fallback=fallback,
+            cost=cost,
+        )
+
+    def test_the_lead_without_a_diagnosis_takes_the_next_model(self):
+        whole = _whole(
+            [
+                self.part("linux", "FAIL"),  # its diagnosis was unavailable
+                self.part("windows", "FAIL", model="m-win", fallback=True, cost=0.5),
+            ]
+        )
+        self.assertEqual(whole.platform, "linux")
+        self.assertEqual(whole.model_actual, "m-win")
+        self.assertTrue(whole.fallback)
+        self.assertAlmostEqual(whole.cost, 0.5)
+
+    def test_one_platform_is_itself(self):
+        part = self.part("", "FAIL", model="m", cost=0.25)
+        whole = _whole([part])
+        self.assertEqual((whole.model_actual, whole.cost), ("m", 0.25))
+        self.assertEqual(whole.platforms, [part])
+
+
+class BaselineCoverage(PlatformCase):
+    """PR #77 F1: a baseline is reused only on the platforms it ran on"""
+
+    def reusable(self, listed, covered):
+        head = git(["rev-parse", "HEAD"], self.repo).strip()
+        ctx = SimpleNamespace(
+            repo_root=self.repo,
+            head_sha=head,
+            cfg=SimpleNamespace(
+                validate=SimpleNamespace(reuse_baseline=True),
+                project=SimpleNamespace(platforms=listed, test_dir="tests"),
+            ),
+        )
+        state = State()
+        state.baseline_sha = head
+        state.baseline_platforms = covered
+        return baseline_reusable(ctx, state) == head
+
+    def test_coverage(self):
+        self.assertTrue(self.reusable(["linux"], []))  # an older state: the first platform
+        self.assertFalse(self.reusable(["linux", "windows"], []))
+        self.assertTrue(self.reusable(["linux", "windows"], ["linux", "windows"]))
+        self.assertFalse(self.reusable(["linux", "windows"], ["linux"]))
+        self.assertTrue(self.reusable(["windows"], ["linux", "windows"]))
 
 
 class Names(PlatformCase):
@@ -397,6 +470,15 @@ class SshStubKnobs(unittest.TestCase):
         self.assertEqual(self.ssh("linbox", "true", REVALI_FAKE_SSH_DOWN="winbox"), 0)
         self.assertEqual(self.ssh("b", "true", REVALI_FAKE_SSH_DOWN="a,b"), 255)
 
+    def test_both_stubs_read_down_alike(self):
+        # PR #77 F5: `@` belongs to SCRIPT_DROP; for DOWN it names no host, in either stub
+        for value in ("0@winbox", "winbox,linbox"):
+            with self.subTest(value=value):
+                ssh_down = self.ssh("winbox", "true", REVALI_FAKE_SSH_DOWN=value) == 255
+                scp_down = self.scp("winbox:x", ".", REVALI_FAKE_SSH_DOWN=value) == 255
+                self.assertEqual(ssh_down, scp_down)
+        self.assertNotEqual(self.ssh("winbox", "true", REVALI_FAKE_SSH_DOWN="0@winbox"), 255)
+
     def test_scp_down_for_one_host(self):
         self.assertEqual(self.scp("winbox:x", ".", REVALI_FAKE_SSH_DOWN="winbox"), 255)
         # linbox is up, so the copy is tried and fails on the missing file instead
@@ -429,7 +511,8 @@ class Docs(unittest.TestCase):
     def test_files(self):
         text = self.read("docs", "files.md")
         self.assertIn("`platforms`", text)
-        self.assertIn("validate-r<n>-<platform>", text)
+        self.assertIn("validate-r<round>-<platform>", text)  # PR #77 F4: <n> was ambiguous
+        self.assertIn("diagnose-<validation>-<platform>.raw.json", text)
 
     def test_sandbox(self):
         text = self.read("docs", "sandbox.md")

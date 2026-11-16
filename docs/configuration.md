@@ -35,7 +35,9 @@ the first that cannot start, naming it. The baseline and every validation
 run on every listed platform, one after another in list order: the
 baseline stops at the first platform that fails, validation runs them all
 and FAILs when any of them does, each failing platform with its own base
-rerun and diagnosis. Their times add up. The reviewer's smoke run uses the
+rerun and diagnosis. Their times add up, and so do their costs: each
+diagnosis has its own `[validate] budget_usd`, so one validation can spend
+up to that budget times the number of failing platforms. The reviewer's smoke run uses the
 first platform only. With more than one platform listed, the sandbox
 labels, logs and diagnosis files carry the platform's name
 ([docs/files.md](files.md)).

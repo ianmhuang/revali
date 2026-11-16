@@ -256,14 +256,15 @@ def maybe_open(
     if not failures:
         return None
     tests = test_ids(failures)
+    on = " on %s" % outcome.platform if outcome.platform else ""  # several platforms listed
     known = already_open(state, tests)
     if known:
         numbers = [int(i.get("number", 0)) for i in known]
         if log:
             log.stage(
                 "validate",
-                "pre-existing failure already has issue %s (%s)"
-                % (", ".join("#%d" % n for n in numbers), ", ".join(tests)),
+                "pre-existing failure%s already has issue %s (%s)"
+                % (on, ", ".join("#%d" % n for n in numbers), ", ".join(tests)),
             )
         return IssueRef(
             numbers[0], str(known[0].get("url", "")), existing=True, also=tuple(numbers[1:])
@@ -280,8 +281,8 @@ def maybe_open(
         if log:
             log.stage(
                 "validate",
-                "pre-existing failure already has open issue #%d, opened outside this branch "
-                "(%s): %s" % (number, ", ".join(tests), url),
+                "pre-existing failure%s already has open issue #%d, opened outside this branch "
+                "(%s): %s" % (on, number, ", ".join(tests), url),
             )
         return IssueRef(number, url, existing=True)
 
@@ -334,8 +335,8 @@ def maybe_open(
     if log:
         log.stage(
             "validate",
-            "opened issue #%d for the pre-existing failure (%s)%s: %s"
-            % (number, ", ".join(tests), " assigned to " + assignee if assignee else "", url),
+            "opened issue #%d for the pre-existing failure%s (%s)%s: %s"
+            % (number, on, ", ".join(tests), " assigned to " + assignee if assignee else "", url),
         )
     return IssueRef(number, url)
 

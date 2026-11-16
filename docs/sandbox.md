@@ -11,7 +11,12 @@ as `__`, and `<key>` is 8 hex characters derived from the checkout's real
 path and the exact branch name, so worktrees of one repository, repositories
 whose directories share a name, and branches such as `feature/x` and
 `feature__x` validate side by side, while one checkout and branch keep the
-same directory from run to run), runs `setup`, `build`,
+same directory from run to run; `<label>` names the session, such as
+`baseline`, `smoke-r1-1`, `validate-r1` or `base-r1`, and with more than one
+platform listed every label but the smoke run's ends in the platform,
+`baseline-<platform>`, `validate-r<round>-<platform>` and
+`base-r<round>-<platform>`, so two platforms on one runner never share a
+directory), runs `setup`, `build`,
 `test`, `new_test` there with a per-step timeout, copies the logs back, and
 deletes the clone and the `<branch>-<key>` and `<repo>` directories once
 empty. Earlier revali versions used `<repo>/<branch>/<label>`; a session
