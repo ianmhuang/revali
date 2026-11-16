@@ -377,7 +377,8 @@ def run_validation(
         failed = part.report.failed
         part.base_rerun = rerun_on_base(ctx, state, failed, round_no, log, part.platform)
         if not ctx.dry_run:
-            _diagnose(ctx, state, rdir, failed, part, log)
+            others = [p for p in parts if p is not part]
+            _diagnose(ctx, state, rdir, failed, part, log, others)
             part.issue = maybe_open(ctx, state, rdir, part, log)
     outcome = _whole(parts)
     outcome.section_md = render_section(ctx, outcome)
@@ -659,9 +660,30 @@ def _base_rerun_for_prompt(rerun: BaseRerun) -> str:
     )
 
 
+def _other_platforms(others: List[ValidationOutcome]) -> str:
+    """The `$other_platforms` value of the diagnosis prompt: how the same validation went on
+    the other listed platforms; empty with one platform listed."""
+    if not others:
+        return ""
+    lines = [
+        "- `%s`: %s"
+        % (p.platform, "FAIL at `%s`" % p.failed_step if p.result == FAIL else p.result)
+        for p in others
+    ]
+    return "\n\nThe same validation on the other listed platforms:\n\n" + "\n".join(lines)
+
+
 def _diagnose(
-    ctx: Context, state: State, rdir: str, failed, outcome: ValidationOutcome, log: Optional[RunLog]
+    ctx: Context,
+    state: State,
+    rdir: str,
+    failed,
+    outcome: ValidationOutcome,
+    log: Optional[RunLog],
+    others: List[ValidationOutcome],
 ) -> None:
+    """Ask the diagnosis session about one failed platform; `others` are the other listed
+    platforms' outcomes of the same validation (empty with one platform listed)."""
     cfg = ctx.cfg.validate
     engine = engines.for_role(ctx.cfg, "validate")
     chosen = models.resolve(
@@ -679,6 +701,9 @@ def _diagnose(
         "branch": ctx.branch,
         "base": ctx.base,
         "kind": ctx.doc.kind,
+        "platform": outcome.platform or ctx.cfg.project.platforms[0],
+        "runner": platform(ctx, outcome.platform).runner,
+        "other_platforms": _other_platforms(others),
         "failed_step": failed.name,
         "failed_cmd": failed.cmd,
         "failed_exit": failed.returncode,
