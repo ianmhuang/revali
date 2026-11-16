@@ -7,9 +7,12 @@ carries the platform lets one platform fail while the other passes. The windows 
 `new_test` command of its own, which tells the two platforms' sessions apart.
 """
 
+import contextlib
+import io
 import json
 import os
 import unittest
+from unittest import mock
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, STATE_VERSION
 from revali.state import State, read_history
@@ -297,6 +300,62 @@ class Validation(PlatformCase):
         self.assertEqual(self.state().validations, [])
 
 
+class BaselineCoverage(PlatformCase):
+    """AC-2 (`reuse_baseline` applies to every platform) and round 1 F1: the suite is left out
+    of a platform's validation only when the baseline ran on that platform."""
+
+    def interrupted_then_resumed(self, edit=None):
+        """Approve round 1 with two platforms, lose the run before validation, optionally
+        edit state.json, then let the next run validate the approved round."""
+        self.list_platforms()
+        self.claude(claude_entry())
+        with mock.patch("revali.validate.run_validation", side_effect=RuntimeError("power cut")):
+            with contextlib.redirect_stderr(io.StringIO()):
+                code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        path = State.path(self.rdir())
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            data = json.load(fh)
+        self.assertTrue(data.get("baseline_sha"), data)  # the baseline passed in the first run
+        self.assertEqual(data.get("baseline_platforms"), ["linux", "windows"])
+        if edit is not None:
+            edit(data)
+            with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                json.dump(data, fh, indent=2)
+        self.scenario(
+            {
+                "prs_open": [
+                    {
+                        "number": 7,
+                        "url": "https://github.example/me/sample/pull/7",
+                        "isDraft": True,
+                        "title": "Add mul to calc",
+                    }
+                ]
+            }
+        )
+        self.claude()
+        self.go(EXIT_OK)
+        return [self.session("validate-r1-" + name)["steps"] for name in ("linux", "windows")]
+
+    def test_a_baseline_that_ran_on_both_is_reused_on_both(self):
+        self.assertEqual(self.interrupted_then_resumed(), [["new_test"], ["new_test"]])
+
+    def test_a_baseline_from_before_the_change_is_not_reused_on_the_later_platform(self):
+        # a state written before the change has no `baseline_platforms`: its baseline ran on
+        # the first platform only, so windows must run its suite
+        steps = self.interrupted_then_resumed(lambda data: data.pop("baseline_platforms"))
+        self.assertEqual(steps[1], ["test", "new_test"])
+        self.assertEqual(self.record()["result"], "PASS")
+
+    def test_a_baseline_that_missed_a_platform_is_not_reused_there(self):
+        def only_linux(data):
+            data["baseline_platforms"] = ["linux"]
+
+        steps = self.interrupted_then_resumed(only_linux)
+        self.assertEqual(steps[1], ["test", "new_test"])
+
+
 class PerPlatformDiagnosis(PlatformCase):
     """AC-3"""
 
@@ -336,6 +395,27 @@ class PerPlatformDiagnosis(PlatformCase):
         state = self.state()
         self.assertAlmostEqual(state.validations[0]["cost_usd"], 1.0)
         self.assertAlmostEqual(state.cost_usd, 1.5)  # the reviewer's 0.5 and the two diagnoses
+        # round 1 F2: each platform's entry says what its own diagnosis cost and ran on
+        record = state.validations[0]
+        entries = record["platforms"]
+        self.assertEqual([p["cost_usd"] for p in entries], [0.25, 0.75])
+        for entry in entries:
+            self.assertTrue(entry["model"], entry)
+        self.assertEqual(record["fallback"], any(p["fallback"] for p in entries), entries)
+        self.assertTrue(record["model"])
+
+    def test_a_platform_that_passed_has_no_diagnosis_cost(self):
+        self.list_platforms()
+        self.runner_scenario(failing("windows"))
+        self.claude(claude_entry(), diagnoser(cost=0.75, summary=WINDOWS_SUMMARY))
+        self.go(EXIT_ACTION)
+        record = self.record()
+        linux, windows = record["platforms"]
+        self.assertEqual((linux["cost_usd"], linux["model"], linux["fallback"]), (0, "", False))
+        self.assertEqual(windows["cost_usd"], 0.75)
+        self.assertEqual(record["model"], windows["model"])
+        self.assertTrue(record["model"])
+        self.assertAlmostEqual(record["cost_usd"], 0.75)
 
     def test_a_platform_that_failed_in_the_suite_gets_a_diagnosis_too(self):
         self.validate_key("reuse_baseline = false")
