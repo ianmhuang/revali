@@ -374,7 +374,7 @@ class UnderTestDir(RepoCase):
                 head_sha=git(["rev-parse", "HEAD"], self.repo).strip(),
                 cfg=types.SimpleNamespace(
                     validate=types.SimpleNamespace(reuse_baseline=True),
-                    project=types.SimpleNamespace(test_dir=spelling),
+                    project=types.SimpleNamespace(test_dir=spelling, platforms=["linux"]),
                 ),
             )
             self.assertEqual(baseline_reusable(ctx, st), st.baseline_sha, spelling)

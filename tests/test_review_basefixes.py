@@ -79,7 +79,7 @@ class SharedTestDirCheck(RepoCase):
                 head_sha=head,
                 cfg=types.SimpleNamespace(
                     validate=types.SimpleNamespace(reuse_baseline=True),
-                    project=types.SimpleNamespace(test_dir=test_dir),
+                    project=types.SimpleNamespace(test_dir=test_dir, platforms=["linux"]),
                 ),
             )
 

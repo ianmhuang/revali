@@ -64,12 +64,15 @@ class State:
     )  # per round: head_sha, base_sha, verdict, model
     validations: List[dict] = field(
         default_factory=list
-    )  # per validation run: result, failed_step, cause
+    )  # per validation run: result, failed_step, cause, platforms (STATE_VERSION 9)
     test_commits: List[str] = field(default_factory=list)
     test_files: List[str] = field(default_factory=list)
     tests_mode: str = ""  # [review] tests the rounds ran with: "commit" | "archive"; "" (a state
     # from before the key) counts as commit (STATE_VERSION 6)
     baseline_sha: str = ""  # the commit the baseline suite passed on (STATE_VERSION 4)
+    # the platforms that baseline covered (STATE_VERSION 9); empty in an older state, whose
+    # baseline ran on the first listed platform only
+    baseline_platforms: List[str] = field(default_factory=list)
     issues: List[dict] = field(
         default_factory=list
     )  # GitHub issues opened for pre-existing bugs: number, url, validation, tests, cause,

@@ -370,6 +370,7 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
             state.fix_due = False  # owed to a round that is gone
             state.tests_mode = ""  # the rounds that fixed the mode are gone with them
             state.baseline_sha = ""  # the tree it passed on is gone; validation runs the suite
+            state.baseline_platforms = []
             state.force_push = True  # the remote still has the dropped commits
             rewritten = True
     if state.rounds:  # still: a restart above dropped them, mode and all
@@ -472,7 +473,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
     def baseline_hook(ctx):
         if not ctx.cfg.validate.parallel_baseline:
             validate.baseline(ctx, state, rdir, log)
-        elif validate.baseline_steps(ctx) is not None:
+        elif validate.baseline_plan(ctx) is not None:
             jobs.append(validate.BaselineJob.start(ctx, log))
         else:
             validate.run_baseline(ctx, ctx.head_sha, log)  # logs why there is none
@@ -688,7 +689,7 @@ def _validate_and_finish(
             rdir,
             log,
             "needs_action",
-            "validation %d failed at %s (%s)" % (vout.number, vout.failed_step, counts),
+            "validation %d failed at %s (%s)" % (vout.number, validate.failed_where(vout), counts),
             EXIT_ACTION,
         )
         prstage.update_body(ctx, state, rdir, log)

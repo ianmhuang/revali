@@ -7,6 +7,8 @@ Knobs: REVALI_FAKE_SSH_DOWN=1 refuses every connection (exit 255);
 REVALI_FAKE_SSH_BASH_FAILS=1 makes `bash` fail before the script starts;
 REVALI_FAKE_SSH_SCRIPT_DROP=<n> runs the script, keeps the first n rows of every results file
 on the host and exits 255 as ssh does when the connection goes away.
+Each knob acts on every host; to act on some hosts only, give DOWN and BASH_FAILS the host
+names instead of 1 (`winbox` or `a,b`) and SCRIPT_DROP `<n>@<hosts>` (`0@winbox`).
 """
 
 import json
@@ -42,6 +44,18 @@ def local(path):
     return os.path.join(root, path)
 
 
+def knob(name, host):
+    """The knob's value when it acts on `host`, else "": `1` (or, for SCRIPT_DROP, `<n>`) acts
+    on every host, a comma-separated list (`<n>@<list>`) on those named."""
+    value = os.environ.get(name, "")
+    if not value:
+        return ""
+    if name == "REVALI_FAKE_SSH_SCRIPT_DROP":
+        rows, at, hosts = value.partition("@")
+        return rows if not at or host in hosts.split(",") else ""
+    return value if value == "1" or host in value.split(",") else ""
+
+
 def record(argv):
     log = os.environ.get("REVALI_FAKE_LOG")
     if log:
@@ -49,7 +63,7 @@ def record(argv):
             fh.write(json.dumps({"exe": "ssh", "argv": argv}) + "\n")
 
 
-def one(words):
+def one(words, host=""):
     name = words[0]
     if name == "git":  # the preflight probe
         print("git version 2.43.0 (fake)")
@@ -82,7 +96,7 @@ def one(words):
     if name == "2>/dev/null":
         return 0
     if name == "bash":
-        if os.environ.get("REVALI_FAKE_SSH_BASH_FAILS"):
+        if knob("REVALI_FAKE_SSH_BASH_FAILS", host):
             print("bash: cannot execute", file=sys.stderr)
             return 127
         bash = hostbash.find_bash()
@@ -92,8 +106,8 @@ def one(words):
         env = dict(os.environ)
         env["HOME"] = remote_root()
         rc = subprocess.run([bash, local(words[1])], env=env).returncode
-        drop = os.environ.get("REVALI_FAKE_SSH_SCRIPT_DROP")
-        if drop is None:
+        drop = knob("REVALI_FAKE_SSH_SCRIPT_DROP", host)
+        if not drop:
             return rc
         # the connection went away mid-session: only the first rows reached the results file
         for root, _dirs, files in os.walk(remote_root()):
@@ -118,7 +132,7 @@ def main(argv):
     if not rest:
         return 1
     host, cmd = rest[0], rest[1:]
-    if os.environ.get("REVALI_FAKE_SSH_DOWN"):
+    if knob("REVALI_FAKE_SSH_DOWN", host):
         print("ssh: connect to host %s port 22: Connection refused" % host, file=sys.stderr)
         return 255
     # revali passes one command line; the remote shell would split and unquote it
@@ -142,7 +156,7 @@ def main(argv):
             continue
         if sep == "&&" and rc != 0:
             continue
-        rc = one(words)
+        rc = one(words, host)
     return rc
 
 

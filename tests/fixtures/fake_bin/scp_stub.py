@@ -8,6 +8,10 @@ import os
 import shutil
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from ssh_stub import knob  # noqa: E402  (one reading of the knobs for both stubs)
+
 
 def remote_root():
     return os.environ.get("REVALI_FAKE_REMOTE") or os.path.join(
@@ -58,7 +62,9 @@ def main(argv):
     if len(rest) < 2:
         return 1
     srcs, dst = rest[:-1], rest[-1]
-    if os.environ.get("REVALI_FAKE_SSH_DOWN"):
+    hosts = {s.split(":", 1)[0] for s in srcs + [dst] if is_remote(s)}
+    # `1` refuses every call, one naming no remote host included, as before host lists
+    if any(knob("REVALI_FAKE_SSH_DOWN", h) for h in hosts or {""}):
         print("ssh: connect to host: Connection refused", file=sys.stderr)
         return 255
     if is_remote(dst):

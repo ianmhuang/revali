@@ -11,7 +11,12 @@ as `__`, and `<key>` is 8 hex characters derived from the checkout's real
 path and the exact branch name, so worktrees of one repository, repositories
 whose directories share a name, and branches such as `feature/x` and
 `feature__x` validate side by side, while one checkout and branch keep the
-same directory from run to run), runs `setup`, `build`,
+same directory from run to run; `<label>` names the session, such as
+`baseline`, `smoke-r1-1`, `validate-r1` or `base-r1`, and with more than one
+platform listed every label but the smoke run's ends in the platform,
+`baseline-<platform>`, `validate-r<round>-<platform>` and
+`base-r<round>-<platform>`, so two platforms on one runner never share a
+directory), runs `setup`, `build`,
 `test`, `new_test` there with a per-step timeout, copies the logs back, and
 deletes the clone and the `<branch>-<key>` and `<repo>` directories once
 empty. Earlier revali versions used `<repo>/<branch>/<label>`; a session
@@ -36,7 +41,8 @@ When validation fails in `new_test`, the reviewer's test files are run once
 more on the base tip (the commit preflight compared the branch against),
 copied into a sandbox clone of that commit, with `setup` and `build` first,
 under the label `base-r<round>` (`[validate] rerun_on_base = false`
-disables this). The result is evidence for the diagnosis session, which
+disables this). With more than one platform listed, each platform that
+failed gets its own rerun, labelled `base-r<round>-<platform>`. The result is evidence for the diagnosis session, which
 answers `introduced_by` per failure: `branch` when the test passes on base
 or fails there only because the change is absent, `base` when it fails on
 both for the same reason, `unknown` otherwise. The rerun never changes the
@@ -162,3 +168,7 @@ staging directories under `sandbox_dir` were gone afterwards. The WSL runner was
 way on 2026-08-30, and again on 2026-09-04 with two worktrees of one
 repository validating at the same time in separate `<repo>/<branch>/<label>`
 directories.
+
+A Windows host over ssh has not been run end to end: the `windows`
+platform, alone or listed with `linux`, has only been exercised with the
+test suite's stand-ins for ssh and for the sandbox.
