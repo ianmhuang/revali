@@ -407,6 +407,17 @@ def _os_error_text(exc: OSError, root: str) -> str:
     return "%s: %s" % (exc.strerror, rel.replace(os.sep, "/"))
 
 
+def _lines_outside_tests(
+    changed_lines: Dict[str, List[str]], test_dir: str
+) -> Dict[str, List[str]]:
+    """The changed lines of the files outside `test_dir`: a test's identifiers, fixture
+    strings and AC references are not names a document should be listed for. The test files'
+    paths still count, as links and as names (`docgraph.related` takes them from `paths`)."""
+    if not test_dir:
+        return changed_lines
+    return {f: v for f, v in changed_lines.items() if not under_test_dir(f, test_dir)}
+
+
 def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
     """The documents of the link graph that concern this diff, and a map of the graph's
     documents. Empty when `[review] doc_roots` is empty; a graph that cannot be read is
@@ -421,7 +432,8 @@ def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
         graph = docgraph.build(ctx.repo_root, roots)
         # `diff` and these paths leave out the same files (`gitops.left_out`)
         paths = gitops.diff_paths(ctx.base_ref, "HEAD", ctx.repo_root, exclude=exclude)
-        found = docgraph.related(graph, paths, gitops.diff_changed_lines(diff))
+        lines = _lines_outside_tests(gitops.diff_changed_lines(diff), ctx.cfg.project.test_dir)
+        found = docgraph.related(graph, paths, lines)
     except OSError as exc:
         if ctx.log:
             ctx.log.stage("review", "the documentation graph could not be read: %s" % exc)
