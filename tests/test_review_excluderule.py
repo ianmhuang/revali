@@ -116,18 +116,22 @@ class Renames(PromptCase):
         self.assertTrue([ln for ln in links if "`src/calc.py`" in ln], links)
         self.assertFalse([ln for ln in links if "old_helper.py" in ln], links)
 
-    def test_a_rename_out_of_an_excluded_name_is_left_out_whole(self):
-        """Either name: here the old one matches `*.lock`."""
+    def test_a_rename_out_of_an_excluded_name_is_reviewed(self):
+        """The new name decides (AC-3 as changed after round 1 F3): here only the old one
+        matches `*.lock`, so the file is in the diff as a rename with its edit."""
         self.rename("pkg/old.lock", "pkg/pins.txt", "pins_edit")
-        ctx, diff, omitted, _ = self.build()
+        ctx, diff, omitted, prompt = self.build()
         self.assertIn("kept_marker = 1", diff)
-        self.assertNotIn("old.lock", diff)
-        self.assertNotIn("pins.txt", diff)
-        self.assertNotIn("pins_edit", diff)
-        self.assertEqual(ctx.excluded_files, ["pkg/pins.txt"])
-        self.assertIn("pkg/pins.txt", omitted)
-        self.assertEqual(ctx.changed_files, ["src/calc.py"])
-        self.assertEqual(ctx.diff_lines, 1)
+        self.assertIn("rename from pkg/old.lock", diff)
+        self.assertIn("rename to pkg/pins.txt", diff)
+        self.assertIn("pins_edit", diff)
+        self.assertEqual(ctx.excluded_files, [])
+        self.assertEqual(omitted, "(none)")
+        self.assertEqual(sorted(ctx.changed_files), ["pkg/pins.txt", "src/calc.py"])
+        self.assertEqual(ctx.diff_lines, 3)  # the calc line and the rename's two
+        # AC-4: the README's link to the old name counts, as the rename is in the diff
+        links = link_lines(prompt)
+        self.assertTrue([ln for ln in links if "old.lock" in ln], links)
 
 
 class PlainRename(PromptCase):

@@ -47,7 +47,7 @@ checklist_builtin = ""           # empty = checklists/default.md shipped with re
 prompt = ""                      # empty = prompts/review.md shipped with revali
 schema = ""                      # empty = schemas/review.schema.json shipped with revali
 timeout_min = 20
-exclude = []                     # files the review leaves out; a pattern matches the whole path, the file name, or dir/** (a rename: either name)
+exclude = []                     # files the review leaves out; a pattern matches the whole path, the file name, or dir/** (a rename: its new name)
 security_paths = []
 doc_roots = ["README.md", "CONVENTIONS.md", "CLAUDE.md"]   # the documentation graph's roots; the
                                  # prompt lists its documents that concern the change; [] = off

@@ -167,7 +167,7 @@ or removes: a word with a `_`, `-`, `.`, `/` or camelCase hump (`max_procs`,
 file, or a changed file's whole path. Files the diff
 leaves out do not count: `[review] exclude` and the reviewer's test pattern,
 each matching a changed file's whole path, its file name, or a `dir/**`
-prefix (a renamed file by either name); the same files are left out of the
+prefix (a renamed file by its new name); the same files are left out of the
 reviewer's diff and of preflight's diff size. Documents
 outside the graph are not searched, and a document the diff changes itself
 is marked so. The list ends with a map of the graph's documents and their

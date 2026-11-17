@@ -5,6 +5,7 @@ related-documents section."""
 import os
 import re
 import unittest
+from unittest import mock
 
 from revali import gitops
 from revali.preflight import preflight
@@ -113,13 +114,114 @@ class Numstat(RepoCase):
         self.assertIn(("src/calc.py", "src/arith.py"), names)
         self.assertIn(("README.md",), names)
 
-    def test_left_out_matches_either_name(self):
+    def test_left_out_decides_by_the_new_name(self):
+        """PR #82 round 1 F3: a rename out of an excluded name is reviewed."""
         self.assertTrue(
             gitops.left_out(("tests/x.py", "tests/test_review_x.py"), ["test_review_*.py"])
         )
-        self.assertTrue(gitops.left_out(("a.lock", "b.txt"), ["*.lock"]))
+        self.assertFalse(gitops.left_out(("a.lock", "b.txt"), ["*.lock"]))
         self.assertFalse(gitops.left_out(("a.txt", "b.txt"), ["*.lock"]))
         self.assertFalse(gitops.left_out(("a.lock",), []))
+
+
+BODY = "".join("line_%d = %d\n" % (i, i) for i in range(20))
+
+
+class Sections(RepoCase):
+    """PR #82 round 1: the left-out files' sections are cut from the whole diff (F1), renames
+    are found with -M whatever `diff.renames` says (F2), a name may hold a tab (F4)."""
+
+    def on_base(self, files):
+        """Commit `files` on main and merge main into feature/mul."""
+        git(["checkout", "-q", "main"], self.repo)
+        for path, text in files.items():
+            self.write(path, text)
+        self.commit_all("on the base")
+        git(["checkout", "-q", "feature/mul"], self.repo)
+        git(["merge", "-q", "--no-edit", "main"], self.repo)
+
+    def diff(self, exclude):
+        """The diff with sections cut, after checking the pathspec form gives the same text."""
+        base = gitops.rev_parse("main", self.repo)
+        entries = gitops._entries(base, "HEAD", self.repo)
+        whole = gitops.git_ok(
+            ["diff", "-M", "--src-prefix=a/", "--dst-prefix=b/", "%s...HEAD" % base], self.repo
+        ).stdout
+        self.assertIsNotNone(gitops._without_sections(whole, entries, exclude))
+        cut = gitops.diff_text(base, "HEAD", self.repo, exclude=exclude)
+        with mock.patch.object(gitops, "_without_sections", return_value=None):
+            self.assertEqual(gitops.diff_text(base, "HEAD", self.repo, exclude=exclude), cut)
+        return cut
+
+    def test_the_command_line_does_not_grow_with_the_left_out_files(self):
+        """F1: 600 names of 60 characters are more than Windows takes on one command line."""
+        for i in range(600):
+            self.write("vendor/some_vendored_package/module_with_a_long_name_%04d.py" % i, "v\n")
+        self.commit_all("vendored")
+        base = gitops.rev_parse("main", self.repo)
+        calls = []
+        real = gitops._git
+
+        def record(args, cwd, log=None, timeout=120):
+            calls.append(list(args))
+            return real(args, cwd, log, timeout)
+
+        with mock.patch.object(gitops, "_git", record):
+            text = gitops.diff_text(base, "HEAD", self.repo, exclude=["vendor/**"])
+        self.assertIn("src/calc.py", text)
+        self.assertNotIn("vendor/", text)
+        self.assertLess(max(len(" ".join(a)) for a in calls), 200, calls)
+
+    def test_mixed_entries_pair_with_their_sections(self):
+        self.on_base({"docs/gone.md": "gone\n", "pkg/a.lock": "a\n", "pkg/b.lock": "b\n"})
+        git(["rm", "-q", "docs/gone.md", "pkg/a.lock"], self.repo)
+        self.write("pkg/b.lock", "b2\n")
+        self.write("docs/a [b].md", "kept\n")
+        self.write("pkg/x [1].lock", "x\n")
+        self.commit_all("mixed")
+        diff = self.diff(["*.lock"])
+        self.assertIn("deleted file mode", diff)
+        self.assertIn("docs/gone.md", diff)
+        self.assertIn("docs/a [b].md", diff)
+        self.assertIn("def mul", diff)
+        self.assertNotIn(".lock", diff)
+
+    @unittest.skipIf(os.name == "nt", "symbolic links")
+    def test_a_type_change_has_two_sections(self):
+        self.on_base({"docs/t.md": "file\n", "pkg/t.lock": "file\n"})
+        for name in ("docs/t.md", "pkg/t.lock"):
+            os.remove(os.path.join(self.repo, name))
+            os.symlink("elsewhere", os.path.join(self.repo, name))
+        self.commit_all("type changes")
+        diff = self.diff(["*.lock"])
+        self.assertEqual(diff.count("diff --git a/docs/t.md b/docs/t.md\n"), 2)
+        self.assertNotIn("t.lock", diff)
+        self.assertIn("def mul", diff)
+
+    def test_copy_detection_in_the_users_config_changes_nothing(self):
+        """F2: with `diff.renames = copies` git would report the reviewer's test as a copy of
+        the author's edited file."""
+        self.on_base({"src/big.py": BODY})
+        self.write("src/big.py", BODY.replace("line_3 = 3", "author_edit = 3"))
+        self.write("tests/test_review_big.py", BODY.replace("line_5 = 5", "reviewer = 5"))
+        self.commit_all("edit and copy")
+        git(["config", "diff.renames", "copies"], self.repo)
+        base = gitops.rev_parse("main", self.repo)
+        self.assertIn("C", git(["diff", "--name-status", "%s...HEAD" % base], self.repo))
+        diff = self.diff(["test_review_*.py"])
+        self.assertIn("author_edit", diff)
+        self.assertNotIn("test_review_big.py", diff)
+        paths = gitops.diff_paths(base, "HEAD", self.repo, exclude=["test_review_*.py"])
+        self.assertIn("src/big.py", paths)
+        self.assertNotIn("tests/test_review_big.py", paths)
+
+    @unittest.skipIf(os.name == "nt", "a tab cannot be in a Windows file name")
+    def test_a_name_with_a_tab_is_counted(self):
+        """F4"""
+        self.write("docs/a\tb.md", "tab\n")
+        self.commit_all("tab")
+        rows = gitops.diff_numstat("main", "HEAD", self.repo)
+        self.assertIn((1, 0, ("docs/a\tb.md",)), rows)
 
 
 class Documented(unittest.TestCase):
