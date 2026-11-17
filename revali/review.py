@@ -1661,6 +1661,13 @@ def _run_round(
         state.needs_info_used = True
     write_text(os.path.join(rdir, "tests.md"), render_tests_md(ctx, state, state.rounds))
     state.reviewer_running = False
+    if verdict == CHANGES_REQUESTED:
+        # owed from the moment the verdict is saved: a run that stops before its exit-2
+        # summary (the test commit's push, the PR comment) must not let the next run review
+        # an unchanged branch again
+        state.fix_due = True
+    if commit_sha:
+        state.head_sha = commit_sha  # the run's own commit, never taken for the author's fix
     state.save(rdir)
     if log:
         log.stage(

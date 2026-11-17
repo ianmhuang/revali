@@ -398,10 +398,17 @@ def _rerun_bookkeeping(ctx, state: State, rdir: str, log: RunLog) -> None:
             state.force_push = True
         if state.fix_due:  # not the stage: a stop since then may have recorded `error`
             if ctx.head_sha == state.head_sha:
+                last = len(state.rounds)
+                asked = ""
+                if state.last_verdict == review.CHANGES_REQUESTED:
+                    asked = "; round %d requested changes: %s" % (
+                        last,
+                        os.path.join(rdir, "review-%d.md" % last),
+                    )
                 raise Stop(
                     EXIT_ACTION,
-                    "nothing changed since the last review (HEAD %s); "
-                    "fix, commit, then run again" % ctx.head_sha[:10],
+                    "nothing changed since the last review (HEAD %s)%s; "
+                    "fix, commit, then run again" % (ctx.head_sha[:10], asked),
                 )
             state.fixes += 1
             state.fix_due = False
