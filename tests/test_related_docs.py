@@ -274,6 +274,24 @@ class Prompt(RepoCase):
         self.assertNotIn("links to `src/calc.py`", p)
         self.assertNotIn("mentions `max_retries`", p)
 
+    def test_patterns_without_a_slash_leave_out_nested_files(self):
+        """F5 of round 2: the test pattern and `*.lock` match by base name, as in preflight."""
+        self.write("README.md", "[deps](pkg/deps.lock) and `aa_name`\n")
+        self.commit_all("root")
+        git(["push", "-q", "origin", "HEAD:main"], self.repo)
+        git(["fetch", "-q", "origin"], self.repo)
+        self.write("pkg/deps.lock", "v2\n")
+        self.write("tests/test_review_nested.py", "aa_name = 1\n")
+        self.commit_all("nested")
+        ctx = preflight(self.repo)
+        ctx.log = None
+        diff = gitops.diff_text(ctx.base_ref, "HEAD", self.repo)
+        self.assertIn("aa_name", diff)
+        self.assertIn("pkg/deps.lock", diff)
+        p = build_prompt(ctx, State(), self.rdir(), 1)
+        self.assertNotIn("links to `pkg/deps.lock`", p)
+        self.assertNotIn("mentions `aa_name`", p)
+
     def test_empty_roots_turn_it_off(self):
         self.docs_on_branch()
         self.set_review("doc_roots = []\n")
