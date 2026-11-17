@@ -91,7 +91,7 @@ temporary directory) keeps `<case>/prompt.md`, `<case>/review.raw.json`,
 
 The prompt, schema and checklist are the ones of the revali running the benchmark; the case
 repository contributes its own `revali.toml` (model, budget, test pattern, project
-checklist). A project that keeps `revali.toml` out of git has none in the clone: its cases
+checklist, `doc_roots`) and its documents at the case's head commit. A project that keeps `revali.toml` out of git has none in the clone: its cases
 carry a copy in the case directory, which is written into the clone first and replaces any
 the clone has. A case whose `revali.toml` this revali does not accept ends as `error`, and
 one that is not valid TOML as `malformed`.

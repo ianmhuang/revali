@@ -49,6 +49,9 @@ schema = ""                      # empty = schemas/review.schema.json shipped wi
 timeout_min = 20
 exclude = []
 security_paths = []
+doc_roots = ["README.md", "CONVENTIONS.md", "CLAUDE.md"]   # the documentation graph's roots; the
+                                 # prompt lists its documents that concern the change; [] = off
+doc_map_max = 100                # documents the prompt's map of the documentation lists at most
 tests = "commit"                 # where the reviewer's tests go: "commit" = into the branch (a test
                                  # commit per round); "archive" = under <state_dir>/<branch>/tests/,
                                  # never committed, sent into the sandbox as extra files, moved to

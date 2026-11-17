@@ -10,7 +10,9 @@ behaviour, in which case they are `correctness`.
    tests, fixtures, or docs.
 4. New or changed dependencies are justified in the change description.
 5. Public interfaces (API, CLI, config format) that changed have their
-   documentation updated in the same change.
+   documentation updated in the same change. That includes documents the diff
+   does not touch: a document listed as related to this change that still
+   describes the behaviour from before the change is a finding.
 6. Error and failure paths are handled; no silent `except: pass`.
 7. No dead code, commented-out blocks, or debugging leftovers.
 8. The diff does only what the change description says (no unrelated edits).

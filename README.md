@@ -19,7 +19,7 @@ the existing suite, and the merge waits for the result. Three roles take part.
 
 **Why separate sessions.** Each role runs in its own session with its own
 inputs, so nobody grades their own work: the Reviewer gets the acceptance
-criteria and the diff, not the Developer's reasoning, the Validator is a
+criteria, the diff and the documents the diff concerns, not the Developer's reasoning, the Validator is a
 test run, not an opinion, and the diagnosis session sees only the failure
 output. The models can differ by tier (`auto` puts the Reviewer one tier
 above the Developer) and, at the engine seam, by vendor
@@ -127,7 +127,7 @@ python <path-to>/revali.py --version        # same line as `version`
 
 What a run does, in order: preflight (ending with the existing suite in the sandbox
 as a baseline, by default running on alongside the next two steps), push + draft PR,
-reviewer round (`claude -p` with the diff, change.md, and the checklist; writes tests into `test_dir`; the script
+reviewer round (`claude -p` with the diff, change.md, the checklist and the documents related to the diff; writes tests into `test_dir`; the script
 checks AC coverage, runs `lint` over them, smoke-runs them, commits or archives them), validation
 (the new tests in the sandbox, plus the existing suite unless nothing but
 the reviewer's test commits changed since the baseline ran it; on failure

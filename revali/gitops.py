@@ -5,7 +5,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from revali.procs import ExeNotFound, ProcError, Result, resolve, run, run_retry
 
@@ -181,14 +181,90 @@ def diff_numstat(base: str, head: str, cwd: str) -> List[Tuple[int, int, str]]:
     return out
 
 
+def _excluding(exclude: Optional[List[str]]) -> List[str]:
+    if not exclude:
+        return []
+    return ["--", "."] + [":(exclude,glob)%s" % pat for pat in exclude]
+
+
 def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> str:
-    args = ["diff", "%s...%s" % (base, head)]
-    if exclude:
-        args.append("--")
-        args.append(".")
-        for pat in exclude:
-            args.append(":(exclude,glob)%s" % pat)
-    return git_ok(args, cwd).stdout
+    """The unified diff, with `a/` / `b/` prefixes whatever the user's `diff.noprefix` or
+    `diff.mnemonicPrefix` says (`diff_changed_lines` strips them)."""
+    args = ["diff", "--src-prefix=a/", "--dst-prefix=b/", "%s...%s" % (base, head)]
+    return git_ok(args + _excluding(exclude), cwd).stdout
+
+
+def diff_paths(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> List[str]:
+    """Every path the diff touches, "/" separated: both names of a rename or copy."""
+    res = git_ok(
+        ["diff", "--name-status", "-z", "%s...%s" % (base, head)] + _excluding(exclude), cwd
+    )
+    fields = res.stdout.split("\0")
+    paths: List[str] = []
+    i = 0
+    while i < len(fields) and fields[i]:
+        count = 2 if fields[i][:1] in ("R", "C") else 1
+        paths.extend(fields[i + 1 : i + 1 + count])
+        i += 1 + count
+    return [p for p in paths if p]
+
+
+_C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def _header_name(field: str) -> str:
+    """The file name of a `---` / `+++` line. git ends a name that holds a space with a tab,
+    and writes a name with a special or (by default, `core.quotePath`) non-ASCII character
+    in double quotes with C escapes, octal bytes of UTF-8 included."""
+    if field.endswith("\t"):
+        field = field[:-1]
+    if len(field) < 2 or not (field.startswith('"') and field.endswith('"')):
+        return field
+    body, out, i = field[1:-1], bytearray(), 0
+    while i < len(body):
+        ch = body[i]
+        if ch == "\\" and i + 1 < len(body):
+            nxt = body[i + 1]
+            octal = body[i + 1 : i + 4]
+            if len(octal) == 3 and all(c in "01234567" for c in octal):
+                out.append(int(octal, 8) & 0xFF)
+                i += 4
+                continue
+            if nxt in _C_ESCAPES:
+                out.append(_C_ESCAPES[nxt])
+                i += 2
+                continue
+        out.extend(ch.encode("utf-8"))
+        i += 1
+    return out.decode("utf-8", errors="replace")
+
+
+def diff_changed_lines(diff: str) -> Dict[str, List[str]]:
+    """file -> the lines a unified diff adds or removes, without their `+` / `-`. The file
+    is the new name (the old one for a deletion), unquoted (`_header_name`); the `---` /
+    `+++` header lines are not changed lines."""
+    found: Dict[str, List[str]] = {}
+    current: Optional[List[str]] = None
+    in_header = False
+    old = ""
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            in_header, current, old = True, None, ""
+            continue
+        if in_header:
+            if line.startswith("--- "):
+                old = _header_name(line[4:])
+            elif line.startswith("+++ "):
+                new = _header_name(line[4:])
+                name = old if new == "/dev/null" else new
+                name = name[2:] if name[:2] in ("a/", "b/") else name
+                current = found.setdefault(name, [])
+            elif line.startswith("@@"):
+                in_header = False
+            continue
+        if current is not None and line[:1] in ("+", "-"):
+            current.append(line[1:])
+    return found
 
 
 def changed_files(base: str, head: str, cwd: str) -> List[str]:

@@ -21,6 +21,7 @@ that moves it.
 | checklist, user layer | you | Reviewer | none | `checklist` in `~/.revali/config.toml` |
 | checklist, project layer | the project | Developer (via `CLAUDE.md`), Reviewer | `CONVENTIONS.md` | `[review] checklist` |
 | Reviewer prompt and schema | revali | Reviewer | [prompts/review.md](../prompts/review.md), [schemas/review.schema.json](../schemas/review.schema.json) in revali | `[review] prompt`, `schema` |
+| documentation graph: the roots and every file reachable from them by relative Markdown links; the Markdown documents that concern the diff, and a map of all of them, go into the Reviewer prompt | the project | revali, while building the Reviewer prompt | the project root; roots by default `["README.md", "CONVENTIONS.md", "CLAUDE.md"]` | `[review] doc_roots`, `doc_map_max` |
 | diagnosis prompt and schema | revali | diagnosis session | [prompts/diagnose.md](../prompts/diagnose.md), [schemas/diagnose.schema.json](../schemas/diagnose.schema.json) in revali | `[validate] prompt`, `schema` |
 | how tests are added here | the project | Reviewer | none | `[project] test_guide` |
 | sandbox clone | Validator | Validator; deleted after the run | `~/.revali/sandbox/<repo>/<branch>-<key>/<label>/` inside WSL; on the ssh host `<label>-<id>/` there, with `<label>-<id>-in/` and `<label>-<id>-logs/` beside it, `<id>` new for each session (`<key>`, `<id>`: see [sandbox.md](sandbox.md)) | `[validate.<platform>] sandbox_dir` |
