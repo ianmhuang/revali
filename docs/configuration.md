@@ -21,7 +21,10 @@ root; empty means the file revali ships with. `[validate.platform]` in
 any layer sets the defaults for every `[validate.<name>]` table.
 `[project] platforms` lists `linux`, `windows` or both, each with its own
 `[validate.<name>]` table; any other name, or a name listed twice, is a
-configuration error. A `windows` table needs `runner = "local"` on a
+configuration error. `[project] test_dir` is a directory inside the
+repository, relative to its root, read in its plain form (`./tests`, `tests/` and `tests\`
+are `tests`); an empty value, `.`, an absolute path, one with a `..` component or one with
+a blank at either end of a component is a configuration error. A `windows` table needs `runner = "local"` on a
 Windows host or `runner = "ssh"`: `runner = "wsl"` (the default) is
 refused there, since WSL runs Linux, and so is `local` on a host that is
 not Windows. The ssh runner hands its commands to the remote login shell,
