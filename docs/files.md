@@ -40,7 +40,7 @@ history row, is one of:
 | `pr` | pushing the branch and opening or updating the draft PR |
 | `review` | a Reviewer round, then the checks on its tests and their commit |
 | `validate` | the sandbox run after an APPROVE, and the base rerun and diagnosis on a FAIL |
-| `ready_to_merge` | done: APPROVE and PASS, exit 0; `revali merge` may run |
+| `ready_to_merge` | done: APPROVE and PASS, exit 0; `revali merge` may run. It still may after a later run on the same HEAD stopped before its `pr` stage (a dirty tree, a lint failure, `revali stop`): that stop records its own stage and adds "validation <n> still stands for HEAD <sha>" to its message. A run that starts its `pr` stage, or a new commit, ends that |
 | `merged` | `revali merge` merged the PR |
 | `needs_action` | exit 2: the Developer must fix, answer or rebase, then run again |
 | `needs_human` | exit 3: a human must decide |

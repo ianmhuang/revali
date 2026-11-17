@@ -134,8 +134,9 @@ stated.
   `gh pr edit <n> --title <title>` when the title differs from change.md's;
   when that edit fails nothing is merged (exit 1). A title that cannot be read,
   or a missing change.md, is a warning and the merge goes on
-- on `revali merge` (human-started, refused unless the last run ended READY
-  TO MERGE and HEAD has not moved): waits for CI checks if the PR has any,
+- on `revali merge` (human-started, refused unless a run ended READY TO
+  MERGE, no run has started its `pr` stage since, and HEAD has not moved; a
+  later run that stopped before that stage does not count): waits for CI checks if the PR has any,
   then `gh pr merge --<method> --delete-branch`, which also deletes the
   local branch and checks out the base branch; then `git pull --prune`, tried
   twice (revali checks out the base first when gh did not, and does not pull

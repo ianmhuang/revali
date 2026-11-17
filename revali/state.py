@@ -113,6 +113,10 @@ class State:
 
     # set by `revali archive` for a PR merged without `revali merge` (STATE_VERSION 10)
     merged_outside: bool = False
+    # the HEAD the validation that made the branch ready passed on; cleared when a later run
+    # starts its PR stage. `revali merge` accepts it while HEAD is still there, whatever a
+    # run that stopped before pushing recorded as the stage since (STATE_VERSION 11)
+    validated_sha: str = ""
     last_exit: int = -1
     message: str = ""
     started_at: str = ""
