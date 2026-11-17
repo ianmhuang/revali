@@ -327,6 +327,12 @@ def _repo_relative(value) -> bool:
     return ".." not in re.split(r"[\\/]", value)
 
 
+def _plain_dir(value: str) -> str:
+    """`value` "/" separated, without empty or `.` parts: `./tests/` and `tests\\` are
+    `tests`, `.` is empty."""
+    return "/".join(p for p in re.split(r"[\\/]", value) if p not in ("", "."))
+
+
 def _single_component(value: str) -> bool:
     return bool(value) and value not in (".", "..") and "/" not in value and "\\" not in value
 
@@ -507,6 +513,14 @@ def parse_project_config(
     if merge.auto_merge:
         warnings.append("merge.auto_merge is ignored in this version; merges stay manual")
         merge.auto_merge = False
+    if _repo_relative(project.test_dir) and _plain_dir(project.test_dir):
+        # one spelling for every `under_test_dir` caller, the prompt and the write permission
+        project.test_dir = _plain_dir(project.test_dir)
+    else:
+        problems.append(
+            "project.test_dir must be a directory inside the repository, relative to its root "
+            "(got %r)" % project.test_dir
+        )
     if "{topic}" not in project.test_file_pattern:
         problems.append("project.test_file_pattern must contain {topic}")
     if not _single_component(paths.state_dir):
