@@ -28,7 +28,8 @@ max_fixes = 2                     # fix cycles the author may make before a huma
 max_diff_lines = 800
 budget_usd = 2.0
 checklist = "CONVENTIONS.md"      # project layer; built-in and user layers are prepended
-# prompt = "docs/review-prompt.md"       # replace the built-in reviewer prompt (same $placeholders)
+# prompt = "docs/review-prompt.md"       # replace the built-in reviewer prompt (same $placeholders;
+                                         # no $related_docs_section, no related documents)
 # schema = "docs/review.schema.json"     # replace the built-in answer schema
 timeout_min = 20
 exclude = ["*.lock", "dist/**", "vendor/**"]

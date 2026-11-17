@@ -174,6 +174,55 @@ class DiffParsing(RepoCase):
             {"a.md": ["-- removed dashes", "++ added pluses"], "gone.py": ["old_name = 1"]},
         )
 
+    def test_quoted_and_tab_ended_names_are_read_back(self):
+        diff = (
+            "diff --git a/docs/my notes.md b/docs/my notes.md\n"
+            "--- a/docs/my notes.md\t\n"
+            "+++ b/docs/my notes.md\t\n"
+            "@@ -1 +1 @@\n"
+            "+one\n"
+            'diff --git "a/docs/\\303\\274.md" "b/docs/\\303\\274.md"\n'
+            '--- "a/docs/\\303\\274.md"\n'
+            '+++ "b/docs/\\303\\274.md"\n'
+            "@@ -1 +1 @@\n"
+            "+two\n"
+            'diff --git "a/q\\"t\\\\.md" "b/q\\"t\\\\.md"\n'
+            '--- "a/q\\"t\\\\.md"\n'
+            '+++ "b/q\\"t\\\\.md"\n'
+            "@@ -1 +1 @@\n"
+            "+three\n"
+        )
+        self.assertEqual(
+            gitops.diff_changed_lines(diff),
+            {"docs/my notes.md": ["one"], "docs/ü.md": ["two"], 'q"t\\.md': ["three"]},
+        )
+
+    def test_the_real_diff_names_match_the_paths_whatever_the_git_settings(self):
+        """F4 of round 1: a name with a space or a non-ASCII letter, and the user's
+        diff.noprefix / diff.mnemonicPrefix."""
+        self.write("docs/my notes.md", "x\n")
+        self.write("docs/über.md", "x\n")
+        self.commit_all("docs")
+        git(["config", "diff.noprefix", "true"], self.repo)
+        diff = gitops.diff_text("main", "HEAD", self.repo)
+        git(["config", "diff.noprefix", "false"], self.repo)
+        git(["config", "diff.mnemonicPrefix", "true"], self.repo)
+        self.assertEqual(diff, gitops.diff_text("main", "HEAD", self.repo))
+        changed = gitops.diff_changed_lines(diff)
+        self.assertEqual(changed.get("docs/my notes.md"), ["x"])
+        self.assertEqual(changed.get("docs/über.md"), ["x"])
+
+    def test_a_changed_document_with_a_space_does_not_mention_itself(self):
+        self.write("README.md", "[notes](docs/my%20notes.md)\n")
+        self.write("docs/my notes.md", "`self_name`\n")
+        self.commit_all("notes")
+        graph = docgraph.build(self.repo, ["README.md"])
+        self.assertIn("docs/my notes.md", graph.nodes)
+        diff = gitops.diff_text("main", "HEAD", self.repo)
+        paths = gitops.diff_paths("main", "HEAD", self.repo)
+        found = docgraph.related(graph, paths, gitops.diff_changed_lines(diff))
+        self.assertEqual([r.page for r in found if r.names], [])
+
     def test_diff_paths_name_both_sides_of_a_rename(self):
         git(["mv", "src/calc.py", "src/arith.py"], self.repo)
         self.commit_all("rename")
@@ -263,6 +312,18 @@ class Prompt(RepoCase):
         messages = [c.args[1] for c in log.stage.call_args_list]
         self.assertEqual(len(messages), 1)
         self.assertIn("denied: x.md", messages[0])
+
+    def test_the_prompt_names_the_failing_file_relative_to_the_repository(self):
+        self.docs_on_branch()
+        inside = PermissionError(13, "Permission denied", os.path.join(self.repo, "docs", "a.md"))
+        outside = PermissionError(13, "Permission denied", os.path.join(self.tmp, "home", "b.md"))
+        with mock.patch.object(docgraph, "build", side_effect=inside):
+            p = self.prompt(log=mock.Mock())
+        self.assertIn("unavailable: Permission denied: docs/a.md\n", p)
+        with mock.patch.object(docgraph, "build", side_effect=outside):
+            p = self.prompt(log=mock.Mock())
+        self.assertIn("unavailable: Permission denied: b.md\n", p)
+        self.assertNotIn(self.tmp, p)
 
     def test_no_related_document(self):
         p = self.prompt()  # the fixture's branch adds mul(); no document names it

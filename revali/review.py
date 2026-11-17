@@ -392,6 +392,21 @@ def _related_entry(r) -> str:
     return "- `%s`%s: %s" % (r.page, mark, "; ".join(parts))
 
 
+def _os_error_text(exc: OSError, root: str) -> str:
+    """`exc` for the prompt: its file relative to `root`, or its last part when outside, so
+    the prompt and its saved copy do not carry the user's home directory."""
+    name = exc.filename
+    if not isinstance(name, str) or not exc.strerror:
+        return str(exc)
+    try:
+        rel = os.path.relpath(name, root)
+    except ValueError:
+        rel = ".."
+    if rel == ".." or rel.startswith(".." + os.sep):
+        rel = os.path.basename(name)
+    return "%s: %s" % (exc.strerror, rel.replace(os.sep, "/"))
+
+
 def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
     """The documents of the link graph that concern this diff, and a map of the graph's
     documents. Empty when `[review] doc_roots` is empty; a graph that cannot be read is
@@ -409,7 +424,9 @@ def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
     except OSError as exc:
         if ctx.log:
             ctx.log.stage("review", "the documentation graph could not be read: %s" % exc)
-        return head + "This round the related documents are unavailable: %s\n" % exc
+        return head + "This round the related documents are unavailable: %s\n" % _os_error_text(
+            exc, ctx.repo_root
+        )
     if not graph.nodes:
         return (
             head

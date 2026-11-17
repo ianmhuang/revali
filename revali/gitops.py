@@ -188,7 +188,10 @@ def _excluding(exclude: Optional[List[str]]) -> List[str]:
 
 
 def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> str:
-    return git_ok(["diff", "%s...%s" % (base, head)] + _excluding(exclude), cwd).stdout
+    """The unified diff, with `a/` / `b/` prefixes whatever the user's `diff.noprefix` or
+    `diff.mnemonicPrefix` says (`diff_changed_lines` strips them)."""
+    args = ["diff", "--src-prefix=a/", "--dst-prefix=b/", "%s...%s" % (base, head)]
+    return git_ok(args + _excluding(exclude), cwd).stdout
 
 
 def diff_paths(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> List[str]:
@@ -206,10 +209,40 @@ def diff_paths(base: str, head: str, cwd: str, exclude: Optional[List[str]] = No
     return [p for p in paths if p]
 
 
+_C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def _header_name(field: str) -> str:
+    """The file name of a `---` / `+++` line. git ends a name that holds a space with a tab,
+    and writes a name with a special or (by default, `core.quotePath`) non-ASCII character
+    in double quotes with C escapes, octal bytes of UTF-8 included."""
+    if field.endswith("\t"):
+        field = field[:-1]
+    if len(field) < 2 or not (field.startswith('"') and field.endswith('"')):
+        return field
+    body, out, i = field[1:-1], bytearray(), 0
+    while i < len(body):
+        ch = body[i]
+        if ch == "\\" and i + 1 < len(body):
+            nxt = body[i + 1]
+            octal = body[i + 1 : i + 4]
+            if len(octal) == 3 and all(c in "01234567" for c in octal):
+                out.append(int(octal, 8) & 0xFF)
+                i += 4
+                continue
+            if nxt in _C_ESCAPES:
+                out.append(_C_ESCAPES[nxt])
+                i += 2
+                continue
+        out.extend(ch.encode("utf-8"))
+        i += 1
+    return out.decode("utf-8", errors="replace")
+
+
 def diff_changed_lines(diff: str) -> Dict[str, List[str]]:
     """file -> the lines a unified diff adds or removes, without their `+` / `-`. The file
-    is the new name (the old one for a deletion); the `---` / `+++` header lines are not
-    changed lines."""
+    is the new name (the old one for a deletion), unquoted (`_header_name`); the `---` /
+    `+++` header lines are not changed lines."""
     found: Dict[str, List[str]] = {}
     current: Optional[List[str]] = None
     in_header = False
@@ -220,9 +253,9 @@ def diff_changed_lines(diff: str) -> Dict[str, List[str]]:
             continue
         if in_header:
             if line.startswith("--- "):
-                old = line[4:]
+                old = _header_name(line[4:])
             elif line.startswith("+++ "):
-                new = line[4:]
+                new = _header_name(line[4:])
                 name = old if new == "/dev/null" else new
                 name = name[2:] if name[:2] in ("a/", "b/") else name
                 current = found.setdefault(name, [])

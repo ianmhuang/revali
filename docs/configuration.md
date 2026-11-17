@@ -169,7 +169,9 @@ outside the graph are not searched, and a document the diff changes itself
 is marked so. The list ends with a map of the graph's documents and their
 depth, at most `doc_map_max` of them (default 100; 0 leaves the map out).
 The checklist's documentation item then asks the reviewer to compare those
-documents with the new behaviour. `doc_roots = []` turns all of it off; a
+documents with the new behaviour. A project's own `[review] prompt` gets
+the section through `$related_docs_section`; one written before the
+placeholder existed leaves it out. `doc_roots = []` turns all of it off; a
 root that does not exist is skipped, and a graph that cannot be read is
 logged and noted in the prompt without stopping the review.
 
