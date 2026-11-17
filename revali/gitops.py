@@ -173,7 +173,7 @@ def diff_numstat(base: str, head: str, cwd: str) -> List[Tuple[int, int, Tuple[s
     Read with -z, so a rename never comes back as git's `dir/{old => new}` and a name is never
     quoted. Renames are found with -M whatever `diff.renames` says, as in `_entries` and
     `diff_text`, so a copy is never reported."""
-    res = git_ok(["diff", "-M", "--numstat", "-z", "%s...%s" % (base, head)], cwd)
+    res = git_ok(["diff", "-M", "--no-color", "--numstat", "-z", "%s...%s" % (base, head)], cwd)
     fields = res.stdout.split("\0")
     out: List[Tuple[int, int, Tuple[str, ...]]] = []
     i = 0
@@ -196,13 +196,13 @@ def diff_numstat(base: str, head: str, cwd: str) -> List[Tuple[int, int, Tuple[s
 def _entries(base: str, head: str, cwd: str) -> List[Tuple[str, Tuple[str, ...]]]:
     """(status letter, names) of each changed file in git's order, names "/" separated:
     (path,), or (old, new) for a rename (found with -M, as in `diff_numstat`)."""
-    args = ["diff", "-M", "--name-status", "-z", "%s...%s" % (base, head)]
+    args = ["diff", "-M", "--no-color", "--name-status", "-z", "%s...%s" % (base, head)]
     fields = git_ok(args, cwd).stdout.split("\0")
     entries: List[Tuple[str, Tuple[str, ...]]] = []
     i = 0
     while i < len(fields) and fields[i]:
         status = fields[i][:1]
-        count = 2 if status in ("R", "C") else 1
+        count = 2 if status in ("R", "C") else 1  # `C` only if a caller drops -M
         entries.append((status, tuple(p for p in fields[i + 1 : i + 1 + count] if p)))
         i += 1 + count
     return entries
@@ -249,10 +249,21 @@ def _without_sections(text: str, entries, exclude: List[str]) -> Optional[str]:
 def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> str:
     """The unified diff without the files `left_out` leaves out, with `a/` / `b/` prefixes
     whatever the user's `diff.noprefix` or `diff.mnemonicPrefix` says (`diff_changed_lines`
-    strips them). The left-out files' sections are cut from the whole diff, so the command
-    line does not grow with their number; when the sections cannot be paired with the
-    changed files, git is given the left-out names as literal pathspecs instead."""
-    args = ["diff", "-M", "--src-prefix=a/", "--dst-prefix=b/", "%s...%s" % (base, head)]
+    strips them), and no colour, external diff driver or submodule log whatever the user's
+    config says. The left-out files' sections are cut from the whole diff, so the command
+    line does not grow with their number. When the sections cannot be paired with the
+    changed files, git is given the left-out names as literal pathspecs instead, one
+    argument each, so only that fallback's command line grows with them."""
+    args = [
+        "diff",
+        "-M",
+        "--no-color",
+        "--no-ext-diff",
+        "--submodule=short",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "%s...%s" % (base, head),
+    ]
     text = git_ok(args, cwd).stdout
     entries = _entries(base, head, cwd) if exclude else []
     if not any(left_out(names, exclude) for _, names in entries):

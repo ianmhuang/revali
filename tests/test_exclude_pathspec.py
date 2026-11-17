@@ -215,6 +215,28 @@ class Sections(RepoCase):
         self.assertIn("src/big.py", paths)
         self.assertNotIn("tests/test_review_big.py", paths)
 
+    def test_output_settings_in_the_users_config_keep_the_cut(self):
+        """PR #82 round 2 F5: settings that change the diff's shape are pinned, so the
+        sections are cut and git is not given the left-out names."""
+        self.write("pkg/deps.lock", "lock\n")
+        self.commit_all("lock")
+        for key, value in (("color.ui", "always"), ("diff.submodule", "log")):
+            git(["config", key, value], self.repo)
+        base = gitops.rev_parse("main", self.repo)
+        calls = []
+        real = gitops._git
+
+        def record(args, cwd, log=None, timeout=120):
+            calls.append(list(args))
+            return real(args, cwd, log, timeout)
+
+        with mock.patch.object(gitops, "_git", record):
+            text = gitops.diff_text(base, "HEAD", self.repo, exclude=["*.lock"])
+        self.assertNotIn("\x1b[", text)
+        self.assertNotIn("deps.lock", text)
+        self.assertIn("def mul", text)
+        self.assertFalse([a for a in calls if "--" in a], calls)
+
     @unittest.skipIf(os.name == "nt", "a tab cannot be in a Windows file name")
     def test_a_name_with_a_tab_is_counted(self):
         """F4"""
