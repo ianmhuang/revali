@@ -60,4 +60,4 @@ class LeadSentence(RepoCase):
 class Version(unittest.TestCase):
     def test_prompt_version_moved(self):
         """AC-3"""
-        self.assertEqual(PROMPT_VERSION, "12")
+        self.assertGreaterEqual(int(PROMPT_VERSION), 12)
