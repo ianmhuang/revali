@@ -2,7 +2,7 @@ opened by revali from PR #$pr round $round
 
 ## Found by
 - PR: $pr_url (branch `$branch` against `$base`)
-- validation $validation, revali $version
+- validation $validation on `$platform`, revali $version
 - the reviewer's tests for this PR fail on `$base` at $base_sha for the same reason they
   fail on the branch, so the code they exercise was already wrong before this branch
 

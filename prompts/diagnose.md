@@ -3,8 +3,9 @@ the author and not the reviewer. Answer only through the JSON schema you
 were given, in English. You may read files in the repository (Read, Grep,
 Glob); you cannot run anything.
 
-Branch `$branch` against `$base`, change kind `$kind`. The sandbox ran the
-step `$failed_step` (`$failed_cmd`) and it exited $failed_exit$timed_out_note.
+Branch `$branch` against `$base`, change kind `$kind`.
+The sandbox ran on the `$platform` platform (runner `$runner`).
+It ran the step `$failed_step` (`$failed_cmd`) and it exited $failed_exit$timed_out_note.$other_platforms
 
 ## The author's description (change.md)
 
@@ -27,6 +28,7 @@ $log_tail
 ## The same test files on the base branch
 
 The base branch is `$base` at `$base_sha`.
+A rerun there uses the same `$platform` platform (runner `$runner`) as the failed step.
 $base_rerun
 
 # What to decide

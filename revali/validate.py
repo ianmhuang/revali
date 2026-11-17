@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
 from revali import EXIT_ERROR, engines, gitops, models
-from revali.config import PlatformCfg
+from revali.config import PlatformCfg, listed_platform
 from revali.engines import EngineRequest
 from revali.issues import IssueRef, maybe_open
 from revali.preflight import Context, Stop
@@ -128,7 +128,7 @@ def several(ctx: Context) -> bool:
 
 def platform(ctx: Context, name: str = "") -> PlatformCfg:
     """The `[validate.<name>]` table; the first listed platform's without a name."""
-    return ctx.cfg.validate.platforms[name or ctx.cfg.project.platforms[0]]
+    return listed_platform(ctx.cfg, name)
 
 
 def suffixed(label: str, name: str) -> str:
@@ -377,7 +377,8 @@ def run_validation(
         failed = part.report.failed
         part.base_rerun = rerun_on_base(ctx, state, failed, round_no, log, part.platform)
         if not ctx.dry_run:
-            _diagnose(ctx, state, rdir, failed, part, log)
+            others = [p for p in parts if p is not part]
+            _diagnose(ctx, state, rdir, failed, part, log, others)
             part.issue = maybe_open(ctx, state, rdir, part, log)
     outcome = _whole(parts)
     outcome.section_md = render_section(ctx, outcome)
@@ -659,9 +660,34 @@ def _base_rerun_for_prompt(rerun: BaseRerun) -> str:
     )
 
 
+def _other_platforms(others: List[ValidationOutcome]) -> str:
+    """The `$other_platforms` value of the diagnosis prompt: how the same validation went on
+    the other listed platforms; empty with one platform listed."""
+    if not others:
+        return ""
+    lines = []
+    for p in others:
+        if p.result == FAIL:
+            how = "FAIL at `%s`" % p.failed_step
+        elif p.skipped_reason:  # no step ran there: not a PASS to weigh against this one
+            how = "not run (%s)" % p.skipped_reason
+        else:
+            how = p.result
+        lines.append("- `%s`: %s" % (p.platform, how))
+    return "\n\nThe same validation on the other listed platforms:\n\n" + "\n".join(lines)
+
+
 def _diagnose(
-    ctx: Context, state: State, rdir: str, failed, outcome: ValidationOutcome, log: Optional[RunLog]
+    ctx: Context,
+    state: State,
+    rdir: str,
+    failed,
+    outcome: ValidationOutcome,
+    log: Optional[RunLog],
+    others: List[ValidationOutcome],
 ) -> None:
+    """Ask the diagnosis session about one failed platform; `others` are the other listed
+    platforms' outcomes of the same validation (empty with one platform listed)."""
     cfg = ctx.cfg.validate
     engine = engines.for_role(ctx.cfg, "validate")
     chosen = models.resolve(
@@ -675,10 +701,14 @@ def _diagnose(
     model = chosen.model
     outcome.model_reason = chosen.reason
     tests_md_path = os.path.join(rdir, "tests.md")
+    where = platform(ctx, outcome.platform)
     values = {
         "branch": ctx.branch,
         "base": ctx.base,
         "kind": ctx.doc.kind,
+        "platform": where.name,
+        "runner": where.runner,
+        "other_platforms": _other_platforms(others),
         "failed_step": failed.name,
         "failed_cmd": failed.cmd,
         "failed_exit": failed.returncode,

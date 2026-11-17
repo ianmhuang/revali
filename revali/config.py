@@ -163,6 +163,12 @@ class Config:
         return [list(e.tiers) for n, e in self.engines.items() if n != engine_name]
 
 
+def listed_platform(cfg: Config, name: str = "") -> PlatformCfg:
+    """The `[validate.<name>]` table, the first listed platform's without a name: an outcome
+    carries a platform name only when several are listed, so this is the platform it ran on."""
+    return cfg.validate.platforms[name or cfg.project.platforms[0]]
+
+
 @dataclass
 class UserConfig:
     checklist: str = ""

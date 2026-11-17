@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Set, Tuple
 
 from revali import VERSION, gitops
+from revali.config import listed_platform
 from revali.preflight import Context
 from revali.secretscan import scan_text
 from revali.state import RunLog, State, now_iso, read_text, write_text
@@ -129,14 +130,18 @@ def _acceptance(ctx: Context, state: State, tests: List[str]) -> str:
     return "\n".join(lines) or "(no acceptance criterion could be matched to the failing tests)"
 
 
-def _evidence(outcome, base: str, withhold: bool) -> str:
+def _evidence(ctx: Context, outcome, withhold: bool) -> str:
     rerun = outcome.base_rerun
+    seen = listed_platform(ctx.cfg, outcome.platform)
+    where = " Platform `%s`, runner `%s`." % (seen.name, seen.runner)
     lines = []
     branch_step = outcome.report.failed if outcome.report else None
     if branch_step is not None:
-        lines.append("On the branch: `%s` exit %d." % (branch_step.name, branch_step.returncode))
+        lines.append(
+            "On the branch: `%s` exit %d.%s" % (branch_step.name, branch_step.returncode, where)
+        )
     if rerun is not None:
-        lines.append("Base branch `%s`, %s." % (base, rerun.one_line()))
+        lines.append("Base branch `%s`, %s.%s" % (ctx.base, rerun.one_line(), where))
     if withhold:
         lines += ["", "Output: " + WITHHELD]
     elif rerun is not None and rerun.available:
@@ -180,12 +185,13 @@ def render_body(ctx: Context, state: State, outcome, failures: List[dict], withh
         "pr_url": state.pr_url or "#%d" % state.pr_number,
         "round": max(1, len(state.rounds)),
         "validation": outcome.number,
+        "platform": listed_platform(ctx.cfg, outcome.platform).name,
         "version": VERSION,
         "branch": ctx.branch,
         "base": ctx.base,
         "base_sha": (outcome.base_rerun.sha if outcome.base_rerun else ctx.base_sha)[:10],
         "tests": "\n".join("- `%s`" % t for t in tests),
-        "evidence": _evidence(outcome, ctx.base, withhold),
+        "evidence": _evidence(ctx, outcome, withhold),
         "diagnosis": _diagnosis(outcome, failures, withhold),
         "acceptance": _acceptance(ctx, state, tests),
         "fix": WITHHELD if withhold else str(outcome.diagnosis.get("recommendation", "")).strip(),
