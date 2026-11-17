@@ -269,9 +269,6 @@ def _run_foreground(args) -> int:
         return EXIT_ERROR
     logs_dir = paths_for(root).logs_dir
     log = RunLog(rdir, verbose=args.verbose, logs_dir=logs_dir)
-    problem = clear_wsl_retries(rdir, logs_dir)
-    if problem:
-        log.detail(problem)
     try:
         state = State.load(rdir) or State()
     except StateError:  # reported by cli.main; this run never started
@@ -280,16 +277,21 @@ def _run_foreground(args) -> int:
         raise
     code = EXIT_ERROR
     try:
-        code = _pipeline(args, cwd, rdir, state, log)
+        code = _pipeline(args, cwd, rdir, state, log, logs_dir)
     finally:
         release_lock(rdir)
         release_tree_lock(tpath)
     return code
 
 
-def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
+def _pipeline(args, cwd: str, rdir: str, state: State, log: RunLog, logs_dir: str) -> int:
     started = False  # the "no result yet" mark is on disk
     try:
+        # inside the try: a log write that fails here is recorded like any other error, and
+        # the caller's finally still releases the locks
+        problem = clear_wsl_retries(rdir, logs_dir)
+        if problem:
+            log.detail(problem)
         # No result yet: with the process gone, `wait` / `status` read -1 as "died" (see
         # state.run_died) instead of the previous run's exit code.
         state.last_exit = -1

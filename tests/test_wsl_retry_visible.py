@@ -126,6 +126,26 @@ class RecordFailures(RepoCase):
             run_cli(["run", "--foreground"])
         self.assertRegex(self.revali_log(), r"(?m)^\[\d\d:\d\d:\d\d\]   could not empty X$")
 
+    def test_a_failing_log_write_there_still_releases_the_locks(self):
+        # round 2 follow-up: the clear and its log line run under the locks' finally
+        real = RunLog.detail
+
+        def detail(log, msg):
+            if msg == "could not empty X":
+                raise OSError("disk full")
+            real(log, msg)
+
+        self.claude(claude_entry())
+        with mock.patch("revali.pipeline.clear_wsl_retries", return_value="could not empty X"):
+            with mock.patch.object(RunLog, "detail", detail):
+                code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertFalse(os.path.exists(lock_path(self.rdir())))
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".revali", "tree.lock")))
+        state = State.load(self.rdir())
+        self.assertEqual(state.stage, "error")
+        self.assertIn("OSError: disk full", state.message)
+
 
 class RunRecordsItsRetries(FlakyWsl):
     """AC-1, AC-2 through `revali run`: the probe's and the baseline thread's retries reach
