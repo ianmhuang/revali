@@ -432,8 +432,8 @@ def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
         graph = docgraph.build(ctx.repo_root, roots)
         # `diff` and these paths leave out the same files (`gitops.left_out`)
         paths = gitops.diff_paths(ctx.base_ref, "HEAD", ctx.repo_root, exclude=exclude)
-        lines = _lines_outside_tests(gitops.diff_changed_lines(diff), ctx.cfg.project.test_dir)
-        found = docgraph.related(graph, paths, lines)
+        changed = _lines_outside_tests(gitops.diff_changed_lines(diff), ctx.cfg.project.test_dir)
+        found = docgraph.related(graph, paths, changed)
     except OSError as exc:
         if ctx.log:
             ctx.log.stage("review", "the documentation graph could not be read: %s" % exc)
