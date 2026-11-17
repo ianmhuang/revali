@@ -791,7 +791,10 @@ def _validate_and_finish(
 
 def cmd_preflight(args) -> int:
     cwd = os.getcwd()
-    rdir = _rdir_for(cwd)
+    try:
+        _, branch, rdir = _locate_run(cwd, "")
+    except Stop:  # preflight below reports a repository or branch it cannot use
+        branch, rdir = "", None
     root = gitops.repo_root(cwd)
     log = RunLog(
         rdir if rdir and os.path.isdir(rdir) else None,
@@ -803,7 +806,7 @@ def cmd_preflight(args) -> int:
     except StateError:
         # preflight names the repo and branch in its own first line, which a state error
         # never reaches; name them here so this error says which branch it is about
-        _print_identity(root, gitops.current_branch(root))
+        _print_identity(root, branch)  # resolved above: no second git call to fail here
         raise
     try:
         # the same view of the tree as `run`: a NEEDS_INFO round's files may be dirty

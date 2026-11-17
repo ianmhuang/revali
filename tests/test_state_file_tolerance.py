@@ -4,6 +4,8 @@ broken state that it can read."""
 
 import json
 import os
+import tempfile
+import unittest
 
 from revali import EXIT_ERROR, EXIT_OK
 from revali.state import State
@@ -187,3 +189,18 @@ class OthersStillRefuse(StateFileCase):
             text = " ".join(fh.read().split())
         self.assertIn("byte order mark", text)
         self.assertIn("reads the fields that are well formed", text)
+
+
+class BenchToolReadsABom(unittest.TestCase):
+    """Round 2 F5: tools/bench_case.py reads an archived JSON file as revali reads state.json."""
+
+    def test_load_skips_a_bom(self):
+        from tests.test_bench_case import builder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, prefix in (("plain.json", b""), ("bom.json", BOM)):
+                path = os.path.join(tmp, name)
+                with open(path, "wb") as fh:
+                    fh.write(prefix + b'{"stage": "merged"}')
+                with self.subTest(file=name):
+                    self.assertEqual(builder._load(path), {"stage": "merged"})
