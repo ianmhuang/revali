@@ -141,13 +141,16 @@ class ResetClearsIt(StateCase):
                 self.assertEqual(code, EXIT_OK, status)
                 self.assertIn("state: none", status)
 
-    def test_a_file_the_broken_state_listed_is_not_touched(self):
+    def test_a_file_the_broken_state_listed_is_cleaned_up_from_its_good_fields(self):
+        # fix/state-file-tolerance (M3.14) AC-3 reverses this test's former expectation (the
+        # listed file was left untouched): only `fixes` is bad, the pending list is readable
         left = self.write("tests/test_review_left.py", "# a NEEDS_INFO round's draft\n")
         self.put('{"pending_test_files": ["tests/test_review_left.py"], "fixes": "1"}\n')
         code, out = run_cli(["reset"])
         self.assertEqual(code, EXIT_OK, out)
         self.assertFalse(os.path.exists(State.path(self.rdir())))
-        self.assertTrue(os.path.isfile(left))
+        self.assertFalse(os.path.isfile(left))
+        self.assertIn("skipped field(s): fixes", out)
 
     def test_the_next_run_starts_from_nothing(self):
         self.put('{"stage": "needs_action", "fixes": "1"}\n')

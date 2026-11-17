@@ -871,9 +871,9 @@ def cmd_status(args) -> int:
         return EXIT_ERROR
     root, branch, rdir = found
     paths = paths_for(root)
+    _print_identity(root, branch)  # first: a state error below then names its branch
     state = State.load(rdir)
     pid = lock_owner_alive(rdir)
-    _print_identity(root, branch)
     print("%s %s" % (NAME, VERSION))
     print("branch: %s" % branch)
     if pid:
@@ -931,11 +931,7 @@ def cmd_reset(args) -> int:
     try:
         state = State.load(rdir)
     except StateError as exc:
-        state = None
-        print(
-            "the state file could not be read (%s); the reviewer's uncommitted test files it "
-            "may list are not cleaned up, check `git status` before the next run" % exc
-        )
+        state = _salvaged(rdir, exc)
     if state is not None and (state.pending_test_files or state.reviewer_running):
         _reset_test_dir(state, rdir)
     if os.path.isfile(path):
@@ -945,6 +941,43 @@ def cmd_reset(args) -> int:
         print("no state to remove")
     release_lock(rdir)
     return EXIT_OK
+
+
+# what `reset`'s cleanup reads: the pending list, the interrupted-session flag, the tests mode
+# and archive mode's placed copies, and the reviewer's own files it restores
+CLEANUP_FIELDS = (
+    "pending_test_files",
+    "reviewer_running",
+    "tests_mode",
+    "placed_test_files",
+    "test_files",
+)
+
+
+def _salvaged(rdir: str, exc: StateError) -> Optional[State]:
+    """For `reset` on a state file State.load refused: the well-formed fields, when those the
+    cleanup reads are among them; None (and the reason printed) otherwise."""
+    not_cleaned = (
+        "the reviewer's uncommitted test files it may list are not cleaned up, check "
+        "`git status` before the next run"
+    )
+    try:
+        state, skipped = State.salvage(rdir)
+    except StateError as whole:  # not JSON, not an object: nothing to read fields from
+        print("the state file could not be read (%s); %s" % (whole, not_cleaned))
+        return None
+    needed = [name for name in skipped if name in CLEANUP_FIELDS]
+    if needed:
+        print(
+            "the state file could not be read (%s); its field(s) %s are not usable, so %s"
+            % (exc, ", ".join(needed), not_cleaned)
+        )
+        return None
+    print(
+        "the state file could not be read as a whole (%s); skipped field(s): %s; the cleanup "
+        "of the reviewer's uncommitted test files reads the others" % (exc, ", ".join(skipped))
+    )
+    return state
 
 
 def _reset_test_dir(state: State, rdir: str) -> None:
