@@ -513,7 +513,12 @@ def parse_project_config(
     if merge.auto_merge:
         warnings.append("merge.auto_merge is ignored in this version; merges stay manual")
         merge.auto_merge = False
-    if _repo_relative(project.test_dir) and _plain_dir(project.test_dir):
+    test_dir_parts = re.split(r"[\\/]", project.test_dir)
+    if (
+        _repo_relative(project.test_dir)
+        and _plain_dir(project.test_dir)
+        and all(p == p.strip() for p in test_dir_parts)  # `tests ` would match no path
+    ):
         # one spelling for every `under_test_dir` caller, the prompt and the write permission
         project.test_dir = _plain_dir(project.test_dir)
     else:

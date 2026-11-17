@@ -413,8 +413,6 @@ def _lines_outside_tests(
     """The changed lines of the files outside `test_dir`: a test's identifiers, fixture
     strings and AC references are not names a document should be listed for. The test files'
     paths still count, as links and as names (`docgraph.related` takes them from `paths`)."""
-    if not test_dir:
-        return changed_lines
     return {f: v for f, v in changed_lines.items() if not under_test_dir(f, test_dir)}
 
 

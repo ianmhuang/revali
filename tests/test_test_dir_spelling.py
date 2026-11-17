@@ -59,6 +59,10 @@ class Refused(unittest.TestCase):
             "../t",
             "tests/../x",
             "tests\\..\\x",
+            "tests ",  # PR #84 round 1 F3: a blank around a part would match no path
+            " tests",
+            "tests /unit",
+            "tests\t",
         ):
             with self.assertRaises(ConfigError, msg=value) as cm:
                 load(value)
