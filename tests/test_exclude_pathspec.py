@@ -215,13 +215,12 @@ class Sections(RepoCase):
         self.assertIn("src/big.py", paths)
         self.assertNotIn("tests/test_review_big.py", paths)
 
-    def test_output_settings_in_the_users_config_keep_the_cut(self):
-        """PR #82 round 2 F5: settings that change the diff's shape are pinned, so the
-        sections are cut and git is not given the left-out names."""
+    def cut_under(self, key, value):
+        """PR #82 round 2 F5, round 3 F6: with `key = value` in the repository's config the
+        diff still has the shape the cut needs, so git is not given the left-out names."""
         self.write("pkg/deps.lock", "lock\n")
         self.commit_all("lock")
-        for key, value in (("color.ui", "always"), ("diff.submodule", "log")):
-            git(["config", key, value], self.repo)
+        git(["config", key, value], self.repo)
         base = gitops.rev_parse("main", self.repo)
         calls = []
         real = gitops._git
@@ -232,10 +231,32 @@ class Sections(RepoCase):
 
         with mock.patch.object(gitops, "_git", record):
             text = gitops.diff_text(base, "HEAD", self.repo, exclude=["*.lock"])
-        self.assertNotIn("\x1b[", text)
         self.assertNotIn("deps.lock", text)
         self.assertIn("def mul", text)
         self.assertFalse([a for a in calls if "--" in a], calls)
+        return text
+
+    def test_colour_is_off(self):
+        self.assertNotIn("\x1b[", self.cut_under("color.ui", "always"))
+
+    def test_an_external_diff_driver_is_not_used(self):
+        self.assertNotIn("EXTERNAL_DRIVER", self.cut_under("diff.external", "echo EXTERNAL_DRIVER"))
+
+    def test_a_submodule_change_is_shown_as_a_commit_line(self):
+        """A gitlink moved on the branch; with `diff.submodule = log` git would write it as a
+        `Submodule sub ...` line without a `diff --git` header."""
+
+        def gitlink(sha, message):
+            git(["update-index", "--add", "--cacheinfo", "160000,%s,sub" % sha], self.repo)
+            git(["commit", "-q", "-m", message], self.repo)
+
+        git(["checkout", "-q", "main"], self.repo)
+        gitlink("1" * 40, "submodule on the base")
+        git(["checkout", "-q", "feature/mul"], self.repo)
+        git(["merge", "-q", "--no-edit", "main"], self.repo)
+        gitlink("2" * 40, "submodule moved")
+        text = self.cut_under("diff.submodule", "log")
+        self.assertIn("+Subproject commit " + "2" * 40, text)
 
     @unittest.skipIf(os.name == "nt", "a tab cannot be in a Windows file name")
     def test_a_name_with_a_tab_is_counted(self):
