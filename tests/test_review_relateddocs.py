@@ -217,6 +217,20 @@ class ChangedAndOutside(DocsCase):
         # orphan.md names `retry_limit` and links to src/calc.py, but no root reaches it
         self.assertNotIn("orphan.md", p)
 
+    def test_a_changed_document_with_a_space_in_its_name_does_not_mention_itself(self):
+        """Round 1, F4: git ends such a name with a tab on the `+++` line of the diff. The
+        document's added lines are still its own, so its code spans are not mentions."""
+        self.change_code()
+        self.write("README.md", README + "[notes](docs/my%20notes.md)\n")
+        self.write("docs/my notes.md", "# notes\n\nThe key `self_name` is described here.\n")
+        p = self.prompt()
+        # the graph reaches the document, and the other documents are still searched
+        self.assertRegex(p, r"`docs/my notes\.md`[^\n]*\bdepth\W*1\b")
+        self.assertTrue(entries(p, "docs/guide.md", "mentions"))
+        self.assertEqual(entries(p, "docs/my notes.md", "mentions"), [])
+        mentions = "\n".join(line for line in p.splitlines() if "mentions" in line)
+        self.assertNotIn("`self_name`", mentions)
+
 
 class DocumentationMap(DocsCase):
     """AC-5"""
