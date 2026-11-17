@@ -198,9 +198,10 @@ def _dirty_before_detach(root: str, rdir: str) -> Tuple[str, Optional[State]]:
 
 
 def _merge_note(state: State, root: str) -> str:
-    """The line a stop adds while the validation that made the branch ready still stands (a
-    run that stopped before its PR stage, with HEAD where that validation passed); "" when
-    it does not or HEAD cannot be read."""
+    """The line a stop adds while the validation that made the branch ready still stands, with
+    HEAD where that validation passed: a later run that stopped before its PR stage, or the
+    ready run itself stopping after it recorded `ready_to_merge`. "" when it does not or HEAD
+    cannot be read. A condition, not a promise: `revali merge` still checks the tree and CI."""
     if not state.validated_sha:
         return ""
     try:
@@ -209,18 +210,18 @@ def _merge_note(state: State, root: str) -> str:
         return ""
     if head != state.validated_sha:
         return ""
-    return "validation %d still stands for HEAD %s: `revali merge` merges it" % (
+    return "validation %d still stands for HEAD %s; `revali merge` may still merge it" % (
         len(state.validations),
         head[:10],
     )
 
 
 def _noted(message: str, note: str) -> str:
-    """`message` with `note` after its first line, as validate.with_note does for a Stop."""
+    """`message` with `note` as its last line, so a header and the list it introduces (the
+    dirty paths, the lint output) stay together."""
     if not note:
         return message
-    first, _, rest = message.partition("\n")
-    return first + "\n" + note + ("\n" + rest if rest else "")
+    return message.rstrip("\n") + "\n" + note
 
 
 def _stop_noted(stop: Stop, note: str) -> Stop:
@@ -569,10 +570,14 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
 
     _rerun_bookkeeping(ctx, state, rdir, log)
     resume_round = _approved_round_awaiting_validation(ctx, state)
-    state.branch, state.base = ctx.branch, ctx.base
+    state.branch = ctx.branch
     # lowercased like gitops.remote_repo, so stats groups both sources under one row
     state.repo = ("%s/%s" % (ctx.repo.owner, ctx.repo.name)).lower() if ctx.repo else ""
-    state.head_sha, state.base_sha = ctx.head_sha, ctx.base_sha
+    if not (args.dry_run and state.validated_sha):
+        # a dry run on a ready branch leaves what `revali merge` reads (a `--base` dry run
+        # would otherwise point the merge's checkout and pull at another base)
+        state.base = ctx.base
+        state.head_sha, state.base_sha = ctx.head_sha, ctx.base_sha
     _stage(state, rdir, log, "preflight", "preflight passed")
 
     if args.dry_run:
@@ -1140,7 +1145,8 @@ def cmd_merge(args) -> int:
     except Stop as stop:
         _print_stop(stop)
         if stop.exit_code != EXIT_ACTION:
-            state.message = stop.message
+            # the stage stays the stopped run's; the note keeps saying the validation stands
+            state.message = _noted(stop.message, _merge_note(state, root))
             state.save(rdir)
         _record_history(state, stop.exit_code)
         return stop.exit_code

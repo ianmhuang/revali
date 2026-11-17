@@ -154,6 +154,9 @@ class State:
                 "CHANGES_REQUESTED",
                 "FAIL",
             )
+        if "validated_sha" not in data and st.stage == "ready_to_merge":
+            # a state from before STATE_VERSION 11 that was ready: its head is the validated one
+            st.validated_sha = st.head_sha
         return st
 
     def save(self, rdir: str) -> None:

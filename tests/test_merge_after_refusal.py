@@ -50,7 +50,7 @@ class AfterReady(RepoCase):
         self.assertEqual(self.validated_sha(), self.validated)
 
     def note(self):
-        return "validation 1 still stands for HEAD %s: `revali merge` merges it" % (
+        return "validation 1 still stands for HEAD %s; `revali merge` may still merge it" % (
             self.validated[:10]
         )
 
@@ -82,6 +82,24 @@ class AfterReady(RepoCase):
         code, out = run_cli(["run"])
         self.assertEqual(code, EXIT_ERROR, out)
         self.assert_stopped_with_note(out, ("error",))
+        message = State.load(self.rdir()).message
+        # round 1 F1: the dirty paths stay under the line that announces them
+        self.assertTrue(message.endswith("\n" + self.note()), message)
+        self.assertLess(message.index("stray.txt"), message.index(self.note()))
+        os.remove(os.path.join(self.repo, "stray.txt"))
+        self.assert_merges()
+
+    def test_a_refused_merge_keeps_the_note(self):
+        """Round 1 follow-up: `revali merge` stopping with exit 1 rewrites the message."""
+        os.environ["REVALI_TEST_LINT_FAIL"] = "1"
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        del os.environ["REVALI_TEST_LINT_FAIL"]
+        self.write("stray.txt", "not committed\n")
+        self.assert_refused("working tree is not clean")
+        message = State.load(self.rdir()).message
+        self.assertIn("working tree is not clean", message)
+        self.assertTrue(message.endswith("\n" + self.note()), message)
         os.remove(os.path.join(self.repo, "stray.txt"))
         self.assert_merges()
 
@@ -168,6 +186,21 @@ class AfterReady(RepoCase):
         self.assertEqual(self.validated_sha(), self.validated)
         self.assert_merges()
 
+    def test_a_dry_run_on_another_base_leaves_what_merge_reads(self):
+        """Round 1 F3."""
+        before = State.load(self.rdir())
+        git(["branch", "release", "main"], self.repo)
+        git(["push", "-q", "origin", "release"], self.repo)
+        code, out = run_cli(["run", "--dry-run", "--base", "release"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("against release", out)
+        after = State.load(self.rdir())
+        self.assertEqual(
+            (after.base, after.base_sha, after.head_sha),
+            (before.base, before.base_sha, before.head_sha),
+        )
+        self.assert_merges()
+
     # AC-4 -----------------------------------------------------------------------------------
 
     def test_a_commit_after_ready(self):
@@ -189,8 +222,7 @@ class AfterReady(RepoCase):
 
     # AC-5 -----------------------------------------------------------------------------------
 
-    def test_a_state_from_before_the_field_still_merges(self):
-        self.assertEqual(STATE_VERSION, 11)
+    def as_version_10(self):
         path = State.path(self.rdir())
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -198,7 +230,32 @@ class AfterReady(RepoCase):
         data["version"] = 10
         with open(path, "w", encoding="utf-8", newline="") as fh:
             json.dump(data, fh)
+
+    def test_a_state_from_before_the_field_still_merges(self):
+        self.assertEqual(STATE_VERSION, 11)
+        self.as_version_10()
         self.assert_merges()
+
+    def test_a_ready_state_from_before_the_field_survives_a_stopped_run(self):
+        """Round 1 F4: a branch that was ready when revali was upgraded."""
+        self.as_version_10()
+        os.environ["REVALI_TEST_LINT_FAIL"] = "1"
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assert_stopped_with_note(out)
+        del os.environ["REVALI_TEST_LINT_FAIL"]
+        self.assert_merges()
+
+    def test_an_older_state_at_another_stage_gets_no_validated_head(self):
+        self.as_version_10()
+        path = State.path(self.rdir())
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["stage"] = "needs_action"
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            json.dump(data, fh)
+        self.assertEqual(State.load(self.rdir()).validated_sha, "")
+        self.assert_refused()
 
     def test_merged_or_closed_is_refused(self):
         for stage in ("merged", "closed"):

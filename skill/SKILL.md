@@ -77,6 +77,9 @@ Acting on the result:
   Answer each finding you do not fix in
   `.revali/<branch>/response-<n>.md` (`- F1: wontfix: <reason>`).
 - `1` (ERROR): report the message to the user and stop; do not retry blindly.
+  When its last line says "validation <n> still stands for HEAD <sha>", the
+  branch is still ready: tell the user `revali merge` may still merge it
+  (once the cause, a dirty tree for one, is gone) instead of running again.
 - `3` (NEEDS A HUMAN): summarise both sides' reasons to the user and stop.
 - `0`: report "ready to merge" with the summary (tests landing or archived, rounds, cost).
   Do not merge. The user runs `python "<revali dir>/revali.py" merge` when they
