@@ -7,7 +7,8 @@ run, posting the PR comment raises. The next run must refuse an unchanged HEAD w
 reviewer session and name the round and its review file; once the author has committed, one
 fix cycle is counted and the reviewer's test commit is on the remote, once. When the PR is
 merged outside revali after such a stop, `revali archive` keeps the local branch while the
-recorded test commit is not on the remote branch, and deletes it when it is."""
+recorded test commit is not in the `origin/<branch>` the clone knows, and deletes it when it
+is there or when the clone no longer knows `origin/<branch>` (pruned after the merge)."""
 
 import contextlib
 import io
@@ -252,14 +253,20 @@ class ArchiveAfterTheStop(StopCase):
     def local_tip(self):
         return gitops.rev_parse("refs/heads/" + BRANCH, self.repo)
 
+    def kept_lines(self, out):
+        return [line for line in out.splitlines() if BRANCH in line and "kept" in line]
+
     def test_a_test_commit_whose_push_was_rejected_keeps_the_branch(self):
         commit = self.stopped_round(at_the_test_commit_push(rejected))
         self.assertFalse(self.on_remote(commit))
         self.assertEqual(self.state().head_sha, commit)  # the recorded head is that commit
         out = self.archive_the_merged_pr()
         self.assertEqual(self.local_tip(), commit, out)  # the only copy of the reviewer's tests
-        kept = [line for line in out.splitlines() if BRANCH in line and "kept" in line]
-        self.assertTrue(kept, out)
+        # "and says so": a kept line names the commit, what it is, and where it is missing
+        named = [line for line in self.kept_lines(out) if commit[:7] in line]
+        self.assertTrue(named, out)
+        self.assertIn("test commit", named[0])
+        self.assertIn("origin/" + BRANCH, named[0])
 
     def test_a_test_commit_the_remote_holds_lets_the_branch_go(self):
         commit = self.stopped_round(comment_raises())  # stopped after the push
@@ -267,8 +274,28 @@ class ArchiveAfterTheStop(StopCase):
         self.assertEqual(self.state().head_sha, commit)
         out = self.archive_the_merged_pr()
         self.assertFalse(self.local_tip(), out)
-        kept = [line for line in out.splitlines() if BRANCH in line and "kept" in line]
-        self.assertFalse(kept, out)
+        self.assertFalse(self.kept_lines(out), out)
+
+    def test_a_pushed_test_commit_whose_remote_ref_was_pruned_lets_the_branch_go(self):
+        commit = self.stopped_round(comment_raises())  # stopped after the push
+        self.assertTrue(self.on_remote(commit))
+        self.assertEqual(self.state().head_sha, commit)
+        tracking = "refs/remotes/origin/" + BRANCH
+        # what a pruning fetch does once the remote branch is deleted with the merge
+        git(["update-ref", "-d", tracking], self.repo)
+        self.assertFalse(gitops.rev_parse(tracking, self.repo))
+        out = self.archive_the_merged_pr()
+        self.assertFalse(self.local_tip(), out)
+        self.assertFalse(self.kept_lines(out), out)
+
+    def test_an_author_commit_after_the_stop_keeps_the_branch(self):
+        commit = self.stopped_round(at_the_test_commit_push(rejected))
+        self.commit_fix("made after the stopped run")  # never pushed, never seen by the PR
+        tip = head(self.repo)
+        self.assertNotEqual(tip, commit)
+        out = self.archive_the_merged_pr()
+        self.assertEqual(self.local_tip(), tip, out)
+        self.assertTrue(self.kept_lines(out), out)
 
 
 class UnchangedElsewhere(StopCase):
