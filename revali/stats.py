@@ -81,6 +81,12 @@ def summarise(rows: List[dict]) -> str:
     out += ["last verdicts: " + ", ".join("%s %d" % (k, v) for k, v in sorted(verdicts.items()))]
     issues = sum(int(r.get("issues", 0) or 0) for r in runs)
     out += ["issues opened: %d" % issues]
+    outside = [r for r in runs if r.get("stage") == "merged" and r.get("merged_outside")]
+    closed = [r for r in runs if r.get("stage") == "closed"]
+    out += [
+        "merged outside `revali merge`: %d, closed without merging: %d"
+        % (len(outside), len(closed))
+    ]
     return "\n".join(out)
 
 

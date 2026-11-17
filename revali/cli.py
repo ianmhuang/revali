@@ -92,6 +92,16 @@ def build_parser() -> argparse.ArgumentParser:
         "merge the PR of the current branch (only after READY TO MERGE)",
         pipeline.cmd_merge,
     )
+    p_archive = _command(
+        sub,
+        "archive",
+        "record a PR merged or closed without `revali merge` and archive its review files "
+        "(never merges)",
+        pipeline.cmd_archive,
+    )
+    p_archive.add_argument(
+        "--branch", default="", help="branch to record instead of the checked-out one"
+    )
     _command(sub, "stats", "summarise the run history", _cmd_stats)
     _command(sub, "version", "print the version", pipeline.cmd_version)
     return parser

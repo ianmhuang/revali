@@ -26,8 +26,17 @@ STAGES = (
     "needs_human",
     "error",
     "stopped",
+    "closed",  # the PR was closed without merging; set by `revali archive` (STATE_VERSION 10)
 )
-TERMINAL_STAGES = ("ready_to_merge", "merged", "needs_action", "needs_human", "error", "stopped")
+TERMINAL_STAGES = (
+    "ready_to_merge",
+    "merged",
+    "needs_action",
+    "needs_human",
+    "error",
+    "stopped",
+    "closed",
+)
 
 
 def safe_branch(branch: str) -> str:

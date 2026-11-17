@@ -5,7 +5,7 @@ import os
 import shutil
 import stat
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops, issues
 from revali.config import ConfigError, load_project_config
@@ -377,19 +377,111 @@ def check_title(state: State, rdir: str, root: str, log: RunLog) -> None:
         )
 
 
-def pr_merged(pr_number: int, cwd: str, log: Optional[RunLog]) -> bool:
-    res = run(
-        resolve("gh") + ["pr", "view", str(pr_number), "--json", "state"],
-        cwd=cwd,
-        log=log.detail if log else None,
-        timeout=120,
-    )
-    if not res.ok:
-        return False
+def pr_view_state(pr_number: int, cwd: str, log: Optional[RunLog]) -> Tuple[str, str]:
+    """(state, problem): the PR's state from `gh pr view <n> --json state`, upper case (OPEN,
+    MERGED, CLOSED), or "" and why it could not be read."""
     try:
-        return str(json.loads(res.stdout).get("state", "")).upper() == "MERGED"
-    except ValueError:
-        return False
+        res = run(
+            resolve("gh") + ["pr", "view", str(pr_number), "--json", "state"],
+            cwd=cwd,
+            log=log.detail if log else None,
+            timeout=120,
+        )
+    except ProcError as exc:
+        return "", one_line(str(exc)) or "gh could not be run"
+    if not res.ok:
+        return "", one_line(res.text) or "gh exited %d" % res.returncode
+    try:
+        value = json.loads(res.stdout).get("state")
+    except (ValueError, AttributeError):
+        value = None
+    if not isinstance(value, str) or not value.strip():
+        return "", "no state in gh's answer"
+    return value.strip().upper(), ""
+
+
+def pr_merged(pr_number: int, cwd: str, log: Optional[RunLog]) -> bool:
+    return pr_view_state(pr_number, cwd, log)[0] == "MERGED"
+
+
+OUTSIDE_STAGES = {"MERGED": "merged", "CLOSED": "closed"}
+
+
+def record_outside(root: str, rdir: str, state: State, log: RunLog) -> str:
+    """`revali archive`: record a PR that was merged or closed without `revali merge`. Reads
+    the PR's state and never changes the PR. MERGED or CLOSED: the stage becomes `merged` or
+    `closed` and the stage recorded before is returned. Anything else raises Stop (exit 1)
+    with nothing written."""
+    number = state.pr_number
+    if not number:
+        name = safe_branch(state.branch) if state.branch else os.path.basename(rdir)
+        raise Stop(
+            EXIT_ERROR,
+            "no PR number recorded in %s; nothing to look up (`revali clean %s` deletes the "
+            "directory)" % (rdir, name),
+        )
+    if not gitops.gh_auth_ok(root, log.detail):
+        raise Stop(EXIT_ERROR, "gh is not logged in; nothing changed")
+    found, problem = pr_view_state(number, root, log)
+    if found == "OPEN":
+        raise Stop(
+            EXIT_ERROR,
+            "PR #%d is still open; `revali merge` merges it, `revali archive` only records a "
+            "PR merged or closed elsewhere" % number,
+        )
+    if found not in OUTSIDE_STAGES:
+        raise Stop(
+            EXIT_ERROR,
+            "could not tell how PR #%d ended (%s); nothing changed"
+            % (number, problem or "gh reports state %s" % found),
+        )
+    before = state.stage
+    if found == "MERGED":
+        message = "PR #%d merged outside `revali merge`; recorded by `revali archive`" % number
+    else:
+        message = "PR #%d closed without merging; recorded by `revali archive`" % number
+    state.set_stage(rdir, OUTSIDE_STAGES[found], message, EXIT_OK)
+    log.stage("archive", message + " (stage was %s)" % before)
+    return before
+
+
+def drop_merged_branch(root: str, branch: str, log: RunLog) -> str:
+    """After `revali archive` found the PR merged: delete the local branch unless a working
+    tree has it checked out. Returns the line for the output; git failing is part of it."""
+    try:
+        if not gitops.rev_parse("refs/heads/" + branch, root):
+            return "local branch %s: none" % branch
+        where = root if gitops.current_branch(root) == branch else ""
+        where = where or gitops.worktree_holding(branch, root)
+        if where:
+            return (
+                "local branch %s kept: checked out in %s; switch that tree to another branch, "
+                "then `git branch -D %s`" % (branch, where, branch)
+            )
+        removed, why = _delete_local_branch(root, branch, log, when=True)
+        return "local branch %s %s%s" % (branch, "removed" if removed else "kept", why)
+    except GIT_FAILURES as exc:
+        return "could not tell whether local branch %s was removed: %s" % (
+            branch,
+            one_line(str(exc)),
+        )
+
+
+def archive_summary(state: State, before: str) -> str:
+    how = "merged outside `revali merge`" if state.stage == "merged" else "closed without merging"
+    return (
+        "ARCHIVED: PR #%d %s (stage was %s)\n  rounds: %d, fix cycles: %d, validations: %d, "
+        "cost: $%.2f"
+        % (
+            state.pr_number,
+            how,
+            before,
+            len(state.rounds),
+            state.fixes,
+            len(state.validations),
+            state.cost_usd,
+        )
+    )
 
 
 def _worktree_follow_up(root: str, branch: str, base: str, elsewhere: str, log: RunLog) -> None:

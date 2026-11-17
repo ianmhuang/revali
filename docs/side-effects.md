@@ -158,6 +158,18 @@ stated.
   When `gh pr merge` exits non-zero but `gh pr view`
   reports the PR as MERGED, the merge counts as done and the local
   follow-up still runs
+- on `revali archive [--branch <branch>]` (human-started, for a PR merged or
+  closed without `revali merge`; refused while a run holds the branch or the
+  working tree): `gh auth status` and `gh pr view <n> --json state`, nothing
+  that changes the PR. An open PR, or a state gh cannot report, changes
+  nothing (exit 1). MERGED: the state's stage becomes `merged`, the local
+  branch is deleted with `git branch -D` unless a working tree has it checked
+  out (then it is kept and the output says so), a history row with
+  `merged_outside: true` and `stage_before` is appended, and the branch's
+  state directory is moved to `[paths] archive_dir` as `revali merge` moves
+  it. CLOSED: the same with stage `closed`, and the local branch is left
+  alone. The remote branch, the base branch and the issues a commit fixes
+  are not touched
 - after a review round that stops before its tests are committed (a failed
   or timed-out Reviewer session, unusable output, a smoke run that fails
   twice), deletes the untracked files matching `test_file_pattern` under

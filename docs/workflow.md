@@ -196,6 +196,17 @@ How often the reviewer finds a bug it is known to have found before is measured 
 [tools/review_bench.py](../tools/review_bench.py), which replays archived review rounds as a first round;
 [bench/README.md](../bench/README.md) says how to run it and build a case.
 
+A PR merged without `revali merge` (the web UI, a plain `gh pr merge`, a
+`revali merge` interrupted after its merge) or closed without merging is
+recorded with `revali archive`, or `revali archive --branch <branch>` from
+another branch or a detached HEAD: it asks gh how the PR ended and never
+merges it. Merged, the stage becomes `merged` and the local branch goes;
+closed, the stage becomes `closed` and the branch stays. Either way the
+history row says so and the review files move to the archive as at
+`revali merge`, so `revali stats` stops counting the branch as ready to
+merge. `revali clean <branch>` deletes the review files instead
+([docs/side-effects.md](side-effects.md)).
+
 ## Project setup
 
 Copy [templates/revali.toml](../templates/revali.toml) to the repo root and edit the commands; copy
