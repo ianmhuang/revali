@@ -94,6 +94,24 @@ class StatusNamesTheBranch(StateFileCase):
         self.assertIn("'fixes'", out)
 
 
+class PreflightNamesTheBranch(StateFileCase):
+    """Round 1 F2: `revali preflight` was the one command that read the state unnamed."""
+
+    def test_identity_comes_before_the_error(self):
+        self.needs_info_round()
+        self.edit(fixes="1")
+        code, out = run_cli(["preflight"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("branch: feature/mul", out)
+        self.assertLess(out.index("branch: feature/mul"), out.index("ERROR: "))
+
+    def test_a_readable_state_prints_no_extra_identity_line(self):
+        self.needs_info_round()
+        code, out = run_cli(["preflight"])
+        self.assertNotIn("ERROR", out)
+        self.assertNotIn("repo: %s  branch:" % self.repo, out)
+
+
 class ResetSalvages(StateFileCase):
     """AC-3, AC-4"""
 
@@ -118,13 +136,25 @@ class ResetSalvages(StateFileCase):
 
     def test_a_bad_field_the_cleanup_needs_leaves_the_files(self):
         self.needs_info_round()
-        self.edit(pending_test_files=[PENDING, None])
+        self.edit(pending_test_files=[PENDING, None], fixes="1")
         code, out = run_cli(["reset"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertIn("pending_test_files are not usable", out)
+        # round 1 F3: every skipped field is named, the cleanup's own among them
+        self.assertIn("skipped field(s): fixes, pending_test_files", out)
+        self.assertIn("pending_test_files among them", out)
         self.assertIn("not cleaned up", out)
         self.assertTrue(self.exists(PENDING))
         self.assertFalse(os.path.exists(State.path(self.rdir())))
+
+    def test_nothing_listed_says_so(self):
+        """Round 1 F1: no pending files and no interrupted round, nothing to clean up."""
+        self.needs_info_round()
+        self.edit(fixes="1", pending_test_files=[], reviewer_running=False)
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("skipped field(s): fixes; it lists no uncommitted test files", out)
+        self.assertNotIn("the cleanup of", out)
+        self.assertTrue(self.exists(PENDING))  # not listed any more: the author's to judge
 
     def test_a_file_that_is_not_json_leaves_the_files(self):
         self.needs_info_round()

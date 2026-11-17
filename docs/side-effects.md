@@ -189,7 +189,9 @@ stated.
   files are pending, not leftovers; they go only when the round after it
   is interrupted, and a pending file that is a tracked file of the
   reviewer's own is then restored from HEAD instead). In both cases, and
-  in `revali reset` after an interrupted round, a tracked file of the
+  in `revali reset` after an interrupted round (also from a state file with
+  fields of the wrong type, when the fields this cleanup reads are intact:
+  [files.md](files.md)), a tracked file of the
   reviewer's own from an earlier round that the session modified or
   deleted is restored from HEAD as well, and the log names it. revali
   cannot tell who changed such a file: after an interrupted round, until

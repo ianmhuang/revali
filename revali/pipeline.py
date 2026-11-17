@@ -798,7 +798,13 @@ def cmd_preflight(args) -> int:
         verbose=args.verbose,
         logs_dir=paths_for(root).logs_dir if root else "",
     )
-    state = (State.load(rdir) if rdir else None) or State()
+    try:
+        state = (State.load(rdir) if rdir else None) or State()
+    except StateError:
+        # preflight names the repo and branch in its own first line, which a state error
+        # never reaches; name them here so this error says which branch it is about
+        _print_identity(root, gitops.current_branch(root))
+        raise
     try:
         # the same view of the tree as `run`: a NEEDS_INFO round's files may be dirty
         preflight(
@@ -943,20 +949,12 @@ def cmd_reset(args) -> int:
     return EXIT_OK
 
 
-# what `reset`'s cleanup reads: the pending list, the interrupted-session flag, the tests mode
-# and archive mode's placed copies, and the reviewer's own files it restores
-CLEANUP_FIELDS = (
-    "pending_test_files",
-    "reviewer_running",
-    "tests_mode",
-    "placed_test_files",
-    "test_files",
-)
-
-
 def _salvaged(rdir: str, exc: StateError) -> Optional[State]:
-    """For `reset` on a state file State.load refused: the well-formed fields, when those the
-    cleanup reads are among them; None (and the reason printed) otherwise."""
+    """For `reset` on a state file State.load refused: the well-formed fields, when the ones
+    the cleanup reads (review.CLEANUP_FIELDS) are among them; None otherwise. Either way the
+    printed line names every skipped field and says whether anything is cleaned up."""
+    from revali import review
+
     not_cleaned = (
         "the reviewer's uncommitted test files it may list are not cleaned up, check "
         "`git status` before the next run"
@@ -966,17 +964,18 @@ def _salvaged(rdir: str, exc: StateError) -> Optional[State]:
     except StateError as whole:  # not JSON, not an object: nothing to read fields from
         print("the state file could not be read (%s); %s" % (whole, not_cleaned))
         return None
-    needed = [name for name in skipped if name in CLEANUP_FIELDS]
-    if needed:
-        print(
-            "the state file could not be read (%s); its field(s) %s are not usable, so %s"
-            % (exc, ", ".join(needed), not_cleaned)
-        )
-        return None
-    print(
-        "the state file could not be read as a whole (%s); skipped field(s): %s; the cleanup "
-        "of the reviewer's uncommitted test files reads the others" % (exc, ", ".join(skipped))
+    head = "the state file could not be read as a whole (%s); skipped field(s): %s" % (
+        exc,
+        ", ".join(skipped),
     )
+    needed = [name for name in skipped if name in review.CLEANUP_FIELDS]
+    if needed:
+        print("%s; %s among them, so %s" % (head, ", ".join(needed), not_cleaned))
+        return None
+    if state.pending_test_files or state.reviewer_running:
+        print("%s; the cleanup of the reviewer's uncommitted test files reads the others" % head)
+    else:
+        print("%s; it lists no uncommitted test files of the reviewer's" % head)
     return state
 
 

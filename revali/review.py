@@ -757,6 +757,20 @@ def restore_own_tests(
     return restored
 
 
+# Every State field discard_round_leftovers reads, directly or through the helpers it calls
+# (testarchive.archive_mode / remove_placed, restore_own_tests, drop_pending_tests): the
+# pending list, the interrupted-session flag, the tests mode, archive mode's placed copies,
+# the reviewer's own files. `revali reset` cleans up from a partly unreadable state only when
+# none of these was skipped, so a field the cleanup starts reading must be added here.
+CLEANUP_FIELDS = (
+    "pending_test_files",
+    "reviewer_running",
+    "tests_mode",
+    "placed_test_files",
+    "test_files",
+)
+
+
 def discard_round_leftovers(
     ctx: Context,
     state: State,

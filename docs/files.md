@@ -62,11 +62,13 @@ object, or has a field of the wrong type (a string where a number belongs,
 that reads it with exit 1 and one `ERROR:` line naming the file and the
 field; `revali stop` still stops the run first. `revali reset` removes such a
 file; when it is a JSON object, `reset` first reads the fields that are well
-formed, names the ones it skipped, and cleans up the reviewer's uncommitted
-test files the file lists, unless one of the fields that cleanup reads
-(`pending_test_files`, `reviewer_running`, `tests_mode`,
-`placed_test_files`, `test_files`) is among the skipped, or the file is not
-JSON at all: then it says the files are not cleaned up. A file saved with a
+formed and names every field it skipped. If none of the fields the cleanup
+reads (`pending_test_files`, `reviewer_running`, `tests_mode`,
+`placed_test_files`, `test_files`) is among them, it runs the cleanup a
+readable state gets: the pending files, or after an interrupted round every
+untracked file on `test_file_pattern` (see [side-effects.md](side-effects.md)).
+Otherwise, or when the file is not JSON or not an object, it says the
+reviewer's uncommitted test files are not cleaned up. A file saved with a
 UTF-8 byte order mark (some Windows editors add one) reads like one without;
 the next save writes it without. Every save writes the current state layout version in
 `version`, whatever version the file was read as.
