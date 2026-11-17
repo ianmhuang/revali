@@ -578,6 +578,10 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
         # would otherwise point the merge's checkout and pull at another base)
         state.base = ctx.base
         state.head_sha, state.base_sha = ctx.head_sha, ctx.base_sha
+    if not args.dry_run:
+        # this run reviews again: an earlier validation no longer counts, from the same save
+        # that records the run's base and head
+        state.validated_sha = ""
     _stage(state, rdir, log, "preflight", "preflight passed")
 
     if args.dry_run:
@@ -598,7 +602,6 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
         print("DRY RUN OK: " + msg)
         return EXIT_OK
 
-    state.validated_sha = ""  # this run reviews again: an earlier validation no longer counts
     _stage(state, rdir, log, "pr", "pushing and opening the PR")
     prstage.ensure_pr(ctx, state, rdir, log)
     state.head_sha = ctx.head_sha

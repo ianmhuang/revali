@@ -67,9 +67,15 @@ python "<revali dir>/revali.py" wait --timeout 9m
 something other than 4. Use the Bash tool's background mode if it has one.
 When `run` itself returns 1 (a dirty working tree, another run in progress),
 nothing was started: report its message and fix the cause before running
-again.
+again (but see the note below).
 
 Acting on the result:
+
+- Any result from `run` or `wait`, exit 1 or 2, whose last line says
+  "validation <n> still stands for HEAD <sha>": the branch is still ready.
+  Tell the user `revali merge` may still merge it once the cause (a dirty
+  tree, a changed environment) is gone, instead of committing and running
+  again, which pays for a new review.
 
 - `2` (ACTION NEEDED): read the printed findings / question / rebase request,
   do what it says, commit, run again. If a question needs the user, ask them.
@@ -77,9 +83,6 @@ Acting on the result:
   Answer each finding you do not fix in
   `.revali/<branch>/response-<n>.md` (`- F1: wontfix: <reason>`).
 - `1` (ERROR): report the message to the user and stop; do not retry blindly.
-  When its last line says "validation <n> still stands for HEAD <sha>", the
-  branch is still ready: tell the user `revali merge` may still merge it
-  (once the cause, a dirty tree for one, is gone) instead of running again.
 - `3` (NEEDS A HUMAN): summarise both sides' reasons to the user and stop.
 - `0`: report "ready to merge" with the summary (tests landing or archived, rounds, cost).
   Do not merge. The user runs `python "<revali dir>/revali.py" merge` when they

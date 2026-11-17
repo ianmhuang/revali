@@ -167,6 +167,27 @@ class AfterReady(RepoCase):
         self.assertNotIn("still stands", state.message)
         self.assert_refused()
 
+    def test_a_run_that_dies_on_its_way_to_the_pr_stage_ends_it(self):
+        """Round 2 follow-up: cleared in the save that records the run's base and head."""
+        from revali import pipeline
+
+        real = pipeline._stage
+        on_disk = []
+
+        def stage(state, rdir, log, name, *args, **kwargs):
+            if name == "pr":
+                on_disk.append(self.validated_sha())  # what a kill right here would leave
+                raise RuntimeError("killed")
+            return real(state, rdir, log, name, *args, **kwargs)
+
+        with mock.patch("revali.pipeline._stage", stage):
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertEqual(on_disk, [""])
+        self.assertEqual(self.validated_sha(), "")
+        self.assertNotIn("still stands", out)
+        self.assert_refused()
+
     def test_a_new_review_ends_it(self):
         self.claude(claude_entry(CR, write_tests=False))
         code, out = run_cli(["run", "--foreground"])

@@ -162,7 +162,9 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
     if gitops.dirty_paths(root, (cfg.paths.state_dir + "/",)):
         raise Stop(EXIT_ERROR, "working tree is not clean")
     head = gitops.rev_parse("HEAD", root) or ""
-    validated = state.validated_sha or state.head_sha  # head_sha: a state from before 11
+    # head_sha: a ready state saved without validated_sha (State.load derives it for an older
+    # layout, so only a state written by hand or by a test reaches this)
+    validated = state.validated_sha or state.head_sha
     if validated and head != validated:
         raise Stop(
             EXIT_ACTION,
