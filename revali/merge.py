@@ -420,7 +420,13 @@ def record_outside(root: str, rdir: str, state: State, log: RunLog) -> str:
             "no PR number recorded in %s; nothing to look up (`revali clean %s` deletes the "
             "directory)" % (rdir, name),
         )
-    if not gitops.gh_auth_ok(root, log.detail):
+    try:
+        logged_in = gitops.gh_auth_ok(root, log.detail)
+    except ProcError as exc:  # gh missing, or `gh auth status` timed out
+        raise Stop(
+            EXIT_ERROR, "gh could not be run (%s); nothing changed" % one_line(str(exc))
+        ) from exc
+    if not logged_in:
         raise Stop(EXIT_ERROR, "gh is not logged in; nothing changed")
     found, problem = pr_view_state(number, root, log)
     if found == "OPEN":
@@ -436,20 +442,38 @@ def record_outside(root: str, rdir: str, state: State, log: RunLog) -> str:
             % (number, problem or "gh reports state %s" % found),
         )
     before = state.stage
-    if found == "MERGED":
+    if found == "MERGED" and before == "merged":
+        message = (
+            "PR #%d merged by `revali merge`; its record finished by `revali archive`" % number
+        )
+    elif found == "MERGED":
         message = "PR #%d merged outside `revali merge`; recorded by `revali archive`" % number
     else:
         message = "PR #%d closed without merging; recorded by `revali archive`" % number
+    state.pending_effect = ""  # a `revali merge` stopped between its merge and its state write
     state.set_stage(rdir, OUTSIDE_STAGES[found], message, EXIT_OK)
     log.stage("archive", message + " (stage was %s)" % before)
     return before
 
 
-def drop_merged_branch(root: str, branch: str, log: RunLog) -> str:
+def _covered(tip: str, state: State, root: str) -> bool:
+    """`tip` holds nothing the PR did not: it is the head revali last saw (`state.head_sha`),
+    an ancestor of it, or an ancestor of the remote branch's last known tip."""
+    if state.head_sha and (tip == state.head_sha or gitops.is_ancestor(tip, state.head_sha, root)):
+        return True
+    remote = gitops.rev_parse("refs/remotes/origin/" + state.branch, root)
+    return bool(remote) and gitops.is_ancestor(tip, remote, root)
+
+
+def drop_merged_branch(root: str, state: State, log: RunLog) -> str:
     """After `revali archive` found the PR merged: delete the local branch unless a working
-    tree has it checked out. Returns the line for the output; git failing is part of it."""
+    tree has it checked out or it has commits the PR did not show (made after the last run,
+    or a new branch of the same name). Returns the line for the output; git failing is part
+    of it."""
+    branch = state.branch
     try:
-        if not gitops.rev_parse("refs/heads/" + branch, root):
+        tip = gitops.rev_parse("refs/heads/" + branch, root)
+        if not tip:
             return "local branch %s: none" % branch
         where = root if gitops.current_branch(root) == branch else ""
         where = where or gitops.worktree_holding(branch, root)
@@ -457,6 +481,12 @@ def drop_merged_branch(root: str, branch: str, log: RunLog) -> str:
             return (
                 "local branch %s kept: checked out in %s; switch that tree to another branch, "
                 "then `git branch -D %s`" % (branch, where, branch)
+            )
+        if not _covered(tip, state, root):
+            return (
+                "local branch %s kept: its tip %s is not in what revali last saw of the PR "
+                "(%s) nor in origin/%s; delete it yourself once nothing on it is needed"
+                % (branch, tip[:10], (state.head_sha or "no head recorded")[:10], branch)
             )
         removed, why = _delete_local_branch(root, branch, log, when=True)
         return "local branch %s %s%s" % (branch, "removed" if removed else "kept", why)
@@ -468,7 +498,12 @@ def drop_merged_branch(root: str, branch: str, log: RunLog) -> str:
 
 
 def archive_summary(state: State, before: str) -> str:
-    how = "merged outside `revali merge`" if state.stage == "merged" else "closed without merging"
+    if state.stage == "closed":
+        how = "closed without merging"
+    elif before == "merged":
+        how = "merged by `revali merge`, which stopped before its archive"
+    else:
+        how = "merged outside `revali merge`"
     return (
         "ARCHIVED: PR #%d %s (stage was %s)\n  rounds: %d, fix cycles: %d, validations: %d, "
         "cost: $%.2f"

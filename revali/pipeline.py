@@ -1122,10 +1122,13 @@ def cmd_archive(args) -> int:
     """Record a PR merged or closed outside `revali merge`: never merges, pushes or edits it."""
     from revali import merge
 
-    found = _located(os.getcwd(), args.branch, allow_detached=bool(args.branch))
+    found = _located(os.getcwd(), args.branch, allow_detached=True)
     if not found:
         return EXIT_ERROR
     root, branch, rdir = found
+    if branch == "HEAD":
+        print("ERROR: detached HEAD; name the branch: `revali archive --branch <branch>`")
+        return EXIT_ERROR
     _print_identity(root, branch)
     state = State.load(rdir) if os.path.isdir(rdir) else None
     if state is None:
@@ -1134,6 +1137,8 @@ def cmd_archive(args) -> int:
         )
         return EXIT_ERROR
     state.branch = state.branch or branch
+    # before the locks: a log that cannot be opened must not leave them behind
+    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(root).logs_dir)
     tpath = _tree_lock_path(root)
     if lock_owner_alive(rdir) or tree_lock_owner(tpath):
         print("ERROR: a run is in progress; `revali stop` first")
@@ -1149,12 +1154,11 @@ def cmd_archive(args) -> int:
         release_lock(rdir)
         print(_tree_held_message({"pid": exc.pid, "branch": exc.branch}))
         return EXIT_ERROR
-    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(root).logs_dir)
     local = ""
     try:
         before = merge.record_outside(root, rdir, state, log)
         if state.stage == "merged":
-            local = merge.drop_merged_branch(root, state.branch, log)
+            local = merge.drop_merged_branch(root, state, log)
             log.stage("archive", local)
     except Stop as stop:
         _print_stop(stop)
@@ -1166,7 +1170,8 @@ def cmd_archive(args) -> int:
         release_lock(rdir)
         release_tree_lock(tpath)
     extra = {"stage_before": before}
-    if state.stage == "merged":
+    if state.stage == "merged" and before != "merged":
+        # `before` merged: `revali merge` merged it and stopped before its archive move
         extra["merged_outside"] = True
     _record_history(state, EXIT_OK, extra=extra)
     print(merge.archive_summary(state, before))

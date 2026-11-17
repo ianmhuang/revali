@@ -81,6 +81,6 @@ wait_for_checks = true
 checks_timeout_min = 30
 
 # [paths]
-# archive_dir = "archive"         # where `revali merge` moves .revali/<branch>/ (as
+# archive_dir = "archive"         # where `revali merge` / `archive` move .revali/<branch>/ (as
 #                                 # <owner>__<repo>/<pr>-<branch>/): relative = under ~/.revali/,
 #                                 # absolute as written (a shared path, say); "" = delete it

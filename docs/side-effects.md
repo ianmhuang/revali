@@ -19,7 +19,7 @@ stated.
   the repository, and `FETCH_HEAD`
 - outside your repository, in the checkout revali itself runs from (when it
   runs from a git checkout): `git describe --tags --always --dirty` once per
-  `run`, `preflight`, `merge` or `stop` process, for the build named in the
+  `run`, `preflight`, `merge`, `archive` or `stop` process, for the build named in the
   logs and the history row. The refresh behind `--dirty` takes that
   checkout's `.git/index.lock` for a moment and may write its index back
   (stat data only, no content changes); a `git add`, `commit` or `pull` you
@@ -164,7 +164,9 @@ stated.
   that changes the PR. An open PR, or a state gh cannot report, changes
   nothing (exit 1). MERGED: the state's stage becomes `merged`, the local
   branch is deleted with `git branch -D` unless a working tree has it checked
-  out (then it is kept and the output says so), a history row with
+  out or its tip is neither the head revali last saw nor an ancestor of it or
+  of `origin/<branch>` (a commit made after the last run, or a new branch of
+  that name); a kept branch is named in the output with the reason; a history row with
   `merged_outside: true` and `stage_before` is appended, and the branch's
   state directory is moved to `[paths] archive_dir` as `revali merge` moves
   it. CLOSED: the same with stage `closed`, and the local branch is left

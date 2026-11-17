@@ -75,7 +75,7 @@ class Archive(RepoCase):
         self.assertIn("archive", help_text)
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(here, "README.md"), encoding="utf-8") as fh:
-            self.assertIn("| archive |", fh.read())
+            self.assertIn("| archive [--branch <b>] |", fh.read())
 
     # AC-3, AC-5 -----------------------------------------------------------------------------
 
@@ -165,6 +165,48 @@ class Archive(RepoCase):
         self.assertFalse(os.path.exists(self.archived()))
         self.assertEqual(len(self.rows()), 1)
 
+    def test_a_branch_with_commits_the_pr_did_not_show_is_kept(self):
+        """Round 1 F1: a commit after the last run, or a new branch of the same name."""
+        self.recorded()
+        self.pr_is("MERGED")
+        self.write("later.txt", "not pushed\n")
+        self.commit_all("after the last run")
+        tip = gitops.rev_parse("HEAD", self.repo)
+        git(["checkout", "-q", "main"], self.repo)
+        code, out = run_cli(["archive", "--branch", "feature/mul"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("local branch feature/mul kept: its tip %s is not in" % tip[:10], out)
+        self.assertEqual(gitops.rev_parse("refs/heads/feature/mul", self.repo), tip)
+
+    def test_without_a_recorded_head_the_remote_branch_vouches_for_the_tip(self):
+        self.recorded()
+        state = State.load(self.rdir())
+        state.head_sha = ""
+        state.save(self.rdir())
+        self.pr_is("MERGED")
+        git(["checkout", "-q", "main"], self.repo)
+        code, out = run_cli(["archive", "--branch", "feature/mul"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("local branch feature/mul removed", out)
+
+    def test_finishing_an_interrupted_revali_merge_is_not_merged_outside(self):
+        """Round 1 F3."""
+        self.recorded(stage="merged")
+        state = State.load(self.rdir())
+        state.pending_effect = "merge"
+        state.save(self.rdir())
+        self.pr_is("MERGED")
+        git(["checkout", "-q", "main"], self.repo)
+        code, out = run_cli(["archive", "--branch", "feature/mul"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("merged by `revali merge`, which stopped before its archive", out)
+        row = self.rows()[0]
+        self.assertEqual(row["stage_before"], "merged")
+        self.assertNotIn("merged_outside", row)
+        archived = State.load(self.archived())
+        self.assertEqual(archived.pending_effect, "")
+        self.assertNotIn("outside", archived.message)
+
     # AC-4 -----------------------------------------------------------------------------------
 
     def test_closed_gets_its_own_stage_and_leaves_the_branch(self):
@@ -209,6 +251,22 @@ class Archive(RepoCase):
                 code, out = run_cli(["archive"])
                 self.assert_nothing_changed(code, "ready_to_merge")
                 self.assertIn(words, out)
+
+    def test_a_gh_that_cannot_run_is_one_error_line(self):
+        """Round 1 F2."""
+        self.recorded()
+        os.environ["REVALI_GH_CMD"] = os.path.join(self.tmp, "no-such-gh")
+        code, out = run_cli(["archive"])
+        self.assert_nothing_changed(code, "ready_to_merge")
+        self.assertIn("ERROR: gh could not be run", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_a_detached_head_without_branch_names_the_option(self):
+        self.recorded()
+        git(["checkout", "-q", "--detach", "HEAD"], self.repo)
+        code, out = run_cli(["archive"])
+        self.assertEqual(code, EXIT_ERROR)
+        self.assertIn("`revali archive --branch <branch>`", out)
 
     def test_no_state_or_no_pr_number_changes_nothing(self):
         code, out = run_cli(["archive"])
