@@ -121,6 +121,23 @@ class RetriesOfARun(FlakyWsl):
             self.assertIn(line, printed)
             self.assertIn(line, logged)
 
+    def test_record_that_cannot_be_written_does_not_stop_the_retries(self):  # AC-1
+        # a directory where the record belongs: nothing can be appended to it
+        os.makedirs(record_path(self.rdir()))
+        self.plan(probe=9)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertNotIn("Traceback", out)
+        # both retries are still stage lines, and the run ends on the wsl failure itself
+        self.assertEqual(self.numbers(self.retry_lines(out.splitlines())), ["1", "2"], out)
+        self.assertIn("wsl --shutdown", out)
+        logged = file_lines(os.path.join(self.rdir(), "logs", "revali.log"))
+        self.assertEqual(self.numbers(self.retry_lines(logged)), ["1", "2"], logged)
+        # `wait` reports the run without a record it cannot read
+        code, out = run_cli(["wait", "--timeout", "1s"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertNotIn(RECORD, out)
+
     def test_detached_run_has_them_in_run_log_and_wait_names_the_record(self):  # AC-1, AC-4
         seed(self.rdir(), OLD + "\n")
         self.plan(probe=9)
