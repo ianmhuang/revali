@@ -140,9 +140,10 @@ def _on(name: str) -> str:
     return " on %s" % name if name else ""
 
 
-def _runner(ctx: Context, name: str = ""):
+def _runner(ctx: Context, name: str = "", log: Optional[RunLog] = None):
+    """The runner of platform `name`; its wsl retries go to `log` as stage lines."""
     try:
-        return get_runner(platform(ctx, name))
+        return get_runner(platform(ctx, name), notice=log.wsl_retry if log else None)
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, str(exc)) from exc
 
@@ -196,7 +197,7 @@ def run_baseline(ctx: Context, ref: str, log: Optional[RunLog]) -> str:
 
 def _baseline_on(ctx: Context, ref: str, tag: str, steps, log: Optional[RunLog]) -> None:
     """One platform's baseline; `tag` is its name when several are listed, else ""."""
-    runner = _runner(ctx, tag)
+    runner = _runner(ctx, tag, log)
     label = suffixed("baseline", tag)
     on = _on(tag)
     if log:
@@ -492,7 +493,7 @@ def _validate_on(
         if log:
             log.stage("validate", "run %d%s: %s" % (number, on, outcome.skipped_reason))
         return outcome
-    runner = _runner(ctx, tag)
+    runner = _runner(ctx, tag, log)
     label = suffixed("validate-r%d" % max(1, len(state.rounds)), tag)
     if log:
         if suite_note and not tag:
@@ -579,7 +580,7 @@ def rerun_on_base(
         if log:
             log.stage("validate", "base rerun%s not run: %s" % (_on(tag), out.reason))
         return out
-    runner = _runner(ctx, tag)
+    runner = _runner(ctx, tag, log)
     label = suffixed("base-r%d" % round_no, tag)
     files = sorted(extra)
     steps = steps_with_files(
@@ -754,6 +755,7 @@ def _diagnose(
         )
     except Stop as stop:
         outcome.diagnosis_error = stop.message
+        outcome.cost = stop.cost  # what the session spent before it failed; 0.0 when unknown
         if log:
             log.stage(
                 "validate", "diagnosis%s unavailable: %s" % (_on(outcome.platform), stop.message)

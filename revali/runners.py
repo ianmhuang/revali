@@ -122,8 +122,11 @@ def tail(text: str, n: int = 40) -> str:
 class Runner:
     name = "base"
 
-    def __init__(self, plat: PlatformCfg):
+    def __init__(self, plat: PlatformCfg, notice: Logger = None):
         self.plat = plat
+        # where a retry of the runner's own calls is announced (the run's stage line and
+        # retry record); without it the retry goes to the `log` of the call
+        self.notice = notice
 
     def run(
         self,
@@ -729,8 +732,8 @@ class WslRunner(Runner):
 
     name = "wsl"
 
-    def __init__(self, plat: PlatformCfg):
-        super().__init__(plat)
+    def __init__(self, plat: PlatformCfg, notice: Logger = None):
+        super().__init__(plat, notice)
         self.distro = plat.distro or "Ubuntu"
 
     def transient(self, res) -> str:
@@ -762,7 +765,8 @@ class WslRunner(Runner):
     ):
         """One wsl.exe call, repeated after `wsl_retry_wait_s` up to `wsl_retries` times while
         it fails with a `wsl_transient_errors` pattern (and `may_retry()` agrees). A timeout
-        of revali's own (ProcTimeout) is not retried."""
+        of revali's own (ProcTimeout) is not retried. Each retry is announced to `notice`
+        when the runner has one, else logged to `log`."""
         cmd = resolve("wsl") + ["-d", self.distro, "-e"] + args
         res = run(cmd, timeout=timeout, log=log)
         retries = max(self.plat.wsl_retries, 0)
@@ -773,11 +777,11 @@ class WslRunner(Runner):
                 break
             attempt += 1
             wait = max(self.plat.wsl_retry_wait_s, 0)
-            if log:
-                log(
-                    "[wsl] %s: %s; retry %d of %d in %gs"
-                    % (self.distro, pattern, attempt, retries, wait)
-                )
+            msg = "%s: %s; retry %d of %d in %gs" % (self.distro, pattern, attempt, retries, wait)
+            if self.notice:
+                self.notice(msg)
+            elif log:
+                log("[wsl] " + msg)
             _pause(wait)
             res = run(cmd, timeout=timeout, log=log)
         return res
@@ -1105,9 +1109,9 @@ class SshRunner(Runner):
         return ok
 
 
-def probe_runner(plat: PlatformCfg, log: Logger = None) -> str:
+def probe_runner(plat: PlatformCfg, log: Logger = None, notice: Logger = None) -> str:
     """Return "" when the runner can start, else one line for preflight. The fake runner always
-    can. `log` gets the wsl runner's retry lines."""
+    can. The wsl runner's retries go to `notice`, or to `log` without one."""
     if os.environ.get(FAKE_ENV):
         return ""
     try:
@@ -1127,7 +1131,7 @@ def probe_runner(plat: PlatformCfg, log: Logger = None) -> str:
                     )
                 )
         elif plat.runner == "wsl":
-            runner = WslRunner(plat)
+            runner = WslRunner(plat, notice)
             res = runner._wsl(
                 ["bash", "-c", SSH_PROBE], timeout=plat.connect_timeout_s + 60, log=log
             )
@@ -1144,14 +1148,15 @@ def probe_runner(plat: PlatformCfg, log: Logger = None) -> str:
     return ""
 
 
-def get_runner(plat: PlatformCfg) -> Runner:
+def get_runner(plat: PlatformCfg, notice: Logger = None) -> Runner:
+    """The runner for `plat`; `notice` announces the wsl runner's retries (see WslRunner._wsl)."""
     fake = os.environ.get(FAKE_ENV)
     if fake:
         return FakeRunner(plat, fake)
     if plat.runner == "local":
         return LocalRunner(plat)
     if plat.runner == "wsl":
-        return WslRunner(plat)
+        return WslRunner(plat, notice)
     if plat.runner == "ssh":
         return SshRunner(plat)
     raise RunnerError("unknown runner '%s'" % plat.runner)

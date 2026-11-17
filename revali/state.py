@@ -37,6 +37,7 @@ TERMINAL_STAGES = (
     "stopped",
     "closed",
 )
+WSL_RETRIES = "wsl-retries.log"  # in the branch's logs_dir, beside revali.log and run.log
 
 
 def safe_branch(branch: str) -> str:
@@ -473,6 +474,7 @@ class RunLog:
                 "RunLog needs logs_dir (the configured [paths] logs_dir) when rdir is given"
             )
         self.path = os.path.join(rdir, logs_dir, "revali.log") if rdir else None
+        self.retries_path = wsl_retries_path(rdir, logs_dir) if rdir else None
         self.verbose = verbose
         self.quiet = quiet
         self.timing = Timing()  # stage and sandbox wall times, reported at the end of the run
@@ -495,6 +497,47 @@ class RunLog:
         if self.verbose and not self.quiet:
             print(line, flush=True)
         self._write(line)
+
+    def wsl_retry(self, msg: str) -> None:
+        """A wsl call being retried: a stage line, and the same line appended to this run's
+        record of retries, which `wait` reads."""
+        line = "[%s] wsl: %s" % (time.strftime("%H:%M:%S"), msg)
+        if not self.quiet:
+            print(line, flush=True)
+        self._write(line)
+        if self.retries_path:
+            with open(self.retries_path, "a", encoding="utf-8", newline="\n") as fh:
+                fh.write(line + "\n")
+
+
+# ---- wsl retries of one run -------------------------------------------------
+
+
+def wsl_retries_path(rdir: str, logs_dir: str) -> str:
+    return os.path.join(rdir, logs_dir, WSL_RETRIES)
+
+
+def clear_wsl_retries(rdir: str, logs_dir: str) -> None:
+    """A run starts with an empty record, so `wait` never reports an earlier run's retries.
+    Truncated rather than removed: on Windows a `wait` reading it at that moment blocks a
+    delete, not a write. A failure leaves the old lines; it never stops the run."""
+    path = wsl_retries_path(rdir, logs_dir)
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, "w", encoding="utf-8", newline="\n"):
+            pass
+    except OSError:
+        pass
+
+
+def read_wsl_retries(rdir: str, logs_dir: str) -> List[str]:
+    """The retry lines this run has recorded, oldest first; [] when it has none."""
+    try:
+        with open(wsl_retries_path(rdir, logs_dir), "r", encoding="utf-8", errors="replace") as fh:
+            return [ln.rstrip("\r\n") for ln in fh if ln.strip()]
+    except OSError:  # none recorded, or unreadable: `wait` reports the run without it
+        return []
 
 
 # ---- history ----------------------------------------------------------------

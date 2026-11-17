@@ -154,12 +154,12 @@ class Probes(unittest.TestCase):
     """AC-3"""
 
     def ctx(self, text):
-        return SimpleNamespace(dry_run=False, cfg=load(text), detail=None)
+        return SimpleNamespace(dry_run=False, cfg=load(text), detail=None, wsl_retry=None)
 
     def run_check(self, ctx, answers):
         seen = []
 
-        def probe(plat, log=None):
+        def probe(plat, log=None, notice=None):
             seen.append(plat.name)
             return answers.get(plat.name, "")
 

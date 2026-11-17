@@ -26,9 +26,11 @@ from revali.state import (
     acquire_lock,
     acquire_tree_lock,
     append_history,
+    clear_wsl_retries,
     lock_owner_alive,
     read_lock,
     read_tree_lock,
+    read_wsl_retries,
     release_lock,
     release_tree_lock,
     review_dir,
@@ -36,6 +38,7 @@ from revali.state import (
     safe_branch,
     tree_lock_owner,
     tree_lock_path,
+    wsl_retries_path,
 )
 
 
@@ -149,6 +152,8 @@ def _run_detached(args) -> int:
     if owner:
         print(_tree_held_message(owner))
         return EXIT_ERROR
+    # this run's result replaces the previous one even when it is a refusal, so must its record
+    clear_wsl_retries(rdir, paths_for(root).logs_dir)
     problem, state = _dirty_before_detach(root, rdir)
     if problem:
         problem = _noted(problem, _merge_note(state, root) if state else "")
@@ -260,7 +265,9 @@ def _run_foreground(args) -> int:
         release_lock(rdir)
         print(_tree_held_message({"pid": exc.pid, "branch": exc.branch}))
         return EXIT_ERROR
-    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(root).logs_dir)
+    logs_dir = paths_for(root).logs_dir
+    log = RunLog(rdir, verbose=args.verbose, logs_dir=logs_dir)
+    clear_wsl_retries(rdir, logs_dir)
     try:
         state = State.load(rdir) or State()
     except StateError:  # reported by cli.main; this run never started
@@ -844,6 +851,7 @@ def cmd_wait(args) -> int:
         return EXIT_ERROR
     root, branch, rdir = found
     _print_identity(root, branch)
+    logs_dir = paths_for(root).logs_dir
     deadline = time.monotonic() + parse_duration(args.timeout)
     while True:
         pid = lock_owner_alive(rdir)
@@ -852,6 +860,12 @@ def cmd_wait(args) -> int:
             if state is None:
                 print("no revali run recorded for this branch")
                 return EXIT_ERROR
+            retries = read_wsl_retries(rdir, logs_dir)
+            if retries:  # before the result: the result line stays the last one
+                print(
+                    "wsl retries in this run: %d; see %s"
+                    % (len(retries), wsl_retries_path(rdir, logs_dir))
+                )
             if run_died(state):
                 lock = read_lock(rdir)  # stale when present: nobody alive owns it
                 release_lock(rdir)
@@ -870,6 +884,9 @@ def cmd_wait(args) -> int:
             stage = state.stage if state else "starting"
             again = "revali wait --branch %s" % args.branch if args.branch else "revali wait"
             print("still running (pid %d), stage %s; call `%s` again" % (pid, stage, again))
+            retries = read_wsl_retries(rdir, logs_dir)
+            if retries:
+                print("wsl retries in this run: %d; latest: %s" % (len(retries), retries[-1]))
             return EXIT_OK + 4  # 4: still running, distinct from the pipeline codes
         time.sleep(min(2.0, max(0.1, deadline - time.monotonic())))
 
