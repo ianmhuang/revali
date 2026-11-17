@@ -113,6 +113,11 @@ class State:
 
     # set by `revali archive` for a PR merged without `revali merge` (STATE_VERSION 10)
     merged_outside: bool = False
+    # the HEAD the validation that made the branch ready passed on; cleared when a later run
+    # (not a dry run) passes preflight and its rerun checks, on its way to the PR stage.
+    # `revali merge` accepts it while HEAD is still there, whatever a run that stopped
+    # before pushing recorded as the stage since (STATE_VERSION 11)
+    validated_sha: str = ""
     last_exit: int = -1
     message: str = ""
     started_at: str = ""
@@ -150,6 +155,9 @@ class State:
                 "CHANGES_REQUESTED",
                 "FAIL",
             )
+        if "validated_sha" not in data and st.stage == "ready_to_merge":
+            # a state from before STATE_VERSION 11 that was ready: its head is the validated one
+            st.validated_sha = st.head_sha
         return st
 
     def save(self, rdir: str) -> None:

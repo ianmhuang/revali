@@ -120,7 +120,7 @@ public one.
 python <path-to>/revali.py preflight        # checks only, changes nothing
 python <path-to>/revali.py run              # detached; then:
 python <path-to>/revali.py wait --timeout 9m
-python <path-to>/revali.py merge            # only after READY TO MERGE; waits for CI
+python <path-to>/revali.py merge            # after READY TO MERGE (docs/files.md, stages); waits for CI
 python <path-to>/revali.py status | stop | reset | clean <branch> | archive [--branch <b>] | stats | version
 python <path-to>/revali.py --version        # same line as `version`
 ```
