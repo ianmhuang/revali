@@ -164,7 +164,9 @@ reviewer prompt lists the Markdown documents of that graph that link to a
 file the diff changes, or that name in a code span something the diff adds
 or removes: a word with a `_`, `-`, `.`, `/` or camelCase hump (`max_procs`,
 `--branch`; not `run`) found as a whole word on a changed line of another
-file, or a changed file's whole path. Files the diff
+file, or a changed file's whole path. The changed lines of files under `test_dir` do not
+count (a test's identifiers would list documents the change does not concern); a link to a
+test file, or its whole path, does. Files the diff
 leaves out do not count: `[review] exclude` and the reviewer's test pattern,
 each matching a changed file's whole path, its file name, or a `dir/**`
 prefix (a renamed file by its new name); the same files are left out of the
