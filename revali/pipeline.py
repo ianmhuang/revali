@@ -1173,7 +1173,10 @@ def cmd_archive(args) -> int:
     print(merge.archive_summary(state, before))
     if local:
         print("  " + local)
-    print("  " + _archive_branch_dir(root, rdir, state))
+    line = _archive_branch_dir(root, rdir, state)
+    if line.startswith("could not archive"):
+        line += "; `revali archive` again finishes the move"
+    print("  " + line)
     return EXIT_OK
 
 

@@ -199,7 +199,7 @@ class Archive(RepoCase):
         with mock.patch.object(merge, "archive_review_dir", lambda *a: failed):
             code, out = run_cli(["archive", "--branch", "feature/mul"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertIn(failed, out)
+        self.assertIn(failed + "; `revali archive` again finishes the move", out)
         self.assertTrue(State.load(self.rdir()).merged_outside)
         code, out = run_cli(["archive", "--branch", "feature/mul"])
         self.assertEqual(code, EXIT_OK, out)
