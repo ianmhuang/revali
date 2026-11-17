@@ -191,6 +191,18 @@ class StopsBeforeThePrStage(ReadyCase):
             fh.write(approved)
         self.assert_merges()
 
+    def test_gh_logged_out(self):
+        """A preflight stop with exit 1 that the run itself records (not the refusal before
+        detaching)."""
+        self.scenario({"auth_exit": 1})
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("not logged in", out)
+        self.assert_note(out)
+        self.assert_reported("error", EXIT_ERROR, "not logged in")
+        self.scenario({"auth_exit": 0})
+        self.assert_merges()
+
     def test_two_stops_in_a_row(self):
         self.write("stray.txt", "not committed\n")
         code, out = run_cli(["run"])
@@ -248,6 +260,24 @@ class WhatEndsIt(ReadyCase):
         self.assertNotIn("still stands", out)
         self.assertNotIn("still stands", State.load(self.rdir()).message)
         self.assert_refused("not ready to merge")
+
+    def test_a_run_that_stops_in_its_pr_stage_ends_it(self):
+        """AC-3, whatever that run's outcome: the run passed preflight and pushed, then found
+        the PR closed (exit 1, no review). The cause going away does not bring the validation
+        back."""
+        self.scenario({"prs_all": [{"number": 7, "url": "u", "state": "CLOSED"}]})
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("is closed", out)
+        self.assertNotIn("still stands", out)
+        state = State.load(self.rdir())
+        self.assertEqual(state.stage, "error")
+        self.assertNotIn("still stands", state.message)
+        self.scenario({"prs_all": []})
+        self.assert_refused("not ready to merge")
+        code, out = run_cli(["status"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("still stands", out)
 
     def test_a_run_that_ends_ready_again_counts_again(self):
         self.claude(claude_entry(approve_response(), write_tests=False))
