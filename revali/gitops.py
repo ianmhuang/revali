@@ -5,7 +5,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from revali.procs import ExeNotFound, ProcError, Result, resolve, run, run_retry
 
@@ -181,14 +181,57 @@ def diff_numstat(base: str, head: str, cwd: str) -> List[Tuple[int, int, str]]:
     return out
 
 
+def _excluding(exclude: Optional[List[str]]) -> List[str]:
+    if not exclude:
+        return []
+    return ["--", "."] + [":(exclude,glob)%s" % pat for pat in exclude]
+
+
 def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> str:
-    args = ["diff", "%s...%s" % (base, head)]
-    if exclude:
-        args.append("--")
-        args.append(".")
-        for pat in exclude:
-            args.append(":(exclude,glob)%s" % pat)
-    return git_ok(args, cwd).stdout
+    return git_ok(["diff", "%s...%s" % (base, head)] + _excluding(exclude), cwd).stdout
+
+
+def diff_paths(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> List[str]:
+    """Every path the diff touches, "/" separated: both names of a rename or copy."""
+    res = git_ok(
+        ["diff", "--name-status", "-z", "%s...%s" % (base, head)] + _excluding(exclude), cwd
+    )
+    fields = res.stdout.split("\0")
+    paths: List[str] = []
+    i = 0
+    while i < len(fields) and fields[i]:
+        count = 2 if fields[i][:1] in ("R", "C") else 1
+        paths.extend(fields[i + 1 : i + 1 + count])
+        i += 1 + count
+    return [p for p in paths if p]
+
+
+def diff_changed_lines(diff: str) -> Dict[str, List[str]]:
+    """file -> the lines a unified diff adds or removes, without their `+` / `-`. The file
+    is the new name (the old one for a deletion); the `---` / `+++` header lines are not
+    changed lines."""
+    found: Dict[str, List[str]] = {}
+    current: Optional[List[str]] = None
+    in_header = False
+    old = ""
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            in_header, current, old = True, None, ""
+            continue
+        if in_header:
+            if line.startswith("--- "):
+                old = line[4:]
+            elif line.startswith("+++ "):
+                new = line[4:]
+                name = old if new == "/dev/null" else new
+                name = name[2:] if name[:2] in ("a/", "b/") else name
+                current = found.setdefault(name, [])
+            elif line.startswith("@@"):
+                in_header = False
+            continue
+        if current is not None and line[:1] in ("+", "-"):
+            current.append(line[1:])
+    return found
 
 
 def changed_files(base: str, head: str, cwd: str) -> List[str]:

@@ -8,6 +8,7 @@ in defaults.toml.
 """
 
 import os
+import re
 import sys
 import tomllib
 from dataclasses import dataclass, field
@@ -87,6 +88,8 @@ class ReviewCfg:
     timeout_min: int = 0
     exclude: List[str] = field(default_factory=list)
     security_paths: List[str] = field(default_factory=list)
+    doc_roots: List[str] = field(default_factory=list)  # roots of the documentation graph
+    doc_map_max: int = 0  # documents the prompt's map of the documentation lists at most
     tests: str = ""  # where the reviewer's tests go: "commit" (into the branch) | "archive"
     # (kept under <state_dir>/<branch>/tests/, never committed)
 
@@ -314,6 +317,15 @@ def merge_layers(*layers: dict) -> dict:
     return merged
 
 
+def _repo_relative(value) -> bool:
+    """A non-empty relative path with no `..` component, in either separator."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if os.path.isabs(value) or value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", value):
+        return False
+    return ".." not in re.split(r"[\\/]", value)
+
+
 def _single_component(value: str) -> bool:
     return bool(value) and value not in (".", "..") and "/" not in value and "\\" not in value
 
@@ -465,6 +477,14 @@ def parse_project_config(
         )
     if review.max_fixes < 0:
         problems.append("review.max_fixes must be >= 0")
+    if review.doc_map_max < 0:
+        problems.append("review.doc_map_max must be >= 0 (0 = no map)")
+    for root in review.doc_roots:
+        if not _repo_relative(root):
+            problems.append(
+                "review.doc_roots must list paths inside the repository, relative to its root "
+                "(got %r)" % root
+            )
     if review.tests not in TESTS_MODES:
         problems.append(
             "review.tests must be %s (got %r)"

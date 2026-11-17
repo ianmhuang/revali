@@ -377,6 +377,66 @@ def _lint_section(ctx: Context) -> str:
     return text
 
 
+RELATED_NAMES_MAX = 3  # names listed per document; the rest are counted
+
+
+def _related_entry(r) -> str:
+    parts = []
+    if r.links:
+        parts.append("links to " + ", ".join("`%s` (line %d)" % (path, no) for path, no in r.links))
+    if r.names:
+        shown = ", ".join("`%s` (line %d)" % (n, no) for n, no in r.names[:RELATED_NAMES_MAX])
+        more = len(r.names) - RELATED_NAMES_MAX
+        parts.append("mentions " + shown + (" and %d more" % more if more > 0 else ""))
+    mark = " (changed in this diff)" if r.changed else ""
+    return "- `%s`%s: %s" % (r.page, mark, "; ".join(parts))
+
+
+def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
+    """The documents of the link graph that concern this diff, and a map of the graph's
+    documents. Empty when `[review] doc_roots` is empty; a graph that cannot be read is
+    logged and said, never an error of the run."""
+    from revali import docgraph
+
+    roots = list(ctx.cfg.review.doc_roots)
+    if not roots:
+        return ""
+    head = "## Documents related to this change\n\n"
+    try:
+        graph = docgraph.build(ctx.repo_root, roots)
+        paths = gitops.diff_paths(ctx.base_ref, "HEAD", ctx.repo_root, exclude=exclude)
+        found = docgraph.related(graph, paths, gitops.diff_changed_lines(diff))
+    except OSError as exc:
+        if ctx.log:
+            ctx.log.stage("review", "the documentation graph could not be read: %s" % exc)
+        return head + "This round the related documents are unavailable: %s\n" % exc
+    if not graph.nodes:
+        return (
+            head
+            + "There is no documentation graph: none of the documentation roots exists (%s).\n"
+            % ", ".join(roots)
+        )
+    lines = [
+        "Documents reachable by relative links from %s that link to a file this diff "
+        "changes, or name in a code span something it adds or removes. They are not in the "
+        "diff unless marked; read each one and compare it with the new behaviour."
+        % ", ".join(roots),
+        "",
+    ]
+    if found:
+        lines += [_related_entry(r) for r in found]
+    else:
+        lines.append("No document in the graph links to a changed file or names a changed name.")
+    docs = [n for n in graph.nodes.values() if n.path.lower().endswith(".md")]
+    cap = ctx.cfg.review.doc_map_max
+    if cap > 0:
+        lines += ["", "Map of the documentation (depth = links from the nearest root):", ""]
+        lines += ["- `%s` (depth %d)" % (n.path, n.depth) for n in docs[:cap]]
+        if len(docs) > cap:
+            lines.append("- and %d more" % (len(docs) - cap))
+    return head + "\n".join(lines) + "\n"
+
+
 def _bounce_section(notes: str) -> str:
     if not notes:
         return ""
@@ -417,6 +477,7 @@ def build_prompt(
         "excluded_files": ", ".join(ctx.excluded_files) or "(none)",
         "modified_tests": ", ".join(modified_existing_tests(ctx)) or "(none)",
         "manifests": ", ".join(manifests_touched(ctx)) or "(none)",
+        "related_docs_section": _related_docs_section(ctx, diff, exclude),
         "prior_section": _prior_findings_section(rdir, round_no),
         "response_section": _response_section(rdir, round_no),
         "bounce_section": _bounce_section(bounce_notes),

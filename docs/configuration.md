@@ -156,6 +156,22 @@ A commit-mode run that finds that directory non-empty (rounds in archive
 mode, then a `reset` and the key switched) logs the files it will never
 use, on `run --dry-run` too; delete the directory yourself, or they move
 to `archive_dir` with the rest at merge.
+`[review] doc_roots` (default `["README.md", "CONVENTIONS.md",
+"CLAUDE.md"]`) are the roots of the project's documentation graph: every
+file reachable from them through relative Markdown links, at any depth. The
+reviewer prompt lists the Markdown documents of that graph that link to a
+file the diff changes, or that name in a code span something the diff adds
+or removes: a word with a `_`, `-`, `.`, `/` or camelCase hump (`max_procs`,
+`--branch`; not `run`) found as a whole word on a changed line of another
+file, or a changed file's whole path. Files the diff
+leaves out (`exclude`, the reviewer's test pattern) do not count, documents
+outside the graph are not searched, and a document the diff changes itself
+is marked so. The list ends with a map of the graph's documents and their
+depth, at most `doc_map_max` of them (default 100; 0 leaves the map out).
+The checklist's documentation item then asks the reviewer to compare those
+documents with the new behaviour. `doc_roots = []` turns all of it off; a
+root that does not exist is skipped, and a graph that cannot be read is
+logged and noted in the prompt without stopping the review.
 
 Models: `model = "auto"` (the default) picks the Reviewer one tier above
 the Developer's model (`author_model` in `change.md`) and the diagnosis

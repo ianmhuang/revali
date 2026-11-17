@@ -8,8 +8,9 @@ reference is in the README; configuration keys are in [docs/configuration.md](co
 
 Each role runs in its own session with its own inputs, so nobody grades
 their own work: the Developer never reviews the change it wrote; the
-Reviewer gets the acceptance criteria and the diff, not the Developer's
-reasoning, and derives its tests from the criteria; the Validator is a test
+Reviewer gets the acceptance criteria, the diff and the documents the diff
+concerns, not the Developer's reasoning, and derives its tests from the
+criteria; the Validator is a test
 run, not an opinion; the diagnosis session sees only the failure output. The
 models can differ by tier (`auto` puts the Reviewer one tier above the
 Developer); the engine seam is where a second vendor would plug in

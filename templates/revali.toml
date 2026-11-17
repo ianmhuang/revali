@@ -32,6 +32,9 @@ checklist = "CONVENTIONS.md"      # project layer; built-in and user layers are 
 # schema = "docs/review.schema.json"     # replace the built-in answer schema
 timeout_min = 20
 exclude = ["*.lock", "dist/**", "vendor/**"]
+# doc_roots = ["README.md", "CONVENTIONS.md", "CLAUDE.md"]   # the prompt lists the documents
+#                                 # reachable from these that concern the change; [] = off
+# doc_map_max = 100               # documents the prompt's map of the documentation lists at most
 tests = "commit"                  # the reviewer's tests are committed on the branch;
                                   # tests = "archive" keeps them under .revali/<branch>/tests/ instead, never
                                   # committed, archived with the branch directory at merge (needs [paths] archive_dir)

@@ -22,6 +22,7 @@ Files changed but omitted from the diff above: $excluded_files
 Existing test files this diff modifies or deletes: $modified_tests
 Dependency manifests this diff touches: $manifests
 
+$related_docs_section
 $prior_section
 $response_section
 $bounce_section
