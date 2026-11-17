@@ -133,6 +133,43 @@ class Renames(PromptCase):
         links = link_lines(prompt)
         self.assertTrue([ln for ln in links if "old.lock" in ln], links)
 
+    def test_renames_turned_off_in_the_git_config_change_nothing(self):
+        """AC-3: renames are found the same way whatever `diff.renames` says. With it off,
+        git alone would report the rename as a deletion of the old name and a new file."""
+        git(["config", "diff.renames", "false"], self.repo)
+        self.rename("tests/old_helper.py", "tests/test_review_moved.py", "moved_edit")
+        status = git(["diff", "--name-status", "main...HEAD"], self.repo)
+        self.assertRegex(status, r"(?m)^D\ttests/old_helper\.py$")  # what the config asks for
+        ctx, diff, omitted, _ = self.build()
+        self.assertIn("kept_marker = 1", diff)
+        self.assertNotIn("old_helper.py", diff)
+        self.assertNotIn("test_review_moved.py", diff)
+        self.assertEqual(ctx.excluded_files, ["tests/test_review_moved.py"])
+        self.assertIn("tests/test_review_moved.py", omitted)
+        self.assertEqual(ctx.changed_files, ["src/calc.py"])
+        self.assertEqual(ctx.diff_lines, 1)
+
+    def test_a_copy_found_by_the_git_config_does_not_take_its_source_out(self):
+        """AC-3, AC-2: with `diff.renames = copies` git alone reports the reviewer's test as a
+        copy of the file the author edited. The edited file matches no pattern, so it stays
+        in the diff and in preflight's list; only the reviewer's test is left out."""
+        self.write("tests/old_helper.py", BODY.replace("line_3 = 3\n", "author_edit = 3\n"))
+        self.write(
+            "tests/test_review_helper.py", BODY.replace("line_5 = 5\n", "reviewer_copy = 5\n")
+        )
+        self.commit_all("an edit, and a reviewer test much like the edited file")
+        git(["config", "diff.renames", "copies"], self.repo)
+        status = git(["diff", "--name-status", "main...HEAD"], self.repo)
+        self.assertRegex(status, r"(?m)^C\d*\ttests/old_helper\.py\t")  # the config's copy
+        ctx, diff, omitted, _ = self.build()
+        self.assertIn("author_edit = 3", diff)
+        self.assertNotIn("reviewer_copy", diff)
+        self.assertNotIn("test_review_helper.py", diff)
+        self.assertEqual(ctx.changed_files, ["tests/old_helper.py"])
+        self.assertEqual(ctx.excluded_files, ["tests/test_review_helper.py"])
+        self.assertIn("tests/test_review_helper.py", omitted)
+        self.assertEqual(ctx.diff_lines, 2)  # the edited line, removed and added
+
 
 class PlainRename(PromptCase):
     """AC-3: neither name matches"""
