@@ -642,7 +642,7 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
         return EXIT_ACTION
     if outcome.verdict == review.CHANGES_REQUESTED:
         reasons = "\n".join("  - " + r for r in outcome.reasons)
-        state.fix_due = True  # saved by _stage
+        state.fix_due = True  # owed since review.run_round saved the round; saved by _stage
         _stage(
             state,
             rdir,

@@ -8,7 +8,7 @@ from unittest import mock
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops
 from revali.preflight import Stop
 from revali.state import State
-from tests.helpers import approve_response, claude_entry, git, run_cli
+from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
 from tests.test_fix_cycle_owed import APPROVED, CR, OwedCase
 
 
@@ -79,6 +79,7 @@ class StoppedAfterTheVerdict(OwedCase):
             "the test commit was not pushed",
         )
         self.assertTrue(state.fix_due)
+        self.assertEqual(state.head_sha, commit)
         self.assert_owed_then_counted_once(commit)
 
     def test_the_pr_comment_cannot_be_posted(self):
@@ -111,3 +112,69 @@ class Unchanged(OwedCase):
         self.assertIn("continuing there without a new review", out)
         self.assertEqual(self.reviewer_calls(), calls_before)
         self.assertEqual(State.load(self.rdir()).fixes, 0)
+
+
+class ArchiveAfterAStoppedPush(RepoCase):
+    """AC-5 (PR #86 F2): the recorded head vouches for the local branch only when the PR could
+    have shown it."""
+
+    def setUp(self):
+        super().setUp()
+        git(["push", "-q", "-u", "origin", "feature/mul"], self.repo)  # what the pr stage does
+        self.scenario({"pr_create": {"number": 7, "url": "https://x/pull/7", "state": "MERGED"}})
+
+    def recorded(self, head, test_commits):
+        State(
+            repo="me/sample",
+            branch="feature/mul",
+            base="main",
+            stage="needs_action",
+            pr_number=7,
+            head_sha=head,
+            test_commits=test_commits,
+        ).save(self.rdir())
+
+    def make_test_commit(self):
+        self.write("tests/test_extra.py", "def test_x():\n    pass\n")
+        self.commit_all("test: review tests (round 1)")
+        return head(self.repo)
+
+    def archive(self):
+        git(["checkout", "-q", "main"], self.repo)
+        code, out = run_cli(["archive", "--branch", "feature/mul"])
+        self.assertEqual(code, EXIT_OK, out)
+        return out
+
+    def branch(self):
+        return gitops.rev_parse("refs/heads/feature/mul", self.repo)
+
+    def test_an_unpushed_test_commit_keeps_the_branch(self):
+        commit = self.make_test_commit()
+        self.recorded(commit, [commit])
+        out = self.archive()
+        self.assertIn("local branch feature/mul kept: its tip %s is not in" % commit[:10], out)
+        self.assertEqual(self.branch(), commit)
+
+    def test_a_pushed_test_commit_lets_the_branch_go(self):
+        commit = self.make_test_commit()
+        git(["push", "-q", "origin", "feature/mul"], self.repo)
+        self.recorded(commit, [commit])
+        out = self.archive()
+        self.assertIn("local branch feature/mul removed", out)
+        self.assertFalse(self.branch())
+
+    def test_without_the_remote_branch_a_test_commit_keeps_the_branch(self):
+        commit = self.make_test_commit()
+        git(["push", "-q", "origin", "feature/mul"], self.repo)
+        git(["update-ref", "-d", "refs/remotes/origin/feature/mul"], self.repo)  # pruned
+        self.recorded(commit, [commit])
+        out = self.archive()
+        self.assertIn("local branch feature/mul kept", out)
+        self.assertEqual(self.branch(), commit)
+
+    def test_an_author_head_still_vouches_without_the_remote_branch(self):
+        tip = head(self.repo)
+        git(["update-ref", "-d", "refs/remotes/origin/feature/mul"], self.repo)
+        self.recorded(tip, [])
+        out = self.archive()
+        self.assertIn("local branch feature/mul removed", out)

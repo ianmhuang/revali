@@ -469,11 +469,20 @@ def record_outside(root: str, rdir: str, state: State, log: RunLog) -> str:
 
 def _covered(tip: str, state: State, root: str) -> bool:
     """`tip` holds nothing the PR did not: it is the head revali last saw (`state.head_sha`),
-    an ancestor of it, or an ancestor of the remote branch's last known tip."""
-    if state.head_sha and (tip == state.head_sha or gitops.is_ancestor(tip, state.head_sha, root)):
-        return True
+    an ancestor of it, or an ancestor of the remote branch's last known tip. A recorded head
+    that is one of the reviewer's test commits vouches only when the remote branch holds it:
+    a run that stopped before pushing that commit has recorded it all the same."""
     remote = gitops.rev_parse("refs/remotes/origin/" + state.branch, root)
-    return bool(remote) and gitops.is_ancestor(tip, remote, root)
+
+    def pushed(sha: str) -> bool:
+        return bool(remote) and gitops.is_ancestor(sha, remote, root)
+
+    head = state.head_sha
+    if head and head in state.test_commits and not pushed(head):
+        head = ""
+    if head and (tip == head or gitops.is_ancestor(tip, head, root)):
+        return True
+    return pushed(tip)
 
 
 def drop_merged_branch(root: str, state: State, log: RunLog) -> str:
