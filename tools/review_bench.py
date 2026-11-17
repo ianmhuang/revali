@@ -391,9 +391,10 @@ def locate_case(case: Case, clone: str, default_branch: str):
     ctx.base_sha = _git(["rev-parse", case.base], clone).strip()
     exclude = list(ctx.cfg.review.exclude)
     exclude.append(ctx.cfg.project.test_file_pattern.replace("{topic}", "*"))
-    for _added, _deleted, path in gitops.diff_numstat(case.base, "HEAD", clone):
-        (ctx.excluded_files if gitops.matches_any(path, exclude) else ctx.changed_files).append(
-            path
+    for _added, _deleted, names in gitops.diff_numstat(case.base, "HEAD", clone):
+        # as preflight: one rule (`left_out`), a rename listed under its new name
+        (ctx.excluded_files if gitops.left_out(names, exclude) else ctx.changed_files).append(
+            names[-1]
         )
     return ctx
 

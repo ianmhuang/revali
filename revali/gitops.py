@@ -168,45 +168,118 @@ def commits_between(base: str, head: str, cwd: str) -> int:
     return int(res.stdout.strip() or 0)
 
 
-def diff_numstat(base: str, head: str, cwd: str) -> List[Tuple[int, int, str]]:
-    res = git_ok(["diff", "--numstat", "%s...%s" % (base, head)], cwd)
-    out = []
-    for line in res.stdout.splitlines():
-        parts = line.split("\t")
+def diff_numstat(base: str, head: str, cwd: str) -> List[Tuple[int, int, Tuple[str, ...]]]:
+    """(added, deleted, names) per changed file; names is (path,) or, for a rename, (old, new).
+    Read with -z, so a rename never comes back as git's `dir/{old => new}` and a name is never
+    quoted. Renames are found with -M whatever `diff.renames` says, as in `_entries` and
+    `diff_text`, so a copy is never reported."""
+    res = git_ok(["diff", "-M", "--no-color", "--numstat", "-z", "%s...%s" % (base, head)], cwd)
+    fields = res.stdout.split("\0")
+    out: List[Tuple[int, int, Tuple[str, ...]]] = []
+    i = 0
+    while i < len(fields):
+        parts = fields[i].split("\t", 2)  # the counts hold no tab, a name may
+        i += 1
         if len(parts) != 3:
             continue
         added = 0 if parts[0] == "-" else int(parts[0])
         deleted = 0 if parts[1] == "-" else int(parts[1])
-        out.append((added, deleted, parts[2]))
+        if parts[2]:
+            names: Tuple[str, ...] = (parts[2],)
+        else:  # a rename or copy: the two names follow as fields of their own
+            names = tuple(fields[i : i + 2])
+            i += 2
+        out.append((added, deleted, names))
     return out
 
 
-def _excluding(exclude: Optional[List[str]]) -> List[str]:
-    if not exclude:
-        return []
-    return ["--", "."] + [":(exclude,glob)%s" % pat for pat in exclude]
+def _entries(base: str, head: str, cwd: str) -> List[Tuple[str, Tuple[str, ...]]]:
+    """(status letter, names) of each changed file in git's order, names "/" separated:
+    (path,), or (old, new) for a rename (found with -M, as in `diff_numstat`)."""
+    args = ["diff", "-M", "--no-color", "--name-status", "-z", "%s...%s" % (base, head)]
+    fields = git_ok(args, cwd).stdout.split("\0")
+    entries: List[Tuple[str, Tuple[str, ...]]] = []
+    i = 0
+    while i < len(fields) and fields[i]:
+        status = fields[i][:1]
+        count = 2 if status in ("R", "C") else 1  # `C` only if a caller drops -M
+        entries.append((status, tuple(p for p in fields[i + 1 : i + 1 + count] if p)))
+        i += 1 + count
+    return entries
+
+
+def left_out(names: Tuple[str, ...], exclude: Optional[List[str]]) -> bool:
+    """The one rule for what the review leaves out: a changed file is out when its current name
+    (the new one, for a rename) matches a pattern by `matches_any`. A rename left out is left
+    out under both names, so its old name is not shown as a deletion; a file renamed out of
+    an excluded name is reviewed like any other."""
+    return bool(exclude) and matches_any(names[-1], exclude)
+
+
+def _plain_name(name: str) -> bool:
+    """git writes this name in a `diff --git` header as it is, never quoted."""
+    return name.isascii() and name.isprintable() and '"' not in name and "\\" not in name
+
+
+def _without_sections(text: str, entries, exclude: List[str]) -> Optional[str]:
+    """`text` without the sections of the entries `left_out` leaves out, or None when its
+    sections cannot be paired with `entries`. A section starts at a `diff --git ` line (a
+    content line always starts with a space, `+`, `-` or `\\`); there is one per entry, in
+    the same order, and two for a type change (git shows it as a deletion and an addition).
+    A section whose names git writes unquoted must start with them."""
+    cuts = [m.start() for m in re.finditer(r"(?m)^diff --git ", text)]
+    if not cuts or cuts[0] != 0:
+        return None
+    sections = [text[a:b] for a, b in zip(cuts, cuts[1:] + [len(text)], strict=True)]
+    kept: List[str] = []
+    i = 0
+    for status, names in entries:
+        mine = sections[i : i + (2 if status == "T" else 1)]
+        i += 2 if status == "T" else 1
+        header = "diff --git a/%s b/%s\n" % (names[0], names[-1])
+        if i > len(sections) or (
+            all(_plain_name(n) for n in names) and not all(s.startswith(header) for s in mine)
+        ):
+            return None
+        if not left_out(names, exclude):
+            kept += mine
+    return "".join(kept) if i == len(sections) else None
 
 
 def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> str:
-    """The unified diff, with `a/` / `b/` prefixes whatever the user's `diff.noprefix` or
-    `diff.mnemonicPrefix` says (`diff_changed_lines` strips them)."""
-    args = ["diff", "--src-prefix=a/", "--dst-prefix=b/", "%s...%s" % (base, head)]
-    return git_ok(args + _excluding(exclude), cwd).stdout
+    """The unified diff without the files `left_out` leaves out, with `a/` / `b/` prefixes
+    whatever the user's `diff.noprefix` or `diff.mnemonicPrefix` says (`diff_changed_lines`
+    strips them), and no colour, external diff driver or submodule log whatever the user's
+    config says. The left-out files' sections are cut from the whole diff, so the command
+    line does not grow with their number. When the sections cannot be paired with the
+    changed files, git is given the left-out names as literal pathspecs instead, one
+    argument each, so only that fallback's command line grows with them."""
+    args = [
+        "diff",
+        "-M",
+        "--no-color",
+        "--no-ext-diff",
+        "--submodule=short",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "%s...%s" % (base, head),
+    ]
+    text = git_ok(args, cwd).stdout
+    entries = _entries(base, head, cwd) if exclude else []
+    if not any(left_out(names, exclude) for _, names in entries):
+        return text
+    cut = _without_sections(text, entries, exclude)
+    if cut is not None:
+        return cut
+    out = [n for _, names in entries if left_out(names, exclude) for n in names]
+    paths = [":(top)"] + [":(top,exclude,literal)%s" % n for n in out]
+    return git_ok(args + ["--"] + paths, cwd).stdout
 
 
 def diff_paths(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> List[str]:
-    """Every path the diff touches, "/" separated: both names of a rename or copy."""
-    res = git_ok(
-        ["diff", "--name-status", "-z", "%s...%s" % (base, head)] + _excluding(exclude), cwd
-    )
-    fields = res.stdout.split("\0")
-    paths: List[str] = []
-    i = 0
-    while i < len(fields) and fields[i]:
-        count = 2 if fields[i][:1] in ("R", "C") else 1
-        paths.extend(fields[i + 1 : i + 1 + count])
-        i += 1 + count
-    return [p for p in paths if p]
+    """Every path the diff touches, "/" separated: both names of a rename; a file `left_out`
+    leaves out is not listed under either name."""
+    return [n for _, e in _entries(base, head, cwd) if not left_out(e, exclude) for n in e]
 
 
 _C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}

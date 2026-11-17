@@ -419,13 +419,9 @@ def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
     head = "## Documents related to this change\n\n"
     try:
         graph = docgraph.build(ctx.repo_root, roots)
+        # `diff` and these paths leave out the same files (`gitops.left_out`)
         paths = gitops.diff_paths(ctx.base_ref, "HEAD", ctx.repo_root, exclude=exclude)
-        changed = gitops.diff_changed_lines(diff)
-        # The exclude pathspec matches a pattern without "/" at the root only; preflight
-        # matches it by base name too (`matches_any`), and so does this list.
-        paths = [p for p in paths if not gitops.matches_any(p, exclude)]
-        changed = {k: v for k, v in changed.items() if not gitops.matches_any(k, exclude)}
-        found = docgraph.related(graph, paths, changed)
+        found = docgraph.related(graph, paths, gitops.diff_changed_lines(diff))
     except OSError as exc:
         if ctx.log:
             ctx.log.stage("review", "the documentation graph could not be read: %s" % exc)

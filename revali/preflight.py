@@ -297,8 +297,9 @@ def check_diff_size(ctx: Context) -> None:
     exclude.append(cfg.project.test_file_pattern.replace("{topic}", "*"))
     total = 0
     files = []
-    for added, deleted, path in gitops.diff_numstat(ctx.base_ref, "HEAD", ctx.repo_root):
-        if gitops.matches_any(path, exclude):
+    for added, deleted, names in gitops.diff_numstat(ctx.base_ref, "HEAD", ctx.repo_root):
+        path = names[-1]  # a rename is listed under its new name
+        if gitops.left_out(names, exclude):
             ctx.excluded_files.append(path)
             continue
         total += added + deleted
