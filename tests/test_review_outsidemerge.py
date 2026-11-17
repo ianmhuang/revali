@@ -2,11 +2,12 @@
 
 `revali archive [--branch NAME]` records a PR that ended without `revali merge`: it asks gh
 for the PR's state and changes nothing on GitHub or on the remote. MERGED: stage `merged`,
-one history row with `merged_outside: true` and `stage_before`, the review directory moved to
-the archive, the local branch deleted unless a working tree has it checked out. CLOSED: stage
-`closed`, the row without `merged_outside`, the local branch left alone. An open PR, a gh
-that fails or gives no known state, a missing state or PR number, and a held lock change
-nothing and exit 1.
+one history row with `merged_outside: true` and `stage_before` (no `merged_outside` when the
+stage before was already `merged`), the review directory moved to the archive, the local
+branch deleted when no working tree has it checked out and its tip is the recorded head, an
+ancestor of it, or an ancestor of origin/<branch>. CLOSED: stage `closed`, the row without
+`merged_outside`, the local branch left alone. An open PR, a gh that fails, cannot be run or
+gives no known state, a missing state or PR number, and a held lock change nothing and exit 1.
 
 Black-box through the CLI on the fixture repository (fake gh, real git). The base branch has
 no `archive` subcommand, so every test here fails there."""
@@ -49,8 +50,11 @@ class OutsideCase(RepoCase):
 
     # ---- staging ----
 
-    def record(self, stage="ready_to_merge", pr_number=7, last_exit=EXIT_OK):
-        """The review record a finished run leaves: state.json and a review file."""
+    def record(self, stage="ready_to_merge", pr_number=7, last_exit=EXIT_OK, head=None):
+        """The review record a finished run leaves: state.json and a review file. `head` is
+        the head the run last recorded; the branch's tip unless given."""
+        if head is None:
+            head = gitops.rev_parse("refs/heads/" + BRANCH, self.repo) or ""
         State(
             repo="me/sample",
             branch=BRANCH,
@@ -61,7 +65,7 @@ class OutsideCase(RepoCase):
             pr_number=pr_number,
             pr_url="https://github.example/me/sample/pull/%d" % pr_number,
             cost_usd=1.25,
-            head_sha=gitops.rev_parse("refs/heads/" + BRANCH, self.repo) or "",
+            head_sha=head,
         ).save(self.rdir())
         with open(os.path.join(self.rdir(), "review-1.md"), "w", encoding="utf-8") as fh:
             fh.write("# review 1\n")
@@ -74,6 +78,23 @@ class OutsideCase(RepoCase):
 
     def leave_branch(self):
         git(["checkout", "-q", "main"], self.repo)
+
+    def tip(self):
+        return gitops.rev_parse("refs/heads/" + BRANCH, self.repo)
+
+    def commit_on_branch(self, name):
+        """One more commit on the checked-out PR branch; returns the new tip."""
+        self.write(name, "added after the last run\n")
+        self.commit_all("add %s" % name)
+        return self.tip()
+
+    def forget_remote_branch(self):
+        """What `git fetch --prune` leaves once the remote branch was deleted with the merge:
+        no origin/<branch> in this clone. The remote itself is not touched."""
+        git(["update-ref", "-d", "refs/remotes/origin/" + BRANCH], self.repo)
+
+    def kept_lines(self, out):
+        return [line for line in out.splitlines() if BRANCH in line and "kept" in line]
 
     def live_pid(self):
         child = subprocess.Popen(
@@ -265,6 +286,78 @@ class AMergedPr(OutsideCase):
         kept = [line for line in out.splitlines() if BRANCH in line and "kept" in line]
         self.assertTrue(kept, out)
 
+    def test_a_commit_made_after_the_last_run_keeps_the_branch(self):
+        """AC-5: the tip is not the recorded head, not an ancestor of it and not in
+        origin/<branch>, so the branch is kept and the output says why."""
+        recorded = self.tip()
+        tip = self.commit_on_branch("later.txt")  # never pushed
+        self.record(stage="needs_action", head=recorded)
+        self.pr_is("MERGED")
+        self.leave_branch()
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(code, EXIT_OK, out)
+        row = self.assert_recorded("merged", before="needs_action")
+        self.assertIs(row["merged_outside"], True)
+        self.assertEqual(self.tip(), tip)
+        self.assertTrue(self.kept_lines(out), out)
+        self.assert_pr_and_remote_untouched()
+
+    def test_a_branch_of_that_name_revali_knows_nothing_about_is_kept(self):
+        """AC-5: no head recorded and no origin/<branch>: nothing vouches for the tip."""
+        self.record(head="")
+        self.pr_is("MERGED")
+        self.forget_remote_branch()
+        tip = self.tip()
+        self.leave_branch()
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assert_recorded("merged")
+        self.assertEqual(self.tip(), tip)
+        self.assertTrue(self.kept_lines(out), out)
+
+    def test_a_branch_behind_the_recorded_head_is_deleted(self):
+        """AC-5: the tip is an ancestor of the head revali last recorded."""
+        self.record()
+        self.pr_is("MERGED")
+        self.forget_remote_branch()
+        self.leave_branch()
+        git(["branch", "-q", "-f", BRANCH, "main"], self.repo)
+        self.assertNotEqual(self.tip(), State.load(self.rdir()).head_sha)
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assert_recorded("merged")
+        self.assertFalse(self.branch_exists(), out)
+        self.assertFalse(self.kept_lines(out), out)
+
+    def test_a_tip_that_is_on_origin_is_deleted_though_revali_never_recorded_it(self):
+        """AC-5: the tip is an ancestor of origin/<branch>."""
+        recorded = self.tip()
+        self.commit_on_branch("pushed.txt")
+        git(["push", "-q", "origin", BRANCH], self.repo)
+        self.remote_before = self.remote_refs()
+        self.record(head=recorded)
+        self.pr_is("MERGED")
+        self.leave_branch()
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assert_recorded("merged")
+        self.assertFalse(self.branch_exists(), out)
+        self.assert_pr_and_remote_untouched()
+
+    def test_finishing_a_revali_merge_that_stopped_before_its_archive(self):
+        """AC-3: the stage recorded before is already `merged`: `revali merge` merged the PR,
+        so the row carries `stage_before` and no `merged_outside`."""
+        self.record(stage="merged")
+        self.pr_is("MERGED")
+        self.leave_branch()
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(code, EXIT_OK, out)
+        row = self.assert_recorded("merged", before="merged")
+        self.assertNotIn("merged_outside", row)
+        self.assertIn("#7", out)
+        self.assertIn(self.archived(), out)
+        self.assert_pr_and_remote_untouched()
+
     def test_an_empty_archive_dir_deletes_the_directory_as_merge_does(self):
         self.record()
         self.pr_is("MERGED")
@@ -347,6 +440,19 @@ class NothingChanges(OutsideCase):
                 self.pr_is(state, **scenario)
                 code, out = run_cli(["archive", "--branch", BRANCH])
                 self.assert_nothing_changed(code, out, before)
+
+    def test_a_gh_that_cannot_be_run(self):
+        """AC-6: `gh` fails. A gh that is not there is refused like any other failure: exit 1
+        through the command's own return, nothing written."""
+        self.record()
+        self.pr_is("MERGED")
+        before = self.state_bytes()
+        self.leave_branch()
+        os.environ["REVALI_GH_CMD"] = '"%s"' % os.path.join(self.tmp, "no-such-gh")
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assert_nothing_changed(code, out, before)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.gh_argv(), [])
 
     def test_no_review_directory(self):
         self.pr_is("MERGED")

@@ -85,32 +85,34 @@ class Summary(RepoCase):
         self.assertEqual(outside_counts(text), (0, 0))
 
     def test_pipelines_are_counted_not_rows(self):
-        """A branch closed under one PR and merged under a later one is two pipelines; an
-        `archive` repeated for the same PR (its move failed the first time) is still one."""
+        """A branch closed under one PR and merged under a later one is two pipelines; a
+        `revali merge` whose record `revali archive` finished (AC-3: `stage_before` is
+        `merged`, no `merged_outside`) is one pipeline, merged, and not merged outside."""
         rows = [
             row("e", 5, "closed", stage_before="needs_action"),
             row("e", 6, "merged", merged_outside=True, stage_before="ready_to_merge"),
-            row("f", 7, "merged", merged_outside=True, stage_before="ready_to_merge"),
-            row("f", 7, "merged", merged_outside=True, stage_before="merged"),
+            row("f", 7, "ready_to_merge"),
+            row("f", 7, "merged"),  # written by `revali merge`
+            row("f", 7, "merged", stage_before="merged"),  # written by `revali archive`
         ]
         text = summarise(rows)
         cells = table_row(text)
         self.assertEqual(cells["runs"], "3")
         self.assertEqual(cells["merged"], "2")
-        self.assertEqual(outside_counts(text), (2, 1))
+        self.assertEqual(outside_counts(text), (1, 1))
 
 
 class AfterArchive(RepoCase):
     """`revali archive` then `revali stats`, on the rows the commands write themselves."""
 
-    def ready(self):
+    def ready(self, stage="ready_to_merge"):
         """A branch whose last run ended READY TO MERGE: its state and its history row."""
         git(["push", "-q", "-u", "origin", "feature/mul"], self.repo)
         State(
             repo=REPO,
             branch="feature/mul",
             base="main",
-            stage="ready_to_merge",
+            stage=stage,
             last_exit=EXIT_OK,
             pr_number=7,
         ).save(self.rdir())
@@ -139,6 +141,18 @@ class AfterArchive(RepoCase):
         self.assertEqual(cells["merged"], "1")
         self.assertEqual(cells["first-try pass"], "1/1")
         self.assertEqual(outside_counts(text), (1, 0))
+
+    def test_a_revali_merge_finished_by_archive_is_not_merged_outside(self):
+        """AC-3 with AC-7: `revali merge` merged the PR and recorded it, and stopped before
+        its archive; the `archive` that finishes the record adds nothing to "merged outside"."""
+        self.ready(stage="merged")
+        append_history(history_path(None), row("feature/mul", 7, "merged"))
+        self.archive("MERGED")
+        text = self.stats()
+        cells = table_row(text)
+        self.assertEqual(cells["runs"], "1")
+        self.assertEqual(cells["merged"], "1")
+        self.assertEqual(outside_counts(text), (0, 0))
 
     def test_ready_then_closed(self):
         self.ready()
