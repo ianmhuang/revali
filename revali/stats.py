@@ -13,7 +13,7 @@ def pipelines(rows: List[dict]) -> List[dict]:
 
     Every stop writes a row (needs_action, ready_to_merge, merged...), and the
     counters and cost in each row are cumulative, so the last row of a pipeline
-    is its current state. `fallback` is kept if any row set it."""
+    is its current state. `fallback` and `merged_outside` are kept if any row set them."""
     latest = {}
     order = []
     for r in rows:
@@ -23,7 +23,8 @@ def pipelines(rows: List[dict]) -> List[dict]:
             latest[key] = dict(r)
         else:
             merged = dict(r)
-            merged["fallback"] = bool(latest[key].get("fallback")) or bool(r.get("fallback"))
+            for flag in ("fallback", "merged_outside"):
+                merged[flag] = bool(latest[key].get(flag)) or bool(r.get(flag))
             latest[key] = merged
     return [latest[k] for k in order]
 

@@ -3,8 +3,9 @@ closed without `revali merge`, archives the branch's review files and never merg
 
 import json
 import os
+from unittest import mock
 
-from revali import EXIT_ERROR, EXIT_OK, gitops
+from revali import EXIT_ERROR, EXIT_OK, gitops, merge
 from revali.cli import build_parser
 from revali.config import history_path
 from revali.state import STAGES, TERMINAL_STAGES, State, acquire_lock, release_lock
@@ -189,6 +190,24 @@ class Archive(RepoCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("local branch feature/mul removed", out)
 
+    def test_a_rerun_after_its_own_failed_move_stays_merged_outside(self):
+        """Round 2 F6: the stage `merged` was written by the first `archive`."""
+        self.recorded()
+        self.pr_is("MERGED")
+        git(["checkout", "-q", "main"], self.repo)
+        failed = "could not archive x (disk full); left in place: %s" % self.rdir()
+        with mock.patch.object(merge, "archive_review_dir", lambda *a: failed):
+            code, out = run_cli(["archive", "--branch", "feature/mul"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn(failed, out)
+        self.assertTrue(State.load(self.rdir()).merged_outside)
+        code, out = run_cli(["archive", "--branch", "feature/mul"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("ARCHIVED: PR #7 merged outside `revali merge` (stage was merged)", out)
+        rows = self.rows()
+        self.assertEqual([r.get("merged_outside") for r in rows], [True, True])
+        self.assertIn("merged outside `revali merge`: 1,", summarise(rows))
+
     def test_finishing_an_interrupted_revali_merge_is_not_merged_outside(self):
         """Round 1 F3."""
         self.recorded(stage="merged")
@@ -327,3 +346,11 @@ class Stats(RepoCase):
         self.assertEqual(cells[3], "2/2")
         self.assertEqual(cells[4], "2")
         self.assertIn("merged outside `revali merge`: 1, closed without merging: 1", text)
+
+    def test_merged_outside_stays_when_a_later_row_lacks_it(self):
+        """Round 2 F6: `pipelines` keeps the flag like `fallback`."""
+        rows = [
+            dict(repo="me/sample", branch="b", pr=2, stage="merged", merged_outside=True),
+            dict(repo="me/sample", branch="b", pr=2, stage="merged", stage_before="merged"),
+        ]
+        self.assertIn("merged outside `revali merge`: 1,", summarise(rows))

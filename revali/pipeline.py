@@ -1163,15 +1163,11 @@ def cmd_archive(args) -> int:
     except Stop as stop:
         _print_stop(stop)
         return stop.exit_code
-    except OSError as exc:  # the state file could not be written
-        print("ERROR: the state file could not be updated (%s); nothing changed" % exc)
-        return EXIT_ERROR
     finally:
         release_lock(rdir)
         release_tree_lock(tpath)
     extra = {"stage_before": before}
-    if state.stage == "merged" and before != "merged":
-        # `before` merged: `revali merge` merged it and stopped before its archive move
+    if state.merged_outside:
         extra["merged_outside"] = True
     _record_history(state, EXIT_OK, extra=extra)
     print(merge.archive_summary(state, before))

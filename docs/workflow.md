@@ -200,7 +200,8 @@ A PR merged without `revali merge` (the web UI, a plain `gh pr merge`, a
 `revali merge` interrupted after its merge) or closed without merging is
 recorded with `revali archive`, or `revali archive --branch <branch>` from
 another branch or a detached HEAD: it asks gh how the PR ended and never
-merges it. Merged, the stage becomes `merged` and the local branch goes;
+merges it. Merged, the stage becomes `merged` and the local branch goes unless it
+is checked out or holds commits the PR did not show;
 closed, the stage becomes `closed` and the branch stays. Either way the
 history row says so and the review files move to the archive as at
 `revali merge`, so `revali stats` stops counting the branch as ready to

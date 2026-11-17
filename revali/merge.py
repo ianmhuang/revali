@@ -442,16 +442,27 @@ def record_outside(root: str, rdir: str, state: State, log: RunLog) -> str:
             % (number, problem or "gh reports state %s" % found),
         )
     before = state.stage
-    if found == "MERGED" and before == "merged":
+    # A stage already `merged` was written by `revali merge` (stopped before its move), or by
+    # an earlier `archive` whose move failed; only the second sets merged_outside.
+    outside = found == "MERGED" and (before != "merged" or state.merged_outside)
+    if outside:
+        message = "PR #%d merged outside `revali merge`; recorded by `revali archive`" % number
+    elif found == "MERGED":
         message = (
             "PR #%d merged by `revali merge`; its record finished by `revali archive`" % number
         )
-    elif found == "MERGED":
-        message = "PR #%d merged outside `revali merge`; recorded by `revali archive`" % number
     else:
         message = "PR #%d closed without merging; recorded by `revali archive`" % number
+    saved = (state.pending_effect, state.merged_outside, state.stage, state.message)
     state.pending_effect = ""  # a `revali merge` stopped between its merge and its state write
-    state.set_stage(rdir, OUTSIDE_STAGES[found], message, EXIT_OK)
+    state.merged_outside = outside
+    try:
+        state.set_stage(rdir, OUTSIDE_STAGES[found], message, EXIT_OK)
+    except OSError as exc:
+        state.pending_effect, state.merged_outside, state.stage, state.message = saved
+        raise Stop(
+            EXIT_ERROR, "the state file could not be updated (%s); nothing changed" % exc
+        ) from exc
     log.stage("archive", message + " (stage was %s)" % before)
     return before
 
@@ -500,7 +511,7 @@ def drop_merged_branch(root: str, state: State, log: RunLog) -> str:
 def archive_summary(state: State, before: str) -> str:
     if state.stage == "closed":
         how = "closed without merging"
-    elif before == "merged":
+    elif not state.merged_outside:
         how = "merged by `revali merge`, which stopped before its archive"
     else:
         how = "merged outside `revali merge`"
