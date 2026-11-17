@@ -143,6 +143,32 @@ class ResetReadsWhatItCan(HandEdits, RepoCase):
         self.assertFalse(self.exists(FILE))
         self.assertFalse(os.path.exists(self.state_file()))
 
+    def test_a_state_that_lists_nothing_is_not_reported_as_left_behind(self):
+        """AC-3 with nothing to clean up: the readable fields name no pending file and no
+        interrupted round, so nothing is deleted and nothing is said to be left behind."""
+        self.needs_info_round()
+        self.edit(fixes="1", pending_test_files=[], reviewer_running=False)
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("Traceback", out)
+        self.assertIn("fixes", out)
+        self.assertNotIn("not cleaned up", out)
+        self.assertTrue(self.exists(FILE))  # no longer listed: as for a good file, it stays
+        self.assertFalse(os.path.exists(self.state_file()))
+
+    def test_a_refused_cleanup_still_names_every_skipped_field(self):
+        """AC-3 / AC-4: the skipped fields are named whether or not the cleanup can run."""
+        self.needs_info_round()
+        self.edit(pending_test_files=[FILE, None], cost_usd="a lot", models_used="fable")
+        code, out = run_cli(["reset"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("Traceback", out)
+        self.assertIn("not cleaned up", out)
+        for name in ("pending_test_files", "cost_usd", "models_used"):
+            self.assertIn(name, out)
+        self.assertTrue(self.exists(FILE))
+        self.assertFalse(os.path.exists(self.state_file()))
+
 
 class ArchiveModeCopies(HandEdits, ArchiveModeCase):
     """AC-3, archive mode"""

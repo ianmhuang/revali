@@ -126,16 +126,17 @@ class EveryCommandReadsIt(StateBytesCase):
 class StatusNamesTheBranchFirst(StateBytesCase):
     """AC-2"""
 
-    def test_the_identity_line_comes_before_the_state_error(self):
-        cases = {
-            '{"stage": "review", "fixes": "1"}': "fixes",
-            '{"stage": "review",': "",
-            "[1, 2]": "",
-        }
-        for text, field in cases.items():
-            with self.subTest(state=text):
+    CASES = {
+        '{"stage": "review", "fixes": "1"}': "fixes",
+        '{"stage": "review",': "",
+        "[1, 2]": "",
+    }
+
+    def named_before_the_error(self, command):
+        for text, field in self.CASES.items():
+            with self.subTest(command=command, state=text):
                 self.put_raw(text.encode("utf-8"))
-                code, out = run_cli(["status"])
+                code, out = run_cli([command])
                 self.assertEqual(code, EXIT_ERROR, out)
                 self.assertNotIn("Traceback", out)
                 lines = out.splitlines()
@@ -148,3 +149,11 @@ class StatusNamesTheBranchFirst(StateBytesCase):
                 self.assertIn("state.json", lines[errors[0]])
                 self.assertIn(field, lines[errors[0]])
                 self.assertEqual(self.raw(), text.encode("utf-8"))  # reported, not repaired
+
+    def test_the_identity_line_comes_before_the_state_error(self):
+        self.named_before_the_error("status")
+
+    def test_preflight_names_the_branch_before_the_state_error_too(self):
+        """The Goal ("every state error says which branch it is about"): preflight was the
+        one command left that read the state without naming the branch."""
+        self.named_before_the_error("preflight")
