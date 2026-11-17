@@ -2,8 +2,9 @@
 
 `revali archive [--branch NAME]` records a PR that ended without `revali merge`: it asks gh
 for the PR's state and changes nothing on GitHub or on the remote. MERGED: stage `merged`,
-one history row with `merged_outside: true` and `stage_before` (no `merged_outside` when the
-stage before was already `merged`), the review directory moved to the archive, the local
+one history row with `merged_outside: true` and `stage_before` (no `merged_outside` when
+`revali merge` had recorded the merge and stopped before its archive; an `archive` that
+finishes a record it began itself keeps it), the review directory moved to the archive, the local
 branch deleted when no working tree has it checked out and its tip is the recorded head, an
 ancestor of it, or an ancestor of origin/<branch>. CLOSED: stage `closed`, the row without
 `merged_outside`, the local branch left alone. An open PR, a gh that fails, cannot be run or
@@ -16,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+from unittest import mock
 
 from revali import EXIT_ERROR, EXIT_OK, gitops
 from revali.config import history_path
@@ -50,12 +52,15 @@ class OutsideCase(RepoCase):
 
     # ---- staging ----
 
-    def record(self, stage="ready_to_merge", pr_number=7, last_exit=EXIT_OK, head=None):
+    def record(
+        self, stage="ready_to_merge", pr_number=7, last_exit=EXIT_OK, head=None, outside=False
+    ):
         """The review record a finished run leaves: state.json and a review file. `head` is
-        the head the run last recorded; the branch's tip unless given."""
+        the head the run last recorded; the branch's tip unless given. `outside`: the state an
+        earlier `revali archive` wrote for a PR merged elsewhere (`merged_outside`)."""
         if head is None:
             head = gitops.rev_parse("refs/heads/" + BRANCH, self.repo) or ""
-        State(
+        state = State(
             repo="me/sample",
             branch=BRANCH,
             base="main",
@@ -66,7 +71,10 @@ class OutsideCase(RepoCase):
             pr_url="https://github.example/me/sample/pull/%d" % pr_number,
             cost_usd=1.25,
             head_sha=head,
-        ).save(self.rdir())
+        )
+        if outside:
+            state.merged_outside = True
+        state.save(self.rdir())
         with open(os.path.join(self.rdir(), "review-1.md"), "w", encoding="utf-8") as fh:
             fh.write("# review 1\n")
 
@@ -374,6 +382,85 @@ class AMergedPr(OutsideCase):
         self.assertIn("#7", out)
 
 
+class ARecordArchiveBeganItself(OutsideCase):
+    """AC-3 as amended after round 2: a stage that is already `merged` means `revali merge`
+    recorded the merge only when the state does not say an earlier `revali archive` did. An
+    `archive` that finishes its own record (its move failed, or it was interrupted after the
+    state write) still reports and records the PR as merged outside `revali merge`."""
+
+    def block_the_archive(self):
+        """A file where this repository's directory in the archive would go: nothing can be
+        moved there until it is removed."""
+        root = os.path.join(self.home, "archive")
+        os.makedirs(root)
+        blocker = os.path.join(root, "me__sample")
+        with open(blocker, "w", encoding="utf-8") as fh:
+            fh.write("in the way\n")
+        return blocker
+
+    def test_a_rerun_after_its_own_move_failed_is_still_merged_outside(self):
+        self.record()
+        self.pr_is("MERGED")
+        self.leave_branch()
+        blocker = self.block_the_archive()
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        # the merge is recorded, the review files could not be moved and are still here
+        self.assertTrue(os.path.isfile(os.path.join(self.rdir(), "review-1.md")), out)
+        self.assertEqual(State.load(self.rdir()).stage, "merged", out)
+        self.assertTrue(os.path.isfile(blocker))
+        os.unlink(blocker)
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertFalse(os.path.exists(self.rdir()))
+        dest = self.archived()
+        self.assertTrue(os.path.isfile(os.path.join(dest, "review-1.md")), out)
+        state = State.load(dest)
+        self.assertEqual(state.stage, "merged")
+        self.assertIn("outside", state.message)
+        self.assertIn("outside", out)
+        self.assertIn(dest, out)
+        rows = self.rows()
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual((row["pr"], row["stage"]), (7, "merged"), rows)
+            self.assertIs(row.get("merged_outside"), True, rows)
+        self.assertEqual(rows[0]["stage_before"], "ready_to_merge")
+        self.assertEqual(rows[-1]["stage_before"], "merged")
+        self.assert_pr_and_remote_untouched()
+
+    def test_a_state_archive_wrote_before_it_was_interrupted(self):
+        """The state says `merged` and that the merge was outside; no row, nothing moved."""
+        self.record(stage="merged", outside=True)
+        self.pr_is("MERGED")
+        self.leave_branch()
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(code, EXIT_OK, out)
+        row = self.assert_recorded("merged", before="merged")
+        self.assertIs(row.get("merged_outside"), True)
+        self.assertIn("outside", State.load(self.archived()).message)
+        self.assertIn("outside", out)
+
+    def test_a_closed_pr_never_carries_merged_outside(self):
+        """AC-4: the row of a closed PR has no `merged_outside`, on a rerun as well."""
+        self.record()
+        self.pr_is("CLOSED")
+        self.leave_branch()
+        blocker = self.block_the_archive()
+        run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(State.load(self.rdir()).stage, "closed")
+        os.unlink(blocker)
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(State.load(self.archived()).stage, "closed")
+        rows = self.rows()
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(row["stage"], "closed", rows)
+            self.assertFalse(row.get("merged_outside"), rows)
+        self.assertEqual(rows[-1]["stage_before"], "closed")
+        self.assertTrue(self.branch_exists())
+
+
 class AClosedPr(OutsideCase):
     """AC-2, AC-4, AC-5"""
 
@@ -453,6 +540,19 @@ class NothingChanges(OutsideCase):
         self.assert_nothing_changed(code, out, before)
         self.assertNotIn("Traceback", out)
         self.assertEqual(self.gh_argv(), [])
+
+    def test_a_state_file_that_cannot_be_written(self):
+        """The round 2 answer: a state write that fails is reported as nothing changed, and
+        nothing has: no row, no move, the branch kept, both locks released."""
+        self.record()
+        self.pr_is("MERGED")
+        before = self.state_bytes()
+        self.leave_branch()
+        with mock.patch.object(State, "save", side_effect=OSError("disk full")):
+            code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assert_nothing_changed(code, out, before)
+        self.assertIsNone(read_lock(self.rdir()))
+        self.assertIsNone(read_tree_lock(tree_lock_path(gitops.repo_root(self.repo), ".revali")))
 
     def test_no_review_directory(self):
         self.pr_is("MERGED")

@@ -9,6 +9,7 @@ were closed without merging.
 The numbers are read from the table by column name and from the one line that names both
 counts. On the base branch that line does not exist and there is no `archive` subcommand."""
 
+import os
 import re
 
 from revali import EXIT_OK
@@ -101,6 +102,35 @@ class Summary(RepoCase):
         self.assertEqual(cells["merged"], "2")
         self.assertEqual(outside_counts(text), (1, 1))
 
+    def test_a_pipeline_archive_recorded_twice_is_merged_outside_once(self):
+        """`revali archive` run again after its own move failed writes a second row; the
+        pipeline is still one, merged, and merged outside `revali merge`."""
+        rows = [
+            row("g", 8, "ready_to_merge"),
+            row("g", 8, "merged", merged_outside=True, stage_before="ready_to_merge"),
+            row("g", 8, "merged", merged_outside=True, stage_before="merged"),
+        ]
+        text = summarise(rows)
+        cells = table_row(text)
+        self.assertEqual(cells["runs"], "1")
+        self.assertEqual(cells["merged"], "1")
+        self.assertEqual(outside_counts(text), (1, 0))
+
+    def test_merged_outside_belongs_to_the_pipeline_not_to_its_last_row(self):
+        """A pipeline one of whose rows says it was merged outside stays counted when a later
+        row of the same pipeline does not repeat it."""
+        rows = [
+            row("h", 9, "merged", merged_outside=True, stage_before="ready_to_merge"),
+            row("h", 9, "merged", stage_before="merged"),
+            row("i", 10, "ready_to_merge"),
+            row("i", 10, "merged"),
+        ]
+        text = summarise(rows)
+        cells = table_row(text)
+        self.assertEqual(cells["runs"], "2")
+        self.assertEqual(cells["merged"], "2")
+        self.assertEqual(outside_counts(text), (1, 0))
+
 
 class AfterArchive(RepoCase):
     """`revali archive` then `revali stats`, on the rows the commands write themselves."""
@@ -153,6 +183,30 @@ class AfterArchive(RepoCase):
         self.assertEqual(cells["runs"], "1")
         self.assertEqual(cells["merged"], "1")
         self.assertEqual(outside_counts(text), (0, 0))
+
+    def test_an_archive_finished_by_a_second_archive_is_still_merged_outside(self):
+        """The first `archive` records the merge and cannot move the files (a file sits where
+        the repository's archive directory goes); the second finishes the record. The PR was
+        merged outside `revali merge` both times, and `stats` counts it once."""
+        self.ready()
+        root = os.path.join(self.home, "archive")
+        os.makedirs(root)
+        blocker = os.path.join(root, "me__sample")
+        with open(blocker, "w", encoding="utf-8") as fh:
+            fh.write("in the way\n")
+        pr = {"number": 7, "url": "https://github.example/me/sample/pull/7", "state": "MERGED"}
+        self.scenario({"pr_create": pr})
+        run_cli(["archive", "--branch", "feature/mul"])
+        self.assertEqual(State.load(self.rdir()).stage, "merged")  # recorded, not moved
+        self.assertEqual(outside_counts(self.stats()), (1, 0))
+        os.unlink(blocker)
+        self.archive("MERGED")
+        self.assertFalse(os.path.exists(self.rdir()))
+        text = self.stats()
+        cells = table_row(text)
+        self.assertEqual(cells["runs"], "1")
+        self.assertEqual(cells["merged"], "1")
+        self.assertEqual(outside_counts(text), (1, 0))
 
     def test_ready_then_closed(self):
         self.ready()
