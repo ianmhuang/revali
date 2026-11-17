@@ -1,11 +1,13 @@
-"""Acceptance tests for fix/fix-due-on-stop (M3.13), AC-1 to AC-4.
+"""Acceptance tests for fix/fix-due-on-stop (M3.13), AC-1 to AC-5.
 
 A round whose verdict is CHANGES_REQUESTED owes its fix from the moment the verdict is saved.
 The runs here stop between that save and the exit-2 summary: the push of the reviewer's test
 commit is rejected, the process is interrupted during that push, the author commits under the
 run, posting the PR comment raises. The next run must refuse an unchanged HEAD without a
 reviewer session and name the round and its review file; once the author has committed, one
-fix cycle is counted and the reviewer's test commit is on the remote, once."""
+fix cycle is counted and the reviewer's test commit is on the remote, once. When the PR is
+merged outside revali after such a stop, `revali archive` keeps the local branch while the
+recorded test commit is not on the remote branch, and deletes it when it is."""
 
 import contextlib
 import io
@@ -20,6 +22,7 @@ from revali.preflight import check_tree_unmoved
 from revali.state import State
 from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
 
+BRANCH = "feature/mul"
 REVIEW_TEST = "tests/test_review_mul.py"  # the file the fake reviewer writes
 NOTHING_CHANGED = "nothing changed since the last review"
 COUNTED = "run: fix cycle"
@@ -227,6 +230,45 @@ class StoppedAfterTheVerdict(StopCase):
         self.assertEqual((state.fixes, len(state.rounds)), (2, 3))
         self.assertEqual(self.sessions(), 3)
         self.assert_reviewer_tests_kept_once(commit)
+
+
+class ArchiveAfterTheStop(StopCase):
+    """AC-5: the PR is merged outside revali after the stopped run."""
+
+    def archive_the_merged_pr(self):
+        number = self.state().pr_number
+        self.assertTrue(number, "the stopped run recorded no PR")
+        merged = {
+            "number": number,
+            "url": "https://github.example/me/sample/pull/%d" % number,
+            "state": "MERGED",
+        }
+        self.scenario({"pr_create": merged})
+        git(["checkout", "-q", "main"], self.repo)
+        code, out = run_cli(["archive", "--branch", BRANCH])
+        self.assertEqual(code, EXIT_OK, out)
+        return out
+
+    def local_tip(self):
+        return gitops.rev_parse("refs/heads/" + BRANCH, self.repo)
+
+    def test_a_test_commit_whose_push_was_rejected_keeps_the_branch(self):
+        commit = self.stopped_round(at_the_test_commit_push(rejected))
+        self.assertFalse(self.on_remote(commit))
+        self.assertEqual(self.state().head_sha, commit)  # the recorded head is that commit
+        out = self.archive_the_merged_pr()
+        self.assertEqual(self.local_tip(), commit, out)  # the only copy of the reviewer's tests
+        kept = [line for line in out.splitlines() if BRANCH in line and "kept" in line]
+        self.assertTrue(kept, out)
+
+    def test_a_test_commit_the_remote_holds_lets_the_branch_go(self):
+        commit = self.stopped_round(comment_raises())  # stopped after the push
+        self.assertTrue(self.on_remote(commit))
+        self.assertEqual(self.state().head_sha, commit)
+        out = self.archive_the_merged_pr()
+        self.assertFalse(self.local_tip(), out)
+        kept = [line for line in out.splitlines() if BRANCH in line and "kept" in line]
+        self.assertFalse(kept, out)
 
 
 class UnchangedElsewhere(StopCase):
