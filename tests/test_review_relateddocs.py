@@ -154,6 +154,27 @@ class Links(DocsCase):
         self.assertEqual(entries(p, "docs/guide.md", "mentions"), [])
         self.assertEqual(entries(p, "docs/keys.md", "mentions"), [])
 
+    def test_a_pattern_without_a_slash_leaves_out_a_nested_file(self):
+        """Round 2, F5: the reviewer's test pattern (`test_review_*.py`) and `*.lock` name
+        files by base name, as preflight does when it reports them as omitted. A reviewer
+        test under tests/ and a lock file under pkg/ give the list no path and no name."""
+        self.write("src/calc.py", self.read("src/calc.py") + "\n\nburst_size = 10\n")
+        # `retry_limit` (docs/guide.md) is only on a line of the reviewer's test
+        self.write("tests/test_review_nested.py", "retry_limit = 3\n")
+        self.write("pkg/deps.lock", "v2\n")
+        self.write("README.md", README + "[deps](pkg/deps.lock), `tests/test_review_nested.py`\n")
+        p = self.prompt()
+        # the rest of the diff still counts
+        self.assertRegex(p, r"`docs/keys\.md`[^\n]*mentions[^\n]*`burst_size` \(line 3\)")
+        self.assertRegex(p, r"`docs/usage\.md`[^\n]*links to[^\n]*`src/calc\.py` \(line 3\)")
+        self.assertEqual(entries(p, "docs/guide.md", "mentions"), [])
+        listed = "\n".join(
+            line for line in p.splitlines() if "links to" in line or "mentions" in line
+        )
+        self.assertNotIn("pkg/deps.lock", listed)
+        self.assertNotIn("test_review_nested.py", listed)
+        self.assertNotIn("`retry_limit`", listed)
+
 
 class Mentions(DocsCase):
     """AC-3"""
