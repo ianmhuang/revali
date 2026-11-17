@@ -6,7 +6,7 @@ CONFIG_VERSION = 1
 STATE_VERSION = (
     10  # 10: stage `closed`, `merged_outside`; 9: a validation record lists its platforms
 )
-PROMPT_VERSION = "11"  # bumped when prompts/, schemas/ or checklists/ change
+PROMPT_VERSION = "12"  # bumped when prompts/, schemas/ or checklists/ change
 
 # Exit codes shared by every subcommand.
 EXIT_OK = 0  # done / ready to merge
