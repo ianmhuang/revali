@@ -166,7 +166,9 @@ stated.
   branch is deleted with `git branch -D` unless a working tree has it checked
   out or its tip is neither the head revali last saw nor an ancestor of it or
   of `origin/<branch>` (a commit made after the last run, or a new branch of
-  that name); a kept branch is named in the output with the reason; a history row with
+  that name); a recorded head that is one of the reviewer's test commits does
+  not count when `origin/<branch>` is known and does not hold it (its push
+  did not go through); a kept branch is named in the output with the reason; a history row with
   `merged_outside: true` and `stage_before` is appended (no `merged_outside`
   when `revali merge` had already recorded the merge and stopped before its
   move), and the branch's

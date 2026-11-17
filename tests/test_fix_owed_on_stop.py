@@ -152,8 +152,22 @@ class ArchiveAfterAStoppedPush(RepoCase):
         commit = self.make_test_commit()
         self.recorded(commit, [commit])
         out = self.archive()
-        self.assertIn("local branch feature/mul kept: its tip %s is not in" % commit[:10], out)
+        self.assertIn(
+            "local branch feature/mul kept: its tip %s is the reviewer's test commit, which "
+            "origin/feature/mul does not hold" % commit[:10],
+            out,
+        )
         self.assertEqual(self.branch(), commit)
+
+    def test_a_later_commit_on_an_unpushed_test_commit_keeps_the_branch(self):
+        commit = self.make_test_commit()
+        self.recorded(commit, [commit])
+        self.write("later.txt", "not pushed\n")
+        self.commit_all("after the last run")
+        tip = head(self.repo)
+        out = self.archive()
+        self.assertIn("local branch feature/mul kept: its tip %s is not in" % tip[:10], out)
+        self.assertEqual(self.branch(), tip)
 
     def test_a_pushed_test_commit_lets_the_branch_go(self):
         commit = self.make_test_commit()
@@ -163,14 +177,15 @@ class ArchiveAfterAStoppedPush(RepoCase):
         self.assertIn("local branch feature/mul removed", out)
         self.assertFalse(self.branch())
 
-    def test_without_the_remote_branch_a_test_commit_keeps_the_branch(self):
+    def test_without_the_remote_branch_a_test_commit_lets_the_branch_go(self):
+        """Round 2 F3: the remote branch deleted with the merge and pruned is the usual end."""
         commit = self.make_test_commit()
         git(["push", "-q", "origin", "feature/mul"], self.repo)
         git(["update-ref", "-d", "refs/remotes/origin/feature/mul"], self.repo)  # pruned
         self.recorded(commit, [commit])
         out = self.archive()
-        self.assertIn("local branch feature/mul kept", out)
-        self.assertEqual(self.branch(), commit)
+        self.assertIn("local branch feature/mul removed", out)
+        self.assertFalse(self.branch())
 
     def test_an_author_head_still_vouches_without_the_remote_branch(self):
         tip = head(self.repo)

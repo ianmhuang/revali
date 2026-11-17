@@ -467,22 +467,26 @@ def record_outside(root: str, rdir: str, state: State, log: RunLog) -> str:
     return before
 
 
-def _covered(tip: str, state: State, root: str) -> bool:
-    """`tip` holds nothing the PR did not: it is the head revali last saw (`state.head_sha`),
-    an ancestor of it, or an ancestor of the remote branch's last known tip. A recorded head
-    that is one of the reviewer's test commits vouches only when the remote branch holds it:
-    a run that stopped before pushing that commit has recorded it all the same."""
-    remote = gitops.rev_parse("refs/remotes/origin/" + state.branch, root)
-
-    def pushed(sha: str) -> bool:
-        return bool(remote) and gitops.is_ancestor(sha, remote, root)
-
+def _unpushed_test_head(state: State, remote: str, root: str) -> bool:
+    """The recorded head is one of the reviewer's test commits and `origin/<branch>` (`remote`)
+    does not hold it: a run that stopped before pushing that commit has recorded it all the
+    same. With no `origin/<branch>` known (pruned once the PR merged) the head is trusted."""
     head = state.head_sha
-    if head and head in state.test_commits and not pushed(head):
-        head = ""
+    return bool(
+        head
+        and remote
+        and head in state.test_commits
+        and not gitops.is_ancestor(head, remote, root)
+    )
+
+
+def _covered(tip: str, state: State, remote: str, root: str) -> bool:
+    """`tip` holds nothing the PR did not: it is the head revali last saw (`state.head_sha`),
+    an ancestor of it, or an ancestor of the remote branch's last known tip (`remote`)."""
+    head = "" if _unpushed_test_head(state, remote, root) else state.head_sha
     if head and (tip == head or gitops.is_ancestor(tip, head, root)):
         return True
-    return pushed(tip)
+    return bool(remote) and gitops.is_ancestor(tip, remote, root)
 
 
 def drop_merged_branch(root: str, state: State, log: RunLog) -> str:
@@ -502,7 +506,14 @@ def drop_merged_branch(root: str, state: State, log: RunLog) -> str:
                 "local branch %s kept: checked out in %s; switch that tree to another branch, "
                 "then `git branch -D %s`" % (branch, where, branch)
             )
-        if not _covered(tip, state, root):
+        remote = gitops.rev_parse("refs/remotes/origin/" + branch, root)
+        if not _covered(tip, state, remote, root):
+            if tip == state.head_sha:  # distrusted by _unpushed_test_head
+                return (
+                    "local branch %s kept: its tip %s is the reviewer's test commit, which "
+                    "origin/%s does not hold (its push did not go through); delete it "
+                    "yourself once nothing on it is needed" % (branch, tip[:10], branch)
+                )
             return (
                 "local branch %s kept: its tip %s is not in what revali last saw of the PR "
                 "(%s) nor in origin/%s; delete it yourself once nothing on it is needed"
