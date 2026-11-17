@@ -75,6 +75,11 @@ class Context:
         if self.log:
             self.log.detail(msg)
 
+    def wsl_retry(self, msg: str) -> None:
+        """The runners' `notice`: a wsl retry as a stage line and in the run's retry record."""
+        if self.log:
+            self.log.wsl_retry(msg)
+
 
 def check_engines(cfg: Config) -> List[str]:
     """Both roles must name an engine revali implements, before anything is pushed."""
@@ -258,7 +263,9 @@ def check_runner(ctx: Context) -> None:
 
     names = ctx.cfg.project.platforms
     for name in names:
-        problem = probe_runner(ctx.cfg.validate.platforms[name], log=ctx.detail)
+        problem = probe_runner(
+            ctx.cfg.validate.platforms[name], log=ctx.detail, notice=ctx.wsl_retry
+        )
         if problem:
             raise Stop(
                 EXIT_ERROR, problem if len(names) == 1 else "validate.%s: %s" % (name, problem)

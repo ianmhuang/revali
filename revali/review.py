@@ -1126,7 +1126,7 @@ def smoke_run(
     a string = they could not run (bounce to the reviewer)."""
     plat = ctx.cfg.validate.platforms[ctx.cfg.project.platforms[0]]
     try:
-        runner = get_runner(plat)
+        runner = get_runner(plat, notice=log.wsl_retry if log else None)
     except RunnerError as exc:
         raise Stop(EXIT_ERROR, str(exc)) from exc
     extra = {

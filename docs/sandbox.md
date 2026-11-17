@@ -59,7 +59,11 @@ The WSL service itself sometimes fails a call for a while
 Every `wsl.exe` call the runner makes (the preflight probe, `wslpath`, the
 sandbox script) is retried when its output matches `wsl_transient_errors`:
 after `wsl_retry_wait_s` seconds, up to `wsl_retries` times, with one log line
-per retry. The sandbox script is not run again once it has started (its
+per retry. That line is a `wsl:` stage line, so it shows in run.log, and it
+is also kept in the run's `logs/wsl-retries.log`, which each run starts
+empty: while the run goes on, `revali wait` adds the number of retries so far
+and the latest one under its `still running` line, and once the run has
+ended it names the file before the result. The sandbox script is not run again once it has started (its
 first line creates the results file). When the last attempt fails too, the
 run stops with exit 1 as before, and the message adds that `wsl --shutdown`
 restarts WSL and stops every running distro, other projects' included;
