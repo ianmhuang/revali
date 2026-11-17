@@ -168,45 +168,67 @@ def commits_between(base: str, head: str, cwd: str) -> int:
     return int(res.stdout.strip() or 0)
 
 
-def diff_numstat(base: str, head: str, cwd: str) -> List[Tuple[int, int, str]]:
-    res = git_ok(["diff", "--numstat", "%s...%s" % (base, head)], cwd)
-    out = []
-    for line in res.stdout.splitlines():
-        parts = line.split("\t")
+def diff_numstat(base: str, head: str, cwd: str) -> List[Tuple[int, int, Tuple[str, ...]]]:
+    """(added, deleted, names) per changed file; names is (path,) or, for a rename or copy,
+    (old, new). Read with -z, so a rename never comes back as git's `dir/{old => new}`."""
+    res = git_ok(["diff", "--numstat", "-z", "%s...%s" % (base, head)], cwd)
+    fields = res.stdout.split("\0")
+    out: List[Tuple[int, int, Tuple[str, ...]]] = []
+    i = 0
+    while i < len(fields):
+        parts = fields[i].split("\t")
+        i += 1
         if len(parts) != 3:
             continue
         added = 0 if parts[0] == "-" else int(parts[0])
         deleted = 0 if parts[1] == "-" else int(parts[1])
-        out.append((added, deleted, parts[2]))
+        if parts[2]:
+            names: Tuple[str, ...] = (parts[2],)
+        else:  # a rename or copy: the two names follow as fields of their own
+            names = tuple(fields[i : i + 2])
+            i += 2
+        out.append((added, deleted, names))
     return out
 
 
-def _excluding(exclude: Optional[List[str]]) -> List[str]:
-    if not exclude:
-        return []
-    return ["--", "."] + [":(exclude,glob)%s" % pat for pat in exclude]
-
-
-def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> str:
-    """The unified diff, with `a/` / `b/` prefixes whatever the user's `diff.noprefix` or
-    `diff.mnemonicPrefix` says (`diff_changed_lines` strips them)."""
-    args = ["diff", "--src-prefix=a/", "--dst-prefix=b/", "%s...%s" % (base, head)]
-    return git_ok(args + _excluding(exclude), cwd).stdout
-
-
-def diff_paths(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> List[str]:
-    """Every path the diff touches, "/" separated: both names of a rename or copy."""
-    res = git_ok(
-        ["diff", "--name-status", "-z", "%s...%s" % (base, head)] + _excluding(exclude), cwd
-    )
-    fields = res.stdout.split("\0")
-    paths: List[str] = []
+def _entries(base: str, head: str, cwd: str) -> List[Tuple[str, ...]]:
+    """The names of each changed file, "/" separated: (path,), or (old, new) for a rename or
+    copy."""
+    fields = git_ok(["diff", "--name-status", "-z", "%s...%s" % (base, head)], cwd).stdout
+    fields = fields.split("\0")
+    entries: List[Tuple[str, ...]] = []
     i = 0
     while i < len(fields) and fields[i]:
         count = 2 if fields[i][:1] in ("R", "C") else 1
-        paths.extend(fields[i + 1 : i + 1 + count])
+        entries.append(tuple(p for p in fields[i + 1 : i + 1 + count] if p))
         i += 1 + count
-    return [p for p in paths if p]
+    return entries
+
+
+def left_out(names: Tuple[str, ...], exclude: Optional[List[str]]) -> bool:
+    """The one rule for what the review leaves out: a changed file is out when any of its names
+    (both, for a rename) matches a pattern by `matches_any`."""
+    return bool(exclude) and any(matches_any(n, exclude) for n in names)
+
+
+def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> str:
+    """The unified diff without the files `left_out` leaves out, which git is given by name
+    (literal pathspecs, so a space or `*` in a name is a character), with `a/` / `b/`
+    prefixes whatever the user's `diff.noprefix` or `diff.mnemonicPrefix` says
+    (`diff_changed_lines` strips them)."""
+    args = ["diff", "--src-prefix=a/", "--dst-prefix=b/", "%s...%s" % (base, head)]
+    out = (
+        [n for e in _entries(base, head, cwd) if left_out(e, exclude) for n in e] if exclude else []
+    )
+    if out:
+        args += ["--", "."] + [":(exclude,literal)%s" % n for n in out]
+    return git_ok(args, cwd).stdout
+
+
+def diff_paths(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> List[str]:
+    """Every path the diff touches, "/" separated: both names of a rename or copy; a file
+    `left_out` leaves out is not listed under either name."""
+    return [n for e in _entries(base, head, cwd) if not left_out(e, exclude) for n in e]
 
 
 _C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}

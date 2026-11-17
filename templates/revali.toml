@@ -32,7 +32,7 @@ checklist = "CONVENTIONS.md"      # project layer; built-in and user layers are 
                                          # no $related_docs_section, no related documents)
 # schema = "docs/review.schema.json"     # replace the built-in answer schema
 timeout_min = 20
-exclude = ["*.lock", "dist/**", "vendor/**"]
+exclude = ["*.lock", "dist/**", "vendor/**"]   # the whole path, the file name, or dir/**
 # doc_roots = ["README.md", "CONVENTIONS.md", "CLAUDE.md"]   # the prompt lists the documents
 #                                 # reachable from these that concern the change; [] = off
 # doc_map_max = 100               # documents the prompt's map of the documentation lists at most
