@@ -46,6 +46,8 @@ class PlainForm(ValueCase):
             ("site/tests", "site/tests"),
             (".acceptance", ".acceptance"),
             ("tests.d/unit", "tests.d/unit"),
+            # a blank inside a name is not at either end of it: still a directory name
+            ("unit tests", "unit tests"),
         ):
             with self.subTest(value=value):
                 self.spell(value)
@@ -80,6 +82,14 @@ class Refused(ValueCase):
             "../t",
             "tests/../x",
             "tests\\..\\x",
+            # AC-3 as extended in round 2: a blank at either end of a component
+            " ",
+            "tests ",
+            " tests",
+            "tests /unit",
+            "tests/ unit",
+            "tests/unit ",
+            "tests\\unit ",
         ):
             with self.subTest(value=value):
                 self.spell(value)
@@ -110,6 +120,22 @@ class Refused(ValueCase):
         shown = repr("../elsewhere")
         self.assertIn(shown, roots[0])
         self.assertIn(shown, dirs[0])
+
+    def test_a_blank_ended_value_from_the_user_file_is_refused_too(self):
+        """The project file leaves the key out and `~/.revali/config.toml` sets `tests `:
+        the merged value is the one checked, so it is refused wherever it was written."""
+        toml = self.read("revali.toml")
+        new, n = re.subn(r"^test_dir = .*\n", "", toml, flags=re.M)
+        self.assertEqual(n, 1, toml)
+        self.write("revali.toml", new)
+        path = os.path.join(self.home, "config.toml")
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write('[project]\ntest_dir = "tests "\n')
+        with self.assertRaises(ConfigError) as caught:
+            load_project_config(self.repo)
+        named = [p for p in caught.exception.problems if "project.test_dir" in p]
+        self.assertTrue(named, caught.exception.problems)
+        self.assertIn(repr("tests "), named[0])
 
     def test_a_run_stops_on_it_before_the_reviewer_starts(self):
         self.spell("../elsewhere")
