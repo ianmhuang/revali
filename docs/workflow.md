@@ -148,12 +148,17 @@ with exit 1 (stage `error`) and commits and pushes nothing from that point.
 After exit code 2 the author fixes or answers in
 `.revali/<branch>/response-<n>.md` (`- F1: fixed` / `- F1: wontfix: <reason>`),
 commits, and runs again; each such cycle counts against `review.max_fixes`.
-The cycle is owed from the exit 2 of a CHANGES_REQUESTED round or a failed
-validation until a run passes preflight on a new commit and counts it, so a
-run that stops before the review (preflight, the refusal before detaching,
-`revali stop`, an unexpected error) neither loses nor repeats a fix cycle:
-the next run on the HEAD the reviewer saw is still refused with "nothing
-changed", and the next run on a new commit counts the cycle once.
+The cycle is owed from the moment a CHANGES_REQUESTED round is saved (from
+the exit 2 of a failed validation) until a run passes preflight on a new
+commit and counts it. A run that stops before the review (preflight, the
+refusal before detaching, `revali stop`, an unexpected error) or after a
+CHANGES_REQUESTED verdict is saved (the push of the test commit fails, the
+tree moved, the PR comment cannot be posted) neither loses nor repeats a fix
+cycle: the next run on the HEAD the reviewer left (its test commit, when it
+made one) is still refused with "nothing changed", naming the round and its
+`review-<n>.md`, and the next run on a new commit counts the cycle once. A
+test commit that was not pushed goes out with the next run that gets past
+preflight.
 The exit 2 message (and the `revali wait` line) lists what blocks and also
 the findings that did not block, with the blocking / non-blocking counts and
 the path of `review-<n>.md`: a `low` or `medium convention` finding left
