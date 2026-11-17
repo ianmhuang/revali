@@ -47,7 +47,7 @@ class BuildError(Exception):
 
 def _load(path: str) -> dict:
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8-sig") as fh:  # as revali reads state.json: a BOM is skipped
             data = json.load(fh)
     except FileNotFoundError as exc:
         raise BuildError("no %s" % path) from exc

@@ -75,8 +75,11 @@ exit code stays 0.
 
 ## Running
 
-`run`, `wait` and `status` print one identity line first,
-`repo: <working tree root>  branch: <branch>`, so several sessions running
+`run`, `wait`, `status`, `reset`, `merge`, `stop`, `archive` and `clean`
+print one identity line first,
+`repo: <working tree root>  branch: <branch>` (`preflight` prints it only
+before a state file it cannot use; its own first line names the repo and
+branch otherwise), so several sessions running
 revali in different checkouts can tell their output apart; every message
 that reports a live or dead run carries its pid. Which revali ran is in the
 run's own records: preflight's first line, `repo <root>, branch <branch>,

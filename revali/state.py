@@ -9,7 +9,7 @@ import tempfile
 import time
 import typing
 from dataclasses import asdict, dataclass, field, fields
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from revali import PROMPT_VERSION, STATE_VERSION, VERSION
 from revali.procs import pid_alive
@@ -132,6 +132,19 @@ class State:
         """The state in `rdir`, None when there is no state file. A field that is null takes
         its default; keys that are not fields are ignored; anything else State cannot use
         (not JSON, not an object, a value of the wrong type) raises StateError."""
+        return cls._read(rdir, None)
+
+    @classmethod
+    def salvage(cls, rdir: str) -> Tuple[Optional["State"], List[str]]:
+        """For `revali reset` only: the state with every field that is well formed, and the
+        names of the fields that were not (they keep their defaults). A file that is not JSON
+        or not an object still raises StateError."""
+        skipped: List[str] = []
+        return cls._read(rdir, skipped), skipped
+
+    @classmethod
+    def _read(cls, rdir: str, skipped: Optional[List[str]]) -> Optional["State"]:
+        """load (`skipped` None: a bad field raises) or salvage (it is listed there)."""
         path = cls.path(rdir)
         if not os.path.isfile(path):
             return None
@@ -147,8 +160,14 @@ class State:
         st = cls()
         for f in fields(cls):
             value = data.get(f.name)
-            if value is not None:
+            if value is None:
+                continue
+            try:
                 setattr(st, f.name, _checked(path, f.name, hints[f.name], value))
+            except StateError:
+                if skipped is None:
+                    raise
+                skipped.append(f.name)
         if "fix_due" not in data:
             # a state from before STATE_VERSION 7: the stage was the record
             st.fix_due = st.stage == "needs_action" and st.last_verdict in (
@@ -276,10 +295,11 @@ def _until_permitted(attempt, path: str, retry_s: Optional[float]):
 def read_json_retry(path: str, retry_s: Optional[float] = None):
     """`json.load` of `path`. On Windows, opening the file while another process is inside
     `write_json_atomic`'s rename fails with PermissionError, so the open is retried for the
-    same window the writer uses against a reader."""
+    same window the writer uses against a reader. `utf-8-sig`: a file a Windows editor saved
+    with a BOM reads like one without; the next write drops the BOM."""
 
     def attempt():
-        with open(path, "r", encoding="utf-8", newline="") as fh:
+        with open(path, "r", encoding="utf-8-sig", newline="") as fh:
             return json.load(fh)
 
     return _until_permitted(attempt, path, retry_s)

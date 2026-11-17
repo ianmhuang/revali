@@ -791,14 +791,23 @@ def _validate_and_finish(
 
 def cmd_preflight(args) -> int:
     cwd = os.getcwd()
-    rdir = _rdir_for(cwd)
+    try:
+        _, branch, rdir = _locate_run(cwd, "")
+    except Stop:  # preflight below reports a repository or branch it cannot use
+        branch, rdir = "", None
     root = gitops.repo_root(cwd)
     log = RunLog(
         rdir if rdir and os.path.isdir(rdir) else None,
         verbose=args.verbose,
         logs_dir=paths_for(root).logs_dir if root else "",
     )
-    state = (State.load(rdir) if rdir else None) or State()
+    try:
+        state = (State.load(rdir) if rdir else None) or State()
+    except StateError:
+        # preflight names the repo and branch in its own first line, which a state error
+        # never reaches; name them here so this error says which branch it is about
+        _print_identity(root, branch)  # resolved above: no second git call to fail here
+        raise
     try:
         # the same view of the tree as `run`: a NEEDS_INFO round's files may be dirty
         preflight(
@@ -871,9 +880,9 @@ def cmd_status(args) -> int:
         return EXIT_ERROR
     root, branch, rdir = found
     paths = paths_for(root)
+    _print_identity(root, branch)  # first: a state error below then names its branch
     state = State.load(rdir)
     pid = lock_owner_alive(rdir)
-    _print_identity(root, branch)
     print("%s %s" % (NAME, VERSION))
     print("branch: %s" % branch)
     if pid:
@@ -931,11 +940,7 @@ def cmd_reset(args) -> int:
     try:
         state = State.load(rdir)
     except StateError as exc:
-        state = None
-        print(
-            "the state file could not be read (%s); the reviewer's uncommitted test files it "
-            "may list are not cleaned up, check `git status` before the next run" % exc
-        )
+        state = _salvaged(rdir, exc)
     if state is not None and (state.pending_test_files or state.reviewer_running):
         _reset_test_dir(state, rdir)
     if os.path.isfile(path):
@@ -945,6 +950,36 @@ def cmd_reset(args) -> int:
         print("no state to remove")
     release_lock(rdir)
     return EXIT_OK
+
+
+def _salvaged(rdir: str, exc: StateError) -> Optional[State]:
+    """For `reset` on a state file State.load refused: the well-formed fields, when the ones
+    the cleanup reads (review.CLEANUP_FIELDS) are among them; None otherwise. Either way the
+    printed line names every skipped field and says whether anything is cleaned up."""
+    from revali import review
+
+    not_cleaned = (
+        "the reviewer's uncommitted test files it may list are not cleaned up, check "
+        "`git status` before the next run"
+    )
+    try:
+        state, skipped = State.salvage(rdir)
+    except StateError as whole:  # not JSON, not an object: nothing to read fields from
+        print("the state file could not be read (%s); %s" % (whole, not_cleaned))
+        return None
+    head = "the state file could not be read as a whole (%s); skipped field(s): %s" % (
+        exc,
+        ", ".join(skipped),
+    )
+    needed = [name for name in skipped if name in review.CLEANUP_FIELDS]
+    if needed:
+        print("%s; %s among them, so %s" % (head, ", ".join(needed), not_cleaned))
+        return None
+    if state.pending_test_files or state.reviewer_running:
+        print("%s; the cleanup of the reviewer's uncommitted test files reads the others" % head)
+    else:
+        print("%s; it lists no uncommitted test files of the reviewer's" % head)
+    return state
 
 
 def _reset_test_dir(state: State, rdir: str) -> None:
