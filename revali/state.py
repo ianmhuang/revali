@@ -506,8 +506,11 @@ class RunLog:
             print(line, flush=True)
         self._write(line)
         if self.retries_path:
-            with open(self.retries_path, "a", encoding="utf-8", newline="\n") as fh:
-                fh.write(line + "\n")
+            try:
+                with open(self.retries_path, "a", encoding="utf-8", newline="\n") as fh:
+                    fh.write(line + "\n")
+            except OSError as exc:  # the record only serves `wait`; the retry goes on
+                self.detail("could not add the retry to %s: %s" % (self.retries_path, exc))
 
 
 # ---- wsl retries of one run -------------------------------------------------
@@ -517,18 +520,20 @@ def wsl_retries_path(rdir: str, logs_dir: str) -> str:
     return os.path.join(rdir, logs_dir, WSL_RETRIES)
 
 
-def clear_wsl_retries(rdir: str, logs_dir: str) -> None:
+def clear_wsl_retries(rdir: str, logs_dir: str) -> str:
     """A run starts with an empty record, so `wait` never reports an earlier run's retries.
     Truncated rather than removed: on Windows a `wait` reading it at that moment blocks a
-    delete, not a write. A failure leaves the old lines; it never stops the run."""
+    delete, not a write. A failure leaves the old lines and never stops the run; it is
+    returned as one line for the caller to log, "" when the record is empty or absent."""
     path = wsl_retries_path(rdir, logs_dir)
     if not os.path.isfile(path):
-        return
+        return ""
     try:
         with open(path, "w", encoding="utf-8", newline="\n"):
             pass
-    except OSError:
-        pass
+    except OSError as exc:
+        return "could not empty %s; `wait` may report an earlier run's retries: %s" % (path, exc)
+    return ""
 
 
 def read_wsl_retries(rdir: str, logs_dir: str) -> List[str]:

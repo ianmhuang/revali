@@ -152,7 +152,9 @@ def _run_detached(args) -> int:
     if owner:
         print(_tree_held_message(owner))
         return EXIT_ERROR
-    # this run's result replaces the previous one even when it is a refusal, so must its record
+    # this run's result replaces the previous one even when it is a refusal, so must its record;
+    # a failure is not reported here: a spawned child clears again and logs it, and a refused
+    # run prints only its refusal
     clear_wsl_retries(rdir, paths_for(root).logs_dir)
     problem, state = _dirty_before_detach(root, rdir)
     if problem:
@@ -267,7 +269,9 @@ def _run_foreground(args) -> int:
         return EXIT_ERROR
     logs_dir = paths_for(root).logs_dir
     log = RunLog(rdir, verbose=args.verbose, logs_dir=logs_dir)
-    clear_wsl_retries(rdir, logs_dir)
+    problem = clear_wsl_retries(rdir, logs_dir)
+    if problem:
+        log.detail(problem)
     try:
         state = State.load(rdir) or State()
     except StateError:  # reported by cli.main; this run never started

@@ -7,10 +7,18 @@ import io
 import os
 import re
 import unittest
+from unittest import mock
 
 from revali import EXIT_ACTION, EXIT_ERROR
 from revali.runners import WslRunner, probe_runner
-from revali.state import RunLog, State, lock_path, write_json_atomic, wsl_retries_path
+from revali.state import (
+    RunLog,
+    State,
+    clear_wsl_retries,
+    lock_path,
+    write_json_atomic,
+    wsl_retries_path,
+)
 from tests.helpers import RepoCase, claude_entry, run_cli
 from tests.test_wsl_retry import TIMEOUT, FlakyWsl
 
@@ -83,6 +91,40 @@ class RunLogRecord(RepoCase):
             log.wsl_retry("Ubuntu: x; retry 1 of 2 in 0s")
         self.assertEqual(buf.getvalue(), "")
         self.assertEqual(len(recorded(self.rdir())), 1)
+
+
+class RecordFailures(RepoCase):
+    """Round 1 F1, F2: the record never stops a run, and a failure to write or empty it is
+    noted in revali.log."""
+
+    def revali_log(self):
+        with open(os.path.join(self.rdir(), "logs", "revali.log"), "r", encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_failed_append_is_noted_and_the_retry_goes_on(self):
+        log = RunLog(self.rdir(), quiet=True, logs_dir="logs")
+        os.makedirs(wsl_retries_path(self.rdir(), "logs"))  # a directory: open() fails
+        log.wsl_retry("Ubuntu: x; retry 1 of 2 in 0s")  # must not raise
+        text = self.revali_log()
+        self.assertRegex(text, r"(?m)^\[\d\d:\d\d:\d\d\] wsl: Ubuntu: x; retry 1 of 2 in 0s$")
+        self.assertIn("could not add the retry to %s" % wsl_retries_path(self.rdir(), "logs"), text)
+
+    def test_failed_clear_is_returned(self):
+        path = record(self.rdir(), OLD)
+        with mock.patch("revali.state.open", side_effect=PermissionError("held"), create=True):
+            problem = clear_wsl_retries(self.rdir(), "logs")
+        self.assertIn("could not empty %s" % path, problem)
+        self.assertIn("held", problem)
+        self.assertEqual(recorded(self.rdir()), [OLD])
+        self.assertEqual(clear_wsl_retries(self.rdir(), "logs"), "")
+        self.assertEqual(recorded(self.rdir()), [])
+        self.assertEqual(clear_wsl_retries(self.rdir(), "logs"), "")  # nothing to empty
+
+    def test_foreground_run_logs_a_failed_clear(self):
+        self.claude(claude_entry())
+        with mock.patch("revali.pipeline.clear_wsl_retries", return_value="could not empty X"):
+            run_cli(["run", "--foreground"])
+        self.assertRegex(self.revali_log(), r"(?m)^\[\d\d:\d\d:\d\d\]   could not empty X$")
 
 
 class RunRecordsItsRetries(FlakyWsl):
