@@ -3,7 +3,9 @@
 NAME = "revali"
 VERSION = "0.3.0"
 CONFIG_VERSION = 1
-STATE_VERSION = 9  # 9: a validation record lists its platforms
+STATE_VERSION = (
+    10  # 10: stage `closed`, `merged_outside`; 9: a validation record lists its platforms
+)
 PROMPT_VERSION = "11"  # bumped when prompts/, schemas/ or checklists/ change
 
 # Exit codes shared by every subcommand.

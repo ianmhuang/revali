@@ -19,7 +19,7 @@ stated.
   the repository, and `FETCH_HEAD`
 - outside your repository, in the checkout revali itself runs from (when it
   runs from a git checkout): `git describe --tags --always --dirty` once per
-  `run`, `preflight`, `merge` or `stop` process, for the build named in the
+  `run`, `preflight`, `merge`, `archive` or `stop` process, for the build named in the
   logs and the history row. The refresh behind `--dirty` takes that
   checkout's `.git/index.lock` for a moment and may write its index back
   (stat data only, no content changes); a `git add`, `commit` or `pull` you
@@ -158,6 +158,22 @@ stated.
   When `gh pr merge` exits non-zero but `gh pr view`
   reports the PR as MERGED, the merge counts as done and the local
   follow-up still runs
+- on `revali archive [--branch <branch>]` (human-started, for a PR merged or
+  closed without `revali merge`; refused while a run holds the branch or the
+  working tree): `gh auth status` and `gh pr view <n> --json state`, nothing
+  that changes the PR. An open PR, or a state gh cannot report, changes
+  nothing (exit 1). MERGED: the state's stage becomes `merged`, the local
+  branch is deleted with `git branch -D` unless a working tree has it checked
+  out or its tip is neither the head revali last saw nor an ancestor of it or
+  of `origin/<branch>` (a commit made after the last run, or a new branch of
+  that name); a kept branch is named in the output with the reason; a history row with
+  `merged_outside: true` and `stage_before` is appended (no `merged_outside`
+  when `revali merge` had already recorded the merge and stopped before its
+  move), and the branch's
+  state directory is moved to `[paths] archive_dir` as `revali merge` moves
+  it. CLOSED: the same with stage `closed`, and the local branch is left
+  alone. The remote branch, the base branch and the issues a commit fixes
+  are not touched
 - after a review round that stops before its tests are committed (a failed
   or timed-out Reviewer session, unusable output, a smoke run that fails
   twice), deletes the untracked files matching `test_file_pattern` under

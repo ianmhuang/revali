@@ -26,8 +26,17 @@ STAGES = (
     "needs_human",
     "error",
     "stopped",
+    "closed",  # the PR was closed without merging; set by `revali archive` (STATE_VERSION 10)
 )
-TERMINAL_STAGES = ("ready_to_merge", "merged", "needs_action", "needs_human", "error", "stopped")
+TERMINAL_STAGES = (
+    "ready_to_merge",
+    "merged",
+    "needs_action",
+    "needs_human",
+    "error",
+    "stopped",
+    "closed",
+)
 
 
 def safe_branch(branch: str) -> str:
@@ -101,6 +110,9 @@ class State:
     # archive mode: the copies the round placed in test_dir, recorded before they are written,
     # plus the reviewer's files a failed take could not move; the cleanup of a round that
     # stops early deletes exactly these (STATE_VERSION 6)
+
+    # set by `revali archive` for a PR merged without `revali merge` (STATE_VERSION 10)
+    merged_outside: bool = False
     last_exit: int = -1
     message: str = ""
     started_at: str = ""

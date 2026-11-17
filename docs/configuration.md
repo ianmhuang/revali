@@ -124,7 +124,8 @@ preflight stops with exit 2 without it. The line's exit code is logged,
 not judged; lint decides. With `lint` empty the format line still runs and
 nothing checks its result; preflight's empty-lint note says so.
 `[paths] archive_dir` (default `archive`) is where `revali merge` moves the
-branch's `.revali/<branch>/` once the PR is merged, as
+branch's `.revali/<branch>/` once the PR is merged (and `revali archive` once
+the PR was merged or closed elsewhere), as
 `<owner>__<repo>/<pr>-<branch>/` under it: the review record outlives the
 branch as a local or shared knowledge base. A relative value sits under
 `~/.revali/` (`REVALI_HOME`), `~` is expanded, an absolute path is used as

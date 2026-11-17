@@ -19,6 +19,7 @@ COMMANDS = (
     "clean",
     "stop",
     "merge",
+    "archive",  # feature/archive-outside-merge
     "stats",
     "version",
 )
@@ -90,6 +91,7 @@ class SubcommandHelp(unittest.TestCase):
             "clean": pipeline.cmd_clean,
             "stop": pipeline.cmd_stop,
             "merge": pipeline.cmd_merge,
+            "archive": pipeline.cmd_archive,
             "stats": cli._cmd_stats,
             "version": pipeline.cmd_version,
         }

@@ -306,9 +306,12 @@ def _record_stop(
     return stop.exit_code
 
 
-def _record_history(state: State, exit_code: int, log: Optional[RunLog] = None) -> None:
+def _record_history(
+    state: State, exit_code: int, log: Optional[RunLog] = None, extra: Optional[dict] = None
+) -> None:
     """The history row for this run. With `log`, the run's timing is closed, written to the
-    log as one `run: timing` line, and stored in the row (`stage_s`, `sandbox_s`)."""
+    log as one `run: timing` line, and stored in the row (`stage_s`, `sandbox_s`). `extra`
+    adds fields (`revali archive`: `merged_outside`, `stage_before`)."""
     timing = {}
     if log is not None:
         log.timing.close()
@@ -337,6 +340,7 @@ def _record_history(state: State, exit_code: int, log: Optional[RunLog] = None) 
                 "issues": opened_count(state),  # not the open ones reused (found)
                 "revali_build": build(),
                 **timing,
+                **(extra or {}),
             },
         )
     except OSError:
@@ -856,7 +860,8 @@ def cmd_status(args) -> int:
         ]
         if stale:
             print(
-                "stale review dirs (branch no longer exists): %s  -> `revali clean <name>`"
+                "stale review dirs (branch no longer exists): %s  -> `revali archive --branch "
+                "<name>` records a PR merged or closed elsewhere, `revali clean <name>` deletes"
                 % ", ".join(stale)
             )
     return EXIT_OK
@@ -1089,18 +1094,90 @@ def cmd_merge(args) -> int:
     print(merge.merge_summary(state, state.base))
     # the root found before the merge: a checkout does not move it, and asking git again here
     # could fail now that the PR is merged and skip the archive
+    print(
+        "  "
+        + _archive_branch_dir(
+            root, review_dir(root, state.branch, paths_for(root).state_dir), state
+        )
+    )
+    return code
+
+
+def _archive_branch_dir(root: str, rdir: str, state: State) -> str:
+    """Move `rdir` to `[paths] archive_dir` (delete it when the key is empty), as `merge` and
+    `archive` do last. Returns the line for the output."""
+    from revali import merge
+
     paths = paths_for(root)
-    rdir = review_dir(root, state.branch, paths.state_dir)
     root_dir = archive_root(paths)
     if root_dir:
-        line = merge.archive_review_dir(
+        return merge.archive_review_dir(
             rdir, root_dir, state.repo or os.path.basename(root), state.pr_number, state.branch
         )
-    else:
-        merge.remove_tree(rdir)
-        line = "removed %s/%s/" % (paths.state_dir, safe_branch(state.branch))
+    merge.remove_tree(rdir)
+    return "removed %s/%s/" % (paths.state_dir, os.path.basename(rdir))
+
+
+def cmd_archive(args) -> int:
+    """Record a PR merged or closed outside `revali merge`: never merges, pushes or edits it."""
+    from revali import merge
+
+    found = _located(os.getcwd(), args.branch, allow_detached=True)
+    if not found:
+        return EXIT_ERROR
+    root, branch, rdir = found
+    if branch == "HEAD":
+        print("ERROR: detached HEAD; name the branch: `revali archive --branch <branch>`")
+        return EXIT_ERROR
+    _print_identity(root, branch)
+    state = State.load(rdir) if os.path.isdir(rdir) else None
+    if state is None:
+        print(
+            "ERROR: no review state for %s (%s); nothing records a PR" % (branch, State.path(rdir))
+        )
+        return EXIT_ERROR
+    state.branch = state.branch or branch
+    # before the locks: a log that cannot be opened must not leave them behind
+    log = RunLog(rdir, verbose=args.verbose, logs_dir=paths_for(root).logs_dir)
+    tpath = _tree_lock_path(root)
+    if lock_owner_alive(rdir) or tree_lock_owner(tpath):
+        print("ERROR: a run is in progress; `revali stop` first")
+        return EXIT_ERROR
+    try:
+        acquire_lock(rdir)
+    except LockHeld as exc:
+        print("ERROR: %s" % exc)
+        return EXIT_ERROR
+    try:
+        acquire_tree_lock(tpath, state.branch)
+    except TreeLockHeld as exc:
+        release_lock(rdir)
+        print(_tree_held_message({"pid": exc.pid, "branch": exc.branch}))
+        return EXIT_ERROR
+    local = ""
+    try:
+        before = merge.record_outside(root, rdir, state, log)
+        if state.stage == "merged":
+            local = merge.drop_merged_branch(root, state, log)
+            log.stage("archive", local)
+    except Stop as stop:
+        _print_stop(stop)
+        return stop.exit_code
+    finally:
+        release_lock(rdir)
+        release_tree_lock(tpath)
+    extra = {"stage_before": before}
+    if state.merged_outside:
+        extra["merged_outside"] = True
+    _record_history(state, EXIT_OK, extra=extra)
+    print(merge.archive_summary(state, before))
+    if local:
+        print("  " + local)
+    line = _archive_branch_dir(root, rdir, state)
+    if line.startswith("could not archive"):
+        line += "; `revali archive` again finishes the move"
     print("  " + line)
-    return code
+    return EXIT_OK
 
 
 def cmd_version(args) -> int:

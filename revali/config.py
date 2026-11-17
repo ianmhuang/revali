@@ -185,9 +185,10 @@ def user_home() -> str:
 
 
 def archive_root(paths: PathsCfg) -> str:
-    """The directory `revali merge` archives branch directories under: [paths] archive_dir
-    with `~` expanded, relative to the user directory (`~/.revali/`, `REVALI_HOME`) unless
-    absolute; "" when the key is empty, which means delete instead of archive."""
+    """The directory `revali merge` and `revali archive` move branch directories under:
+    [paths] archive_dir with `~` expanded, relative to the user directory (`~/.revali/`,
+    `REVALI_HOME`) unless absolute; "" when the key is empty, which means delete instead of
+    archive."""
     value = paths.archive_dir.strip()
     if not value:
         return ""
