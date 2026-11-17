@@ -77,12 +77,15 @@ class ReadyCase(RepoCase):
 
     def assert_reported(self, stage, exit_code, words):
         """AC-2: the stop's own stage, message and exit code in the state, `wait` and
-        `status`, with the note after the message's first line."""
+        `status`, with the note as the message's last line (what skill/SKILL.md tells the
+        author session to look at)."""
         state = State.load(self.rdir())
         self.assertEqual(state.stage, stage)
         self.assertEqual(state.last_exit, exit_code)
-        self.assertIn(words, state.message.split("\n")[0])
-        self.assert_note(state.message)
+        lines = state.message.split("\n")
+        self.assertIn(words, lines[0])
+        self.assertGreater(len(lines), 1, state.message)
+        self.assert_note(lines[-1])
         code, out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, exit_code, out)
         self.assertIn("%s: " % stage, out)
@@ -140,6 +143,22 @@ class StopsBeforeThePrStage(ReadyCase):
         self.assertIn("working tree is not clean", out)
         self.assert_note(out)
         self.assert_reported("error", EXIT_ERROR, "working tree is not clean")
+        # the dirty paths stay under the line that announces them; the note follows the list
+        message = State.load(self.rdir()).message
+        self.assertLess(message.index("stray.txt"), NOTE.search(message).start(), message)
+        os.remove(os.path.join(self.repo, "stray.txt"))
+        self.assert_merges()
+
+    def test_a_refused_merge_leaves_the_branch_mergeable(self):
+        code, out = self.stopped_by_lint()
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.write("stray.txt", "not committed\n")
+        self.assert_refused("working tree is not clean")
+        # the merge's own refusal is what `status` shows now, and it still says what stands
+        code, out = run_cli(["status"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("working tree is not clean", out)
+        self.assert_note(out)
         os.remove(os.path.join(self.repo, "stray.txt"))
         self.assert_merges()
 
@@ -243,6 +262,18 @@ class WhatEndsIt(ReadyCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assert_merges()
 
+    def test_a_dry_run_against_another_base_leaves_the_merge_where_it_was(self):
+        git(["branch", "release", "main"], self.repo)
+        git(["push", "-q", "origin", "release"], self.repo)
+        code, out = run_cli(["run", "--dry-run", "--base", "release"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("against release", out)
+        code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("MERGED: PR #7 into main", out)  # the base the validation ran against
+        self.assertNotIn("into release", out)
+        self.assertEqual(len(self.merge_calls()), 1, out)
+
     def moved_words(self):
         return "HEAD moved since validation (%s -> %s)" % (self.validated[:10], self.head()[:10])
 
@@ -291,6 +322,23 @@ class OlderStates(ReadyCase):
             self.head()[:10],
         )
         self.assert_refused(moved, EXIT_ACTION)
+
+    def test_an_older_ready_state_survives_a_stopped_run(self):
+        """A branch that was ready when revali was upgraded: its validation stands too."""
+        self.make_older()
+        code, out = self.stopped_by_lint()
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assert_note(out)
+        self.assert_reported("needs_action", EXIT_ACTION, "lint failed")
+        self.assert_merges()
+
+    def test_an_older_state_that_was_not_ready_gains_nothing(self):
+        self.make_older(stage="needs_action", last_exit=EXIT_ACTION)
+        code, out = self.stopped_by_lint()
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assertNotIn("still stands", out)
+        self.assertNotIn("still stands", State.load(self.rdir()).message)
+        self.assert_refused("not ready to merge")
 
     def test_merged_or_closed_is_refused(self):
         for stage in ("merged", "closed"):
