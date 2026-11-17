@@ -446,9 +446,10 @@ def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
         )
     lines = [
         "Documents reachable by relative links from %s that link to a file this diff "
-        "changes, or name in a code span something it adds or removes. They are not in the "
-        "diff unless marked; read each one and compare it with the new behaviour."
-        % ", ".join(roots),
+        "changes, or name in a code span something it adds or removes outside `%s/` (what "
+        "it adds or removes there is not counted as a name; a link to a file there, or its "
+        "path, still counts). They are not in the diff unless marked; read each one and "
+        "compare it with the new behaviour." % (", ".join(roots), ctx.cfg.project.test_dir),
         "",
     ]
     if found:
