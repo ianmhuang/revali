@@ -124,8 +124,8 @@ this line on the host, then the `lint` line: a file that only needed
 formatting passes without sending the reviewer back. It runs over the files
 under `test_dir` that differ from HEAD after the attempt: those the reviewer
 wrote or changed in it, and with `[review] tests = "archive"` also the
-earlier rounds' files placed back for the round. `{files}` is required, so the line touches nothing else;
-preflight stops with exit 2 without it. The line's exit code is logged,
+earlier rounds' files placed back for the round. `{files}` is required, so
+the line touches nothing else; preflight stops with exit 2 without it. The line's exit code is logged,
 not judged; lint decides. With `lint` empty the format line still runs and
 nothing checks its result; preflight's empty-lint note says so.
 `[paths] archive_dir` (default `archive`) is where `revali merge` moves the

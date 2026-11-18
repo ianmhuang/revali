@@ -1016,9 +1016,10 @@ def compute_verdict(data: dict, gaps: List[str], needs_info_allowed: bool) -> Tu
 
 
 def format_files(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> None:
-    """Run `[project] format` on the reviewer's files of this attempt, so a file that only
-    needs formatting costs no bounce (the reviewer has no shell to run a formatter). Its exit
-    code is logged, not judged: lint runs next and decides."""
+    """Run `[project] format` on `test_files`, the files under `test_dir` that differ from
+    HEAD after the attempt (in archive mode the earlier rounds' placed-back files too), so a
+    file that only needs formatting costs no bounce (the reviewer has no shell to run a
+    formatter). Its exit code is logged, not judged: lint runs next and decides."""
     cmd = ctx.cfg.project.format.strip()
     if not cmd or not test_files:
         return

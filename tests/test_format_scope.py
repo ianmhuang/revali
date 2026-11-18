@@ -124,6 +124,13 @@ class Docs(unittest.TestCase):
         for word in ("`test_dir`", "HEAD", 'tests = "archive"', "placed back"):
             self.assertIn(word, para)
 
+    def test_template_comment(self):  # round 1 F1
+        with open(os.path.join(ROOT, "templates", "revali.toml"), encoding="utf-8") as fh:
+            line = [ln for ln in fh if ln.lstrip("# ").startswith("format =")]
+        self.assertEqual(len(line), 1, line)
+        self.assertNotIn("new test files", line[0])
+        self.assertIn("differ from HEAD", line[0])
+
     def test_side_effects_md(self):
         text = self.text("side-effects.md")
         bullet = text.split("runs `[project] format` on the host", 1)[1].split(" - ", 1)[0]
