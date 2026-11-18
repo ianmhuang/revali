@@ -45,18 +45,20 @@ SCHEMA = os.path.join(HERE, "doc_audit.schema.json")
 
 
 def _schema_parts():
-    """The answer's keys and the severities, from the schema file (one source)."""
+    """The answer's allowed keys (`properties`), a finding's allowed and required keys, and
+    the severities, from the schema file (one source)."""
     with open(SCHEMA, encoding="utf-8") as fh:
         schema = json.load(fh)
     item = schema["properties"]["findings"]["items"]
     return (
-        tuple(schema["required"]),
+        tuple(schema["properties"]),
+        tuple(item["properties"]),
         tuple(item["required"]),
         tuple(item["properties"]["severity"]["enum"]),
     )
 
 
-ANSWER_KEYS, FINDING_KEYS, SEVERITIES = _schema_parts()
+ANSWER_KEYS, FINDING_ALLOWED, FINDING_KEYS, SEVERITIES = _schema_parts()
 BLOCKING = ("high", "medium")
 FINDING_TEXT = tuple(k for k in FINDING_KEYS if k not in ("severity", "line"))
 READY, DONE, ERROR, NOT_RUN, STARTED = "ready", "done", "error", "not-run", "started"
@@ -140,7 +142,7 @@ def schema_problem(data) -> str:
     for n, f in enumerate(found, 1):
         if not isinstance(f, dict):
             return "finding %d is not an object" % n
-        extra = sorted(set(f) - set(FINDING_KEYS))
+        extra = sorted(set(f) - set(FINDING_ALLOWED))
         if extra:
             return "finding %d: unknown key(s): %s" % (n, ", ".join(extra))
         if f.get("severity") not in SEVERITIES:
@@ -329,6 +331,23 @@ def load_results(out: str):
     return (data, results), ""
 
 
+def _held_run(out: str) -> str:
+    """Why `out` cannot take a new run ("" when it can): it holds a paid run. A dry run's
+    directory holds only prompts, so a run may start there."""
+    path = os.path.join(out, RESULTS)
+    if not os.path.isfile(path):
+        return ""
+    try:
+        if json.loads(_read(path)).get("dry_run"):
+            return ""
+    except (OSError, ValueError, AttributeError):
+        pass
+    return "%s already holds a run; continue it with --resume %s, or pick another --out" % (
+        out,
+        out,
+    )
+
+
 class Run:
     def __init__(self, out, repo, roots, docs, selected, dry_run, budget, s: Settings):
         self.out, self.repo, self.roots = out, repo, roots
@@ -396,9 +415,17 @@ def _main(args) -> int:
     cfg = load_project_config(repo, load_user_config())
     roots = list(cfg.review.doc_roots)
     docs = documents(repo, roots)
+    engine = engines.for_role(cfg, "review")
+    if not args.dry_run:
+        try:  # a missing executable fails every session alike; stop before anything is made
+            procs.resolve(engine.name)
+        except procs.ExeNotFound as exc:
+            print("doc_audit: %s" % exc)
+            return 1
 
-    kept: dict = {}
+    record: dict = {}  # document -> its latest Result; saved in selection order
     earlier = 0.0
+    recorded_reason = None
     if args.resume:
         loaded, problem = load_results(args.resume)
         if loaded is None:
@@ -420,11 +447,15 @@ def _main(args) -> int:
         if args.model and data.get("model") and args.model != data["model"]:
             print("doc_audit: %s ran with model %s" % (args.resume, data["model"]))
             return 1
-        args.model = args.model or data.get("model", "")
+        if not args.model:  # the recorded model, and how it was chosen
+            args.model = data.get("model", "")
+            recorded_reason = data.get("model_reason", "")
         if args.doc_usd is None:  # a --doc-usd given here replaces the recorded cap
             args.doc_usd = data.get("doc_usd") or None
         selected = list(data.get("selected") or docs)
-        kept = {r.doc: r for r in prior if r.status == DONE}
+        # every earlier record stays until replaced, so an interrupted resume keeps the
+        # done documents that come after the one it was in
+        record = {r.doc: r for r in prior}
         earlier = float(data.get("spent_usd") or 0.0)
         out = args.resume
     else:
@@ -435,22 +466,16 @@ def _main(args) -> int:
             return 1
         wanted = set(args.only)
         selected = [d for d in docs if d in wanted] if args.only else docs  # once, in list order
-        if args.out and os.path.isfile(os.path.join(args.out, RESULTS)):
-            print(
-                "doc_audit: %s already holds a run; use --resume %s, or another --out"
-                % (args.out, args.out)
-            )
+        held = _held_run(args.out) if args.out else ""
+        if held:
+            print("doc_audit: %s" % held)
             return 1
         out = args.out or tempfile.mkdtemp(prefix="revali doc audit ")
         os.makedirs(out, exist_ok=True)
 
     engine, s = settings(cfg, args)
-    if not args.dry_run:
-        try:  # a missing executable fails every session alike, before any is paid for
-            procs.resolve(engine.name)
-        except procs.ExeNotFound as exc:
-            print("doc_audit: %s" % exc)
-            return 1
+    if recorded_reason is not None:
+        s.reason = recorded_reason
     budget = args.budget_usd or 0.0
     run = Run(out, repo, roots, docs, selected, args.dry_run, budget, s)
     print("documents (%d): %s" % (len(selected), ", ".join(selected)))
@@ -461,35 +486,35 @@ def _main(args) -> int:
             % (s.model, " (%s)" % s.reason if s.reason else "", s.cap, budget, earlier)
         )
 
-    results: List[Result] = []
+    def results() -> List[Result]:
+        return [record[d] for d in selected if d in record]
+
     spent = earlier
     stopped = False
     for doc in selected:
-        if doc in kept:
-            results.append(kept[doc])
+        if doc in record and record[doc].status == DONE:
             continue
         prompt = build_prompt(repo, doc, docs, roots)
         _write(os.path.join(out, slug(doc) + ".prompt.txt"), prompt)
         if args.dry_run:
-            results.append(Result(doc, READY, message="prompt %d lines" % prompt.count("\n")))
+            record[doc] = Result(doc, READY, message="prompt %d lines" % prompt.count("\n"))
             print("  %s: ready" % doc)
             continue
         if stopped or spent + s.cap > budget:
             stopped = True
-            results.append(
-                Result(
-                    doc,
-                    NOT_RUN,
-                    message="$%.2f spent + the cap $%.2f would pass the budget $%.2f"
-                    % (spent, s.cap, budget),
-                )
+            record[doc] = Result(
+                doc,
+                NOT_RUN,
+                message="$%.2f spent + the cap $%.2f would pass the budget $%.2f"
+                % (spent, s.cap, budget),
             )
             continue
         # recorded first: if the run ends inside the session, its cap counts on --resume
-        run.save(results + [Result(doc, STARTED, charged=s.cap)], spent + s.cap)
+        record[doc] = Result(doc, STARTED, charged=s.cap)
+        run.save(results(), spent + s.cap)
         result = audit_one(engine, s, repo, doc, prompt, out)
         spent += result.charged
-        results.append(result)
+        record[doc] = result
         _write(os.path.join(out, slug(doc) + ".md"), report(result))
         c = counts(result)
         print(
@@ -504,12 +529,13 @@ def _main(args) -> int:
                 "; " + result.message if result.message else "",
             )
         )
-        run.save(results, spent)
-    run.save(results, spent)
+        run.save(results(), spent)
+    final = results()
+    run.save(final, spent)
     if args.dry_run:
         return 0
-    _write(os.path.join(out, SUMMARY), summary(results, spent, budget))
-    code, line = verdict(results)
+    _write(os.path.join(out, SUMMARY), summary(final, spent, budget))
+    code, line = verdict(final)
     print("%s; spent $%.2f; see %s" % (line, spent, os.path.join(out, SUMMARY)))
     return code
 

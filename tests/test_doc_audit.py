@@ -201,6 +201,33 @@ class Sessions(AuditCase):
         self.assertIn("--resume", out)
         self.assertEqual(len(self.calls()), 1)
 
+    def test_a_missing_executable_makes_no_output_directory(self):  # round 2 follow-up
+        os.environ.pop("REVALI_CLAUDE_CMD")
+        real = shutil.which
+        with (
+            mock.patch(
+                "revali.procs.shutil.which",
+                side_effect=lambda n: None if n == "claude" else real(n),
+            ),
+            mock.patch.object(audit.tempfile, "mkdtemp") as mkdtemp,
+        ):
+            code, out = self.run_audit("--budget-usd", "10", out=False)
+        self.assertEqual(code, 1, out)
+        mkdtemp.assert_not_called()
+
+    def test_a_dry_run_directory_takes_the_run(self):  # AC-4 (round 2 F2)
+        self.run_audit("--dry-run")
+        self.claude(entry())
+        code, out = self.run_audit("--budget-usd", "10", "--only", "README.md")
+        self.assertEqual(code, 0, out)
+        data, by_doc = self.results()
+        self.assertFalse(data["dry_run"])
+        self.assertEqual(by_doc["README.md"]["status"], "done")
+        # and a dry run does not overwrite a paid run
+        code, out = self.run_audit("--dry-run")
+        self.assertEqual(code, 1, out)
+        self.assertFalse(self.results()[0]["dry_run"])
+
     def test_a_cap_over_the_budget_is_not_started(self):  # AC-2, AC-5
         cap = self.cfg.review.budget_usd
         self.claude(entry(cost=0.25))
@@ -368,6 +395,34 @@ class Selection(AuditCase):
         self.assertIn("docs/more.md", out)
         self.assertEqual(len(self.calls()), before)
 
+    def test_an_interrupted_resume_keeps_the_later_done_documents(self):  # AC-6 (round 2 F1)
+        three = ["README.md", "CONVENTIONS.md", "docs/guide.md"]
+        self.claude(ce(answer(), is_error=True, cost=0.2), entry(), entry())
+        code, out = self.run_audit("--budget-usd", "10", "--only", *three)
+        self.assertEqual(code, 1, out)
+        with mock.patch.object(audit, "audit_one", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_audit("--resume", self.out, "--budget-usd", "10", out=False)
+        data, by_doc = self.results()
+        self.assertEqual([by_doc[d]["status"] for d in three], ["started", "done", "done"])
+        self.claude(entry())
+        before = len(self.calls())
+        code, out = self.run_audit("--resume", self.out, "--budget-usd", "10", out=False)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.calls()) - before, 1)  # README.md only
+        data, by_doc = self.results()
+        self.assertEqual([r["doc"] for r in data["results"]], three)
+
+    def test_resume_keeps_how_the_model_was_chosen(self):  # round 2 follow-up
+        cap = self.cfg.review.budget_usd
+        self.claude(entry(cost=0.25))
+        self.run_audit("--budget-usd", str(cap + 0.1), "--only", "README.md", "CONVENTIONS.md")
+        reason = self.results()[0]["model_reason"]
+        self.assertTrue(reason.startswith("auto:"), reason)
+        code, out = self.run_audit("--resume", self.out, "--budget-usd", "10", out=False)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.results()[0]["model_reason"], reason)
+
     def test_resume_refuses_another_repository(self):  # AC-6 (round 1 follow-up)
         self.claude(entry())
         self.run_audit("--budget-usd", "10", "--only", "README.md")
@@ -426,6 +481,9 @@ class Files(unittest.TestCase):
         item = schema["properties"]["findings"]["items"]
         self.assertEqual(audit.SEVERITIES, tuple(item["properties"]["severity"]["enum"]))
         self.assertEqual(audit.FINDING_KEYS, tuple(item["required"]))
+        # allowed keys are the schema's properties, not its required list (round 2 F3)
+        self.assertEqual(audit.ANSWER_KEYS, tuple(schema["properties"]))
+        self.assertEqual(audit.FINDING_ALLOWED, tuple(item["properties"]))
         for key in audit.FINDING_TEXT:  # the session is held to what the check accepts
             self.assertEqual(item["properties"][key]["minLength"], 1, key)
         self.assertIn("unknown", audit.schema_problem(dict(answer(), extra=1)))
