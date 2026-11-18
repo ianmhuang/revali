@@ -198,7 +198,7 @@ class FormatFails(FormatRepo):
         for line in timed:
             # AC-1: the same shape as the exit line, so one pattern finds every format run:
             # the file count, then the command in backquotes, then what happened
-            self.assertIn("format of 1 new test file(s) with `", line)
+            self.assertIn("format of 1 test file(s) with `", line)
             self.assertIn("fmt_stub.py " + FILE + "`: timed out", line)
         self.assertEqual(len(lint_lines(log)), 2, log)  # lint still ran each time
 

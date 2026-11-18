@@ -140,12 +140,13 @@ class Format(FormatCase):
 
     def test_a_format_timeout_is_logged_not_raised(self):
         ctx = preflight(self.repo)
+        self.write(FILE, TEST_REVIEW_MUL)  # format_files skips paths that do not exist
         log = mock.Mock()
         with mock.patch("revali.review.run_shell", side_effect=ProcTimeout("timed out")):
             format_files(ctx, [FILE], log)  # AC-2: no Stop
         line = log.stage.call_args[0][1]
         # PR #44 F2: the same shape as the exit line, file count and command included
-        self.assertIn("format of 1 new test file(s) with `", line)
+        self.assertIn("format of 1 test file(s) with `", line)
         self.assertIn("fmt.py", line)
         self.assertIn("timed out", line)
 
@@ -162,6 +163,8 @@ class Format(FormatCase):
 
     def test_a_path_with_a_space_is_quoted(self):
         ctx = preflight(self.repo)
+        for rel in ("tests/test_review_a b.py", FILE):  # format_files skips missing paths
+            self.write(rel, TEST_REVIEW_MUL)
         with mock.patch("revali.review.run_shell") as rs:
             rs.return_value = mock.Mock(returncode=0, ok=True, text="")
             format_files(ctx, ["tests/test_review_a b.py", FILE], None)

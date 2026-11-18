@@ -339,7 +339,7 @@ def check_lint(ctx: Context) -> None:
             '"black {files}"); revali formats only those: %s' % fmt,
         )
     if fmt:
-        ctx.say("format: %s (the reviewer's new test files)" % fmt)
+        ctx.say("format: %s (the reviewer's test files that differ from HEAD)" % fmt)
     cmd = ctx.cfg.project.lint.strip()
     if not cmd:
         ctx.notes.append(
