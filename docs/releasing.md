@@ -91,7 +91,8 @@ next one; a failed session that reported no cost (a timeout) is charged its cap.
      statement; a version held in a variable and compared later is not seen.
 5. After the merge, and only on the maintainer's word: an annotated tag on the merge commit,
    pushed to origin. The section's heading carries the tag's date; when the tag is made on
-   another day than step 4 planned, a change that corrects the heading comes first.
+   another day than step 4 planned, a change that corrects the heading comes first, and the
+   tag goes on that change's merge commit.
 
    ```
    git tag -a v<version> -m "revali <version>: <what it brings>" <merge commit>
