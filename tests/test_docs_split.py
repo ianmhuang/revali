@@ -15,7 +15,14 @@ from tests.helpers import RepoCase, git, run_cli
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-DOCS = ("workflow.md", "configuration.md", "files.md", "sandbox.md", "side-effects.md")
+DOCS = (
+    "workflow.md",
+    "configuration.md",
+    "files.md",
+    "sandbox.md",
+    "side-effects.md",
+    "releasing.md",
+)
 
 
 def read(*parts):

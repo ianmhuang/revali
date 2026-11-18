@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Two or three sentences: what the document covers and how much of it you checked against the code."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "line", "quote", "actual", "evidence", "suggestion"],
+        "properties": {
+          "severity": {"enum": ["high", "medium", "low"]},
+          "line": {"type": "integer", "minimum": 1, "description": "The document's line the statement is on."},
+          "quote": {"type": "string", "minLength": 1, "description": "The statement, quoted from the document."},
+          "actual": {"type": "string", "minLength": 1, "description": "What the code does instead."},
+          "evidence": {"type": "string", "minLength": 1, "description": "path:line in the repository that shows it."},
+          "suggestion": {"type": "string", "minLength": 1, "description": "How to correct the document."}
+        }
+      }
+    }
+  }
+}

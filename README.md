@@ -140,13 +140,13 @@ and the history row. Every result lands in `.revali/<branch>/`
 
 ## Documentation
 
-- [docs/workflow.md](docs/workflow.md): why the sessions are separate, the acceptance
-  criteria before the code, project setup, what `run` prints and checks,
-  what happens after exit 2 or a dead run, several agents on one repository
+- [docs/workflow.md](docs/workflow.md): why the sessions are separate, the acceptance criteria before the code,
+  project setup, what `run` prints and checks, what happens after exit 2 or a dead run, several agents on one repository
 - [docs/configuration.md](docs/configuration.md): the three layers, models, `REVALI_DISABLE`
 - [docs/files.md](docs/files.md): every file revali reads or writes and the key that moves it
 - [docs/sandbox.md](docs/sandbox.md): the `wsl`, `ssh` and `local` runners, and the verification record
 - [docs/side-effects.md](docs/side-effects.md): every git and GitHub action revali takes, read before the first run
+- [docs/releasing.md](docs/releasing.md): checking every document against the code before a release
 - [skill/SKILL.md](skill/SKILL.md): the Claude Code skill behind `/revali`, the
   Developer's side of the workflow; [templates/CLAUDE-snippet.md](templates/CLAUDE-snippet.md)
   is the paragraph that goes into a project's `CLAUDE.md` so an authoring

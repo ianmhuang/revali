@@ -11,7 +11,14 @@ import unittest
 from revali import EXIT_OK, VERSION
 from tests.helpers import ROOT, run_cli
 
-DOCS = ("workflow.md", "configuration.md", "files.md", "sandbox.md", "side-effects.md")
+DOCS = (
+    "workflow.md",
+    "configuration.md",
+    "files.md",
+    "sandbox.md",
+    "side-effects.md",
+    "releasing.md",
+)
 
 
 def read(*parts):

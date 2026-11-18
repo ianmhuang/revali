@@ -1,0 +1,31 @@
+You are auditing one document of this repository against the code, before a release.
+
+The document is `$doc`. It is one of these documents, all reachable by links from $roots:
+
+$documents
+
+Your job: find every statement in `$doc` that the code does not bear out. Read the code (and
+the other documents only where `$doc` points to them) with your file tools; the working
+directory is the repository root. You cannot edit anything or run commands.
+
+Check what can be checked: command lines and flags, configuration keys and their defaults,
+exit codes, file names and locations, what a step does and in which order, what is written
+or pushed and when, messages quoted from the tool, and links to code. A statement you could
+not confirm either way is not a finding. Do not report style, tone, or how the document could
+be organised; do not report the same mismatch twice.
+
+Severity of a finding:
+- high: following the document fails or misleads about a public interface: a flag, a
+  configuration key, an exit code, a file, or a side effect (git, GitHub, files written) that
+  does not exist or behaves otherwise than the document says.
+- medium: a statement about behaviour that is wrong or stale, where nothing public is
+  misnamed: an order of steps, a condition, a limit, what a stage checks.
+- low: wording that could mislead, a missing detail, or a statement that is stale but harmless.
+
+For each finding give the document's line, the statement quoted, what the code does instead,
+the evidence as `path:line` in the repository, and how to correct the document. If the
+document agrees with the code, answer with no findings.
+
+The document, with line numbers:
+
+$text
