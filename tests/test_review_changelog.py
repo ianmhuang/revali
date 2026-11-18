@@ -40,7 +40,7 @@ HEADING = re.compile(r"^## (\d+)\.(\d+)\.(\d+) - (\d{4}-\d{2}-\d{2})$")
 MODULE = "tests.test_changelog"
 COPIED_DIRS = ("revali", "tests", "docs")
 COPIED_FILES = (".md", ".toml", ".py")
-PIN_SOURCE = (
+PIN_HEAD = (
     "import unittest\n"
     "\n"
     "from revali import VERSION\n"
@@ -48,8 +48,12 @@ PIN_SOURCE = (
     "\n"
     "class UnlistedPin(unittest.TestCase):\n"
     "    def test_version(self):\n"
-    '        self.assertEqual(VERSION, "%s")\n'
 )
+# two ways a test compares VERSION with a literal; %s takes the current version
+PIN_SOURCES = {
+    "an assert method": PIN_HEAD + '        self.assertEqual(VERSION, "%s")\n',
+    "an assert statement": PIN_HEAD + '        assert VERSION == "%s"\n',
+}
 
 
 def read(root, rel):
@@ -229,6 +233,12 @@ class TheProjectTestCatchesIt(unittest.TestCase):
             + sections[2:],
             "a heading that is no release": [sections[0], "## Known issues\n\n- one\n"]
             + sections[1:],
+            # YYYY-MM-DD is a calendar date: a month 13 is not one
+            "a month that does not exist": [
+                sections[0],
+                "## %s - %s-13-01\n%s" % (version, date[:4], rest),
+            ]
+            + sections[2:],
         }
         for label, mutated in cases.items():
             with self.subTest(label=label):
@@ -246,8 +256,10 @@ class TheProjectTestCatchesIt(unittest.TestCase):
     def test_a_new_pin_the_page_does_not_name(self):  # AC-5
         rel = "tests/test_zz_unlisted_pin.py"
         self.assertNotIn(rel, self.page)
-        code, out = self.run_with(rel, PIN_SOURCE % VERSION)
-        self.assertNotEqual(code, 0, out)
+        for label, source in PIN_SOURCES.items():
+            with self.subTest(label=label):
+                code, out = self.run_with(rel, source % VERSION)
+                self.assertNotEqual(code, 0, out)
 
     def test_a_page_that_no_longer_names_a_place(self):  # AC-5
         files = comparing_files()
