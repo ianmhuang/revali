@@ -7,9 +7,10 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import unittest
+from unittest import mock
 
-from revali import PROMPT_VERSION
 from revali.config import load_project_config, load_user_config
 from tests.helpers import ROOT, RepoCase, claude_entry
 
@@ -167,6 +168,39 @@ class Sessions(AuditCase):
         self.assertIn("--budget-usd", out)
         self.assertEqual(self.calls(), [])
 
+    def test_amounts_must_be_above_zero(self):  # AC-2 (round 1 F5)
+        for argv in (
+            ["--budget-usd", "0"],
+            ["--budget-usd", "-1"],
+            ["--budget-usd", "nan"],
+            ["--budget-usd", "10", "--doc-usd", "0"],
+            ["--budget-usd", "10", "--doc-usd", "-0.5"],
+        ):
+            code, out = self.run_audit(*argv)
+            self.assertEqual(code, 1, argv)
+            self.assertIn("above 0", out)
+        self.assertEqual(self.calls(), [])
+
+    def test_a_missing_executable_stops_before_any_charge(self):  # AC-2 (round 1 F2)
+        os.environ.pop("REVALI_CLAUDE_CMD")
+        real = shutil.which
+        with mock.patch(
+            "revali.procs.shutil.which", side_effect=lambda n: None if n == "claude" else real(n)
+        ):
+            code, out = self.run_audit("--budget-usd", "10")
+        self.assertEqual(code, 1, out)
+        self.assertIn("not found", out)
+        self.assertFalse(os.path.exists(os.path.join(self.out, "results.json")))
+
+    def test_a_used_output_directory_is_refused(self):  # AC-4 (round 1 follow-up)
+        self.claude(entry())
+        code, out = self.run_audit("--budget-usd", "10", "--only", "README.md")
+        self.assertEqual(code, 0, out)
+        code, out = self.run_audit("--budget-usd", "10", "--only", "README.md")
+        self.assertEqual(code, 1, out)
+        self.assertIn("--resume", out)
+        self.assertEqual(len(self.calls()), 1)
+
     def test_a_cap_over_the_budget_is_not_started(self):  # AC-2, AC-5
         cap = self.cfg.review.budget_usd
         self.claude(entry(cost=0.25))
@@ -255,6 +289,17 @@ class Selection(AuditCase):
         self.assertEqual(len(self.calls()), 1)
         self.assertEqual(self.results()[0]["selected"], ["docs/guide.md"])
 
+    def test_only_takes_each_document_once_in_list_order(self):  # AC-6 (round 1 F6)
+        self.claude(entry(), entry())
+        code, out = self.run_audit(
+            "--budget-usd", "10", "--only", "docs/guide.md", "README.md", "docs/guide.md"
+        )
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(self.calls()), 2)
+        data, _ = self.results()
+        self.assertEqual(data["selected"], ["README.md", "docs/guide.md"])
+        self.assertEqual([r["doc"] for r in data["results"]], ["README.md", "docs/guide.md"])
+
     def test_an_unknown_name_stops_before_any_session(self):  # AC-6
         code, out = self.run_audit("--budget-usd", "10", "--only", "docs/nope.md")
         self.assertEqual(code, 1, out)
@@ -323,6 +368,38 @@ class Selection(AuditCase):
         self.assertIn("docs/more.md", out)
         self.assertEqual(len(self.calls()), before)
 
+    def test_resume_refuses_another_repository(self):  # AC-6 (round 1 follow-up)
+        self.claude(entry())
+        self.run_audit("--budget-usd", "10", "--only", "README.md")
+        path = os.path.join(self.out, "results.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["repo"] = os.path.join(self.tmp, "elsewhere")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        code, out = self.run_audit("--resume", self.out, "--budget-usd", "10", out=False)
+        self.assertEqual(code, 1, out)
+        self.assertIn("elsewhere", out)
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_resume_takes_a_new_cap_and_refuses_another_model(self):  # AC-6 (round 1 F7)
+        cap = self.cfg.review.budget_usd
+        self.claude(entry(cost=0.25))
+        self.run_audit("--budget-usd", str(cap + 0.1), "--only", "README.md", "CONVENTIONS.md")
+        code, out = self.run_audit(
+            "--resume", self.out, "--budget-usd", "10", "--model", "claude-other", out=False
+        )
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(self.calls()), 1)
+        self.claude(entry())
+        code, out = self.run_audit(
+            "--resume", self.out, "--budget-usd", "10", "--doc-usd", "0.4", out=False
+        )
+        self.assertEqual(code, 0, out)
+        argv = self.calls()[-1]["argv"]
+        self.assertEqual(float(argv[argv.index("--max-budget-usd") + 1]), 0.4)
+        self.assertEqual(self.results()[0]["doc_usd"], 0.4)
+
     def test_resume_needs_a_results_file(self):  # AC-6
         os.makedirs(self.out)
         code, out = self.run_audit("--resume", self.out, "--budget-usd", "10", out=False)
@@ -342,7 +419,21 @@ class Files(unittest.TestCase):
             prompt = fh.read()
         for word in ("high:", "medium:", "low:", "public interface", "stale but harmless"):
             self.assertIn(word, prompt)
-        self.assertEqual(PROMPT_VERSION, "13")
+
+    def test_the_check_follows_the_schema(self):  # AC-3 (round 1 F3)
+        with open(audit.SCHEMA, encoding="utf-8") as fh:
+            schema = json.load(fh)
+        item = schema["properties"]["findings"]["items"]
+        self.assertEqual(audit.SEVERITIES, tuple(item["properties"]["severity"]["enum"]))
+        self.assertEqual(audit.FINDING_KEYS, tuple(item["required"]))
+        for key in audit.FINDING_TEXT:  # the session is held to what the check accepts
+            self.assertEqual(item["properties"][key]["minLength"], 1, key)
+        self.assertIn("unknown", audit.schema_problem(dict(answer(), extra=1)))
+        self.assertIn("unknown", audit.schema_problem(answer(dict(finding(), extra=1))))
+
+    def test_lines_are_numbered_as_an_editor_does(self):  # round 1 follow-up
+        self.assertEqual(audit.numbered("a\fb\nc\n"), "   1| a\fb\n   2| c")
+        self.assertEqual(audit.flat("two\n  lines"), "two lines")
 
     def test_releasing_page(self):  # AC-8
         with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as fh:

@@ -21,6 +21,7 @@ recorded in DIR counts against --budget-usd.
 
 import argparse
 import json
+import math
 import os
 import string
 import sys
@@ -33,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from revali import VERSION, docgraph, engines, gitops, models  # noqa: E402
+from revali import VERSION, docgraph, engines, gitops, models, procs  # noqa: E402
 from revali.config import ConfigError, load_project_config, load_user_config  # noqa: E402
 from revali.engines import EngineRequest  # noqa: E402
 from revali.preflight import Stop  # noqa: E402
@@ -41,9 +42,23 @@ from revali.state import write_json_atomic  # noqa: E402
 
 PROMPT = os.path.join(HERE, "doc_audit_prompt.txt")
 SCHEMA = os.path.join(HERE, "doc_audit.schema.json")
-SEVERITIES = ("high", "medium", "low")
+
+
+def _schema_parts():
+    """The answer's keys and the severities, from the schema file (one source)."""
+    with open(SCHEMA, encoding="utf-8") as fh:
+        schema = json.load(fh)
+    item = schema["properties"]["findings"]["items"]
+    return (
+        tuple(schema["required"]),
+        tuple(item["required"]),
+        tuple(item["properties"]["severity"]["enum"]),
+    )
+
+
+ANSWER_KEYS, FINDING_KEYS, SEVERITIES = _schema_parts()
 BLOCKING = ("high", "medium")
-FINDING_TEXT = ("quote", "actual", "evidence", "suggestion")
+FINDING_TEXT = tuple(k for k in FINDING_KEYS if k not in ("severity", "line"))
 READY, DONE, ERROR, NOT_RUN, STARTED = "ready", "done", "error", "not-run", "started"
 RESULTS = "results.json"
 SUMMARY = "summary.md"
@@ -90,7 +105,11 @@ def documents(repo: str, roots: List[str]) -> List[str]:
 
 
 def numbered(text: str) -> str:
-    return "\n".join("%4d| %s" % (n, line) for n, line in enumerate(text.splitlines(), 1))
+    """Split on "\\n" only, as docgraph does, so a line number is the editor's."""
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    if lines and lines[-1] == "":
+        lines.pop()  # the final newline ends the last line; it does not start another
+    return "\n".join("%4d| %s" % (n, line) for n, line in enumerate(lines, 1))
 
 
 def build_prompt(repo: str, doc: str, docs: List[str], roots: List[str]) -> str:
@@ -110,6 +129,9 @@ def schema_problem(data) -> str:
     """ "" when `data` matches the schema; else what does not."""
     if not isinstance(data, dict):
         return "the answer is not an object"
+    extra = sorted(set(data) - set(ANSWER_KEYS))
+    if extra:
+        return "unknown key(s): %s" % ", ".join(extra)
     if not isinstance(data.get("summary"), str):
         return "no summary"
     found = data.get("findings")
@@ -118,6 +140,9 @@ def schema_problem(data) -> str:
     for n, f in enumerate(found, 1):
         if not isinstance(f, dict):
             return "finding %d is not an object" % n
+        extra = sorted(set(f) - set(FINDING_KEYS))
+        if extra:
+            return "finding %d: unknown key(s): %s" % (n, ", ".join(extra))
         if f.get("severity") not in SEVERITIES:
             return "finding %d: severity %r" % (n, f.get("severity"))
         line = f.get("line")
@@ -145,7 +170,7 @@ def settings(cfg, args) -> Tuple[engines.Engine, Settings]:
         fallback=chosen.fallback,
         reason=chosen.reason,
         effort=review.effort,
-        cap=args.doc_usd if args.doc_usd else review.budget_usd,
+        cap=args.doc_usd if args.doc_usd is not None else review.budget_usd,
         timeout_s=review.timeout_min * 60,
     )
 
@@ -205,6 +230,11 @@ def verdict(results: List[Result]) -> Tuple[int, str]:
     return 0, "PASS: no high or medium finding"
 
 
+def flat(text: str) -> str:
+    """One line, so a multi-line quote does not break a list item."""
+    return " ".join(str(text).split())
+
+
 def report(result: Result) -> str:
     lines = [
         "# Audit of `%s`" % result.doc,
@@ -224,10 +254,10 @@ def report(result: Result) -> str:
             lines.append("none")
         for f in result.findings:
             lines += [
-                "- **%s**, line %d: %s" % (f["severity"], f["line"], f["quote"]),
-                "  - actual: %s" % f["actual"],
-                "  - evidence: `%s`" % f["evidence"],
-                "  - suggestion: %s" % f["suggestion"],
+                "- **%s**, line %d: %s" % (f["severity"], f["line"], flat(f["quote"])),
+                "  - actual: %s" % flat(f["actual"]),
+                "  - evidence: `%s`" % flat(f["evidence"]),
+                "  - suggestion: %s" % flat(f["suggestion"]),
             ]
     return "\n".join(lines) + "\n"
 
@@ -256,7 +286,14 @@ def summary(results: List[Result], spent: float, budget: float) -> str:
     for r, f in blocking:
         out.append(
             "- %s:%d **%s**: %s; actual: %s (`%s`)"
-            % (r.doc, f["line"], f["severity"], f["quote"], f["actual"], f["evidence"])
+            % (
+                r.doc,
+                f["line"],
+                f["severity"],
+                flat(f["quote"]),
+                flat(f["actual"]),
+                flat(f["evidence"]),
+            )
         )
     out += ["", "## Not audited", ""]
     missing = [r for r in results if r.status != DONE]
@@ -293,10 +330,10 @@ def load_results(out: str):
 
 
 class Run:
-    def __init__(self, out, repo, roots, docs, selected, dry_run, budget, s, earlier):
+    def __init__(self, out, repo, roots, docs, selected, dry_run, budget, s: Settings):
         self.out, self.repo, self.roots = out, repo, roots
         self.docs, self.selected, self.dry_run = docs, selected, dry_run
-        self.budget, self.settings, self.earlier = budget, s, earlier
+        self.budget, self.settings = budget, s
 
     def save(self, results: List[Result], spent: float) -> None:
         s = self.settings
@@ -310,9 +347,9 @@ class Run:
                 "roots": self.roots,
                 "documents": self.docs,
                 "selected": self.selected,
-                "model": s.model if s else "",
-                "model_reason": s.reason if s else "",
-                "doc_usd": s.cap if s else 0.0,
+                "model": s.model,
+                "model_reason": s.reason,
+                "doc_usd": s.cap,
                 "budget_usd": self.budget,
                 "spent_usd": round(spent, 4),
                 "results": [asdict(r) for r in results],
@@ -345,6 +382,10 @@ def _main(args) -> int:
     if not args.dry_run and args.budget_usd is None:
         print("doc_audit: --budget-usd is required unless --dry-run")
         return 1
+    for flag, value in (("--budget-usd", args.budget_usd), ("--doc-usd", args.doc_usd)):
+        if value is not None and not (math.isfinite(value) and value > 0):
+            print("doc_audit: %s must be a number above 0, not %s" % (flag, value))
+            return 1
     if args.resume and (args.dry_run or args.out or args.only):
         print("doc_audit: --resume continues DIR as recorded; no --dry-run, --out or --only")
         return 1
@@ -364,6 +405,10 @@ def _main(args) -> int:
             print("doc_audit: %s" % problem)
             return 1
         data, prior = loaded
+        recorded = data.get("repo") or ""
+        if os.path.normcase(os.path.abspath(recorded)) != os.path.normcase(os.path.abspath(repo)):
+            print("doc_audit: %s audited %s, not %s" % (args.resume, recorded, repo))
+            return 1
         if data.get("documents") != docs:
             added = sorted(set(docs) - set(data.get("documents") or []))
             gone = sorted(set(data.get("documents") or []) - set(docs))
@@ -376,7 +421,8 @@ def _main(args) -> int:
             print("doc_audit: %s ran with model %s" % (args.resume, data["model"]))
             return 1
         args.model = args.model or data.get("model", "")
-        args.doc_usd = args.doc_usd or data.get("doc_usd") or None
+        if args.doc_usd is None:  # a --doc-usd given here replaces the recorded cap
+            args.doc_usd = data.get("doc_usd") or None
         selected = list(data.get("selected") or docs)
         kept = {r.doc: r for r in prior if r.status == DONE}
         earlier = float(data.get("spent_usd") or 0.0)
@@ -387,13 +433,26 @@ def _main(args) -> int:
             print("doc_audit: not among the documents: %s" % ", ".join(unknown))
             print("documents:\n" + "\n".join("  " + d for d in docs))
             return 1
-        selected = list(args.only) if args.only else docs
+        wanted = set(args.only)
+        selected = [d for d in docs if d in wanted] if args.only else docs  # once, in list order
+        if args.out and os.path.isfile(os.path.join(args.out, RESULTS)):
+            print(
+                "doc_audit: %s already holds a run; use --resume %s, or another --out"
+                % (args.out, args.out)
+            )
+            return 1
         out = args.out or tempfile.mkdtemp(prefix="revali doc audit ")
         os.makedirs(out, exist_ok=True)
 
     engine, s = settings(cfg, args)
+    if not args.dry_run:
+        try:  # a missing executable fails every session alike, before any is paid for
+            procs.resolve(engine.name)
+        except procs.ExeNotFound as exc:
+            print("doc_audit: %s" % exc)
+            return 1
     budget = args.budget_usd or 0.0
-    run = Run(out, repo, roots, docs, selected, args.dry_run, budget, s, earlier)
+    run = Run(out, repo, roots, docs, selected, args.dry_run, budget, s)
     print("documents (%d): %s" % (len(selected), ", ".join(selected)))
     print("output: %s" % out)
     if not args.dry_run:
