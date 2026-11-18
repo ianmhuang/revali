@@ -617,6 +617,35 @@ class Resume(AuditCase):
         self.assertEqual(second[second.index("--model") + 1], first[first.index("--model") + 1])
         self.assertEqual(set(self.statuses().values()), {"done"})
 
+    def run_record(self):
+        """What results.json says about the run as a whole, apart from its spending."""
+        data, _by_doc = self.results()
+        return {
+            key: value
+            for key, value in data.items()
+            if key not in ("results", "spent_usd", "budget_usd")
+        }
+
+    def test_resume_takes_the_recorded_model_named_again(self):  # AC-2, AC-6
+        self.claude(entry())
+        # 0 + 1.25 is not over $1.25, so one document runs; the other waits for the resume
+        code, text = self.run_audit(
+            "--budget-usd", "1.25", "--only", "index.md", "docs/guide.md", "--out", self.out
+        )
+        self.assertEqual(code, 1, text)
+        (first,) = (call["argv"] for call in self.calls())
+        model = first[first.index("--model") + 1]
+        before = self.run_record()
+        code, text = self.run_audit("--resume", self.out, "--budget-usd", "10", "--model", model)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.sessions(), ["index.md", "docs/guide.md"])
+        second = self.calls()[-1]["argv"]
+        self.assertEqual(second[second.index("--model") + 1], model)
+        self.assertEqual(set(self.statuses().values()), {"done"})
+        # the same model continues the same run: its record (the selection, the model and
+        # how it was chosen, the cap) is the one the first invocation wrote
+        self.assertEqual(self.run_record(), before)
+
     def test_resume_refuses_a_dry_run(self):  # AC-6
         code, text = self.run_audit("--dry-run", "--out", self.out)
         self.assertEqual(code, 0, text)
