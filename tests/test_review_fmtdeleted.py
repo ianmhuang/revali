@@ -7,6 +7,8 @@ AC-2: the format log line reads "format of N test file(s) with `<cmd>`: ..." for
 for a timeout.
 AC-3: preflight's line ends "(the reviewer's test files that differ from HEAD)".
 AC-4: the smoke run's line reads "smoke run of N test file(s) on <runner>".
+AC-6: the lint log line reads "lint of N test file(s) with `<cmd>`: exit <code>", N being the
+listed files that exist on disk; lint still runs when the only listed path was deleted.
 """
 
 import json
@@ -36,6 +38,22 @@ import sys
 with open(os.environ["REVALI_TEST_FMTDELETED_LOG"], "a", encoding="utf-8") as fh:
     fh.write(json.dumps([a.replace("\\\\", "/") for a in sys.argv[1:]]) + "\\n")
 """
+# Stands in for a linter that checks the whole tree: red (exit 3) while any reviewer file
+# carries the marker, green otherwise.
+LINT_LINE = "%s lint_stub.py" % PY
+LINT_STUB = """import glob
+import sys
+
+red = []
+for path in sorted(glob.glob("tests/test_review_*.py")):
+    with open(path, encoding="utf-8") as fh:
+        if "# LINT-RED" in fh.read():
+            red.append(path)
+for path in red:
+    print("would reformat " + path)
+sys.exit(3 if red else 0)
+"""
+RED_TEXT = TEST_REVIEW_MUL.replace("import unittest", "import unittest  # LINT-RED", 1)
 FINDING = {
     "id": "F1",
     "file": "src/calc.py",
@@ -77,10 +95,17 @@ def format_line_pattern(path, ending):
     )
 
 
+def lint_line_pattern(count, code):
+    shape = r"review: lint of %d test file\(s\) with `[^`]*lint_stub\.py`: exit %d$"
+    return shape % (count, code)
+
+
 class FormatRepo(RepoCase):
-    """The fixture repo with a recording `[project] format` line and an empty lint line."""
+    """The fixture repo with a recording `[project] format` line; the lint line is empty
+    unless `lint` is set, which puts LINT_STUB behind it."""
 
     archive = False
+    lint = False
 
     def setUp(self):
         super().setUp()
@@ -91,6 +116,10 @@ class FormatRepo(RepoCase):
         toml = self.read("revali.toml")
         assert "[project]\n" in toml, toml
         toml = toml.replace("[project]\n", '[project]\nformat = "%s"\n' % FORMAT_LINE, 1)
+        if self.lint:
+            assert 'lint = ""\n' in toml, toml
+            toml = toml.replace('lint = ""\n', 'lint = "%s"\n' % LINT_LINE, 1)
+            self.write("lint_stub.py", LINT_STUB)
         if self.archive:
             key = 'exclude = ["*.lock"]\n'
             assert key in toml, toml
@@ -154,6 +183,55 @@ class DeletedPlacedBackFile(FormatRepo):
         self.assertEqual(len(fmt), 1, out)
         self.assertRegex(fmt[0], format_line_pattern(LATER, "exit 0$"))
         self.assertNotIn(FIRST, fmt[0])
+
+
+class LintLine(FormatRepo):
+    """AC-6, commit mode: a deleted committed file is still listed for lint, and the line
+    counts the listed files that are on disk."""
+
+    lint = True
+
+    def test_the_line_counts_only_the_file_that_exists(self):
+        self.round_one()
+        out = self.round_two({LATER: LATER_TEXT})  # listed: FIRST (deleted) and LATER
+        lint = review_lines(out, "lint of")
+        self.assertEqual(len(lint), 1, out)
+        self.assertRegex(lint[0], lint_line_pattern(1, 0))
+
+    def test_with_only_a_deletion_lint_still_runs_and_counts_no_file(self):
+        self.round_one()
+        out = self.round_two({})  # listed: FIRST (deleted) only
+        lint = review_lines(out, "lint of")
+        self.assertEqual(len(lint), 1, out)  # which rounds lint runs in is unchanged
+        self.assertRegex(lint[0], lint_line_pattern(0, 0))
+
+    def test_the_wording_for_a_red_and_a_green_exit(self):
+        self.claude(
+            answer("APPROVE", {FIRST: RED_TEXT}),  # red lint: sent back once
+            answer("APPROVE", {FIRST: TEST_REVIEW_MUL}),
+        )
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        lint = review_lines(out, "lint of")
+        self.assertEqual(len(lint), 2, out)
+        self.assertRegex(lint[0], lint_line_pattern(1, 3))
+        self.assertRegex(lint[1], lint_line_pattern(1, 0))
+        for line in lint:
+            self.assertNotIn("new test file", line)
+
+
+class LintLineArchive(FormatRepo):
+    """AC-6, archive mode: the deleted placed-back file is not listed, LATER is."""
+
+    archive = True
+    lint = True
+
+    def test_the_line_counts_the_file_that_exists(self):
+        self.round_one()
+        out = self.round_two({LATER: LATER_TEXT})
+        lint = review_lines(out, "lint of")
+        self.assertEqual(len(lint), 1, out)
+        self.assertRegex(lint[0], lint_line_pattern(1, 0))
 
 
 class Wording(FormatRepo):
