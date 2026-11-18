@@ -419,6 +419,13 @@ class Selection(AuditCase):
         self.run_audit("--budget-usd", str(cap + 0.1), "--only", "README.md", "CONVENTIONS.md")
         reason = self.results()[0]["model_reason"]
         self.assertTrue(reason.startswith("auto:"), reason)
+        model = self.results()[0]["model"]
+        # the recorded model named again keeps the reason too (round 3 F1)
+        code, out = self.run_audit(
+            "--resume", self.out, "--budget-usd", "10", "--model", model, out=False
+        )
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.results()[0]["model_reason"], reason)
         code, out = self.run_audit("--resume", self.out, "--budget-usd", "10", out=False)
         self.assertEqual(code, 0, out)
         self.assertEqual(self.results()[0]["model_reason"], reason)

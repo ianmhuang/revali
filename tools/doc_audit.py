@@ -156,8 +156,7 @@ def schema_problem(data) -> str:
     return ""
 
 
-def settings(cfg, args) -> Tuple[engines.Engine, Settings]:
-    engine = engines.for_role(cfg, "review")
+def settings(cfg, args, engine: engines.Engine) -> Settings:
     review = cfg.review
     chosen = models.resolve(
         models.REVIEWER,
@@ -167,7 +166,7 @@ def settings(cfg, args) -> Tuple[engines.Engine, Settings]:
         engine.tiers,
         cfg.foreign_ladders(engine.name),
     )
-    return engine, Settings(
+    return Settings(
         model=chosen.model,
         fallback=chosen.fallback,
         reason=chosen.reason,
@@ -447,7 +446,8 @@ def _main(args) -> int:
         if args.model and data.get("model") and args.model != data["model"]:
             print("doc_audit: %s ran with model %s" % (args.resume, data["model"]))
             return 1
-        if not args.model:  # the recorded model, and how it was chosen
+        if not args.model or args.model == data.get("model"):
+            # the recorded model, and how it was chosen
             args.model = data.get("model", "")
             recorded_reason = data.get("model_reason", "")
         if args.doc_usd is None:  # a --doc-usd given here replaces the recorded cap
@@ -473,7 +473,7 @@ def _main(args) -> int:
         out = args.out or tempfile.mkdtemp(prefix="revali doc audit ")
         os.makedirs(out, exist_ok=True)
 
-    engine, s = settings(cfg, args)
+    s = settings(cfg, args, engine)
     if recorded_reason is not None:
         s.reason = recorded_reason
     budget = args.budget_usd or 0.0

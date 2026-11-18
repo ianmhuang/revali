@@ -53,7 +53,8 @@ The output directory holds `results.json` (per document: status `done`, `error`,
 findings), `<document>.md` (one report per document whose session ran, `/` in the path
 written as `__`), `<document>.prompt.txt` and `<document>.raw.json` (the session's raw
 output), and `summary.md`: the counts per severity per document, every high and medium
-finding with its evidence, and the documents not audited.
+finding with its evidence, and the documents not audited. The files belong to the latest
+run in the directory: a run after a dry run there replaces the prompts one by one.
 
 Exit codes: `0` no high or medium finding and every document audited; `2` at least one
 high or medium finding; `1` otherwise (a document failed or was not run, or the command
