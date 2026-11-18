@@ -339,6 +339,32 @@ class Sessions(AuditCase):
         self.assertEqual(len(self.calls()), 1)  # no second session
         self.assertEqual(self.out_text("results.json"), before)
 
+    def test_a_dry_run_does_not_write_over_a_run(self):  # AC-4
+        self.claude(entry(finding("low")))
+        code, text = self.run_audit(
+            "--budget-usd", "10", "--only", "docs/more.md", "--out", self.out
+        )
+        self.assertEqual(code, 0, text)
+        before = self.out_text("results.json")
+        code, text = self.run_audit("--dry-run", "--out", self.out)
+        self.assertEqual(code, 1, text)
+        self.assertEqual(self.out_text("results.json"), before)
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_a_run_may_start_in_a_dry_run_directory(self):  # AC-1, AC-4
+        code, text = self.run_audit("--dry-run", "--out", self.out)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(sorted(self.statuses()), sorted(MARK))
+        self.claude(entry())
+        code, text = self.run_audit(
+            "--budget-usd", "10", "--only", "docs/more.md", "--out", self.out
+        )
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.sessions(), ["docs/more.md"])
+        # the directory now holds the run, not the dry run's listing
+        self.assertEqual(self.statuses(), {"docs/more.md": "done"})
+        self.assertTrue(os.path.isfile(os.path.join(self.out, "summary.md")))
+
 
 class Answers(AuditCase):
     def one(self, *entries, out=None):
@@ -537,6 +563,37 @@ class Resume(AuditCase):
         self.assertEqual(code, 0, text)
         self.assertEqual(self.sessions(), order)  # the first one was kept, not run again
         self.assertEqual(self.statuses(), dict.fromkeys(order, "done"))
+
+    def test_an_interrupted_resume_keeps_the_done_documents_after_it(self):  # AC-6
+        order = self.listed()
+        # the first document fails, the three after it are done
+        self.claude(raw(answer(), is_error=True, cost=0.2), entry(), entry(), entry())
+        code, text = self.run_audit("--budget-usd", "10", "--out", self.out)
+        self.assertEqual(code, 1, text)
+        self.assertEqual(self.sessions(), order)
+        statuses = self.statuses()
+        self.assertEqual([statuses[d] for d in order], ["error", "done", "done", "done"])
+        real = revali_engines.for_role
+
+        def first_is_interrupted(cfg, role):
+            return Interrupting(real(cfg, role), at=1)
+
+        # the resume ends inside the first document, before the three done ones
+        with mock.patch.object(revali_engines, "for_role", side_effect=first_is_interrupted):
+            with contextlib.suppress(KeyboardInterrupt):
+                self.resume(10)
+        self.assertEqual(len(self.calls()), 4)
+        statuses = self.statuses()
+        self.assertNotEqual(statuses.get(order[0]), "done")
+        for doc in order[1:]:  # what was done is still on record
+            self.assertEqual(statuses.get(doc), "done", doc)
+        self.claude(entry())
+        code, text = self.resume(10)
+        self.assertEqual(code, 0, text)
+        # one more session, for the first document only: the done ones were kept
+        self.assertEqual(self.sessions(), order + order[:1])
+        self.assertEqual(self.statuses(), dict.fromkeys(order, "done"))
+        self.assertEqual(list(self.statuses()), order)
 
     def test_resume_takes_a_new_cap_and_refuses_another_model(self):  # AC-2, AC-6
         self.claude(entry())
