@@ -317,6 +317,28 @@ class Sessions(AuditCase):
         self.assertEqual(self.calls(), [])
         self.assertEqual(set(self.statuses().values()), {"not-run"})
 
+    def test_an_amount_that_is_not_above_zero_is_refused(self):  # AC-2
+        for argv in (
+            ("--budget-usd", "0"),
+            ("--budget-usd", "-1"),
+            ("--budget-usd", "10", "--doc-usd", "0"),
+            ("--budget-usd", "10", "--doc-usd", "-0.5"),
+        ):
+            code, text = self.run_audit(*argv, "--out", self.out)
+            self.assertEqual(code, 1, argv)
+        self.assertEqual(self.calls(), [])
+
+    def test_a_directory_that_holds_a_run_is_not_written_over(self):  # AC-4
+        self.claude(entry(finding("low")))
+        argv = ("--budget-usd", "10", "--only", "docs/more.md", "--out", self.out)
+        code, text = self.run_audit(*argv)
+        self.assertEqual(code, 0, text)
+        before = self.out_text("results.json")
+        code, text = self.run_audit(*argv)
+        self.assertEqual(code, 1, text)
+        self.assertEqual(len(self.calls()), 1)  # no second session
+        self.assertEqual(self.out_text("results.json"), before)
+
 
 class Answers(AuditCase):
     def one(self, *entries, out=None):
@@ -429,6 +451,17 @@ class Selection(AuditCase):
         self.assertEqual(sorted(self.sessions()), ["docs/more.md", "index.md"])
         self.assertEqual(sorted(self.statuses()), ["docs/more.md", "index.md"])
 
+    def test_a_name_given_twice_is_audited_once_in_list_order(self):  # AC-2, AC-6
+        order = self.listed()
+        last, first = order[-1], order[0]
+        self.claude(entry())
+        code, text = self.run_audit(
+            "--budget-usd", "10", "--only", last, first, last, "--out", self.out
+        )
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.sessions(), [first, last])
+        self.assertEqual(list(self.statuses()), [first, last])
+
     def test_an_unknown_name_stops_before_any_session(self):  # AC-6
         for name in ("docs/nope.md", "src/calc.py", "docs/orphan.md"):
             code, text = self.run_audit(
@@ -504,6 +537,28 @@ class Resume(AuditCase):
         self.assertEqual(code, 0, text)
         self.assertEqual(self.sessions(), order)  # the first one was kept, not run again
         self.assertEqual(self.statuses(), dict.fromkeys(order, "done"))
+
+    def test_resume_takes_a_new_cap_and_refuses_another_model(self):  # AC-2, AC-6
+        self.claude(entry())
+        # 0 + 1.25 is not over $1.25, so one document runs; 0.5 + 1.25 is, so the other waits
+        code, text = self.run_audit(
+            "--budget-usd", "1.25", "--only", "index.md", "docs/guide.md", "--out", self.out
+        )
+        self.assertEqual(code, 1, text)
+        self.assertEqual(sorted(self.statuses().values()), ["done", "not-run"])
+        self.assertEqual(len(self.calls()), 1)
+        code, text = self.run_audit(
+            "--resume", self.out, "--budget-usd", "10", "--model", "claude-some-other-model"
+        )
+        self.assertNotIn(code, (0, 2), text)
+        self.assertEqual(len(self.calls()), 1)  # the recorded model is the run's model
+        code, text = self.run_audit("--resume", self.out, "--budget-usd", "10", "--doc-usd", "0.4")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(len(self.calls()), 2)
+        first, second = (call["argv"] for call in self.calls())
+        self.assertEqual(float(second[second.index("--max-budget-usd") + 1]), 0.4)
+        self.assertEqual(second[second.index("--model") + 1], first[first.index("--model") + 1])
+        self.assertEqual(set(self.statuses().values()), {"done"})
 
     def test_resume_refuses_a_dry_run(self):  # AC-6
         code, text = self.run_audit("--dry-run", "--out", self.out)
