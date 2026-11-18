@@ -31,6 +31,23 @@ stated.
   draft PR open; the run still ends with exit 1, "branch is broken before
   review", and no review round. With `parallel_baseline = false` a failing
   baseline stops the run before anything is pushed
+- `git push --force-with-lease` instead of a plain push on the first push
+  after the branch's history was rewritten: in the default commit mode when
+  the reviewer's test commits are no longer in HEAD (a rebase or reset; the
+  review starts over from round 1), and in archive mode below. A rejected
+  push ends the run with exit 1
+- `gh pr edit <n> --body-file <file>` to refresh the status table in the PR
+  body: after a NEEDS_INFO or CHANGES_REQUESTED round, when validation
+  starts, after a failed validation and after a passing one; and `gh pr ready
+  <n>` once a validation passes, which takes the PR out of draft. A failure
+  of either is a warning in the log and the run goes on; a dry run does
+  neither
+- with `runner = "local"`, for each sandbox session (baseline, the
+  reviewer's smoke run, validation, the base rerun): `git worktree add
+  --detach` of the commit into a temporary directory, registered in your
+  repository's `.git`, then `git worktree remove --force` and `git worktree
+  prune` when the session ends; a failed cleanup is logged and never stops
+  the run
 - when a run reuses an open PR whose title differs from change.md's `title`,
   `gh pr edit <n> --title <title>`, since a squash merge takes the PR title as
   the commit subject on the base branch; a failure is a warning in the log and
@@ -45,8 +62,11 @@ stated.
 - runs `[project] lint` a second time after the reviewer has written its test
   files, over the working tree with those files in it (preflight ran the same
   line before the reviewer started, so a failure now is the reviewer's files);
-  on a failure the reviewer is sent back once with the command and the output
-  tail, a second failure ends the run with exit 1 and no test commit. A
+  on a failure the reviewer is sent back with the command and the output
+  tail. The reviewer is sent back once per round, whatever the reason (lint,
+  the smoke run, a protected test file, an uncovered AC), so a lint failure on
+  the attempt after that bounce ends the run with exit 1 and no test commit,
+  even when it is the first lint failure. A
   NEEDS_INFO round is checked the same way, since its files stay in the tree.
   For the length of that lint command the reviewer's new, untracked files
   are marked intent-to-add (`git add -N`), so a lint line that only checks
@@ -73,9 +93,17 @@ stated.
   modify. Any other
   tracked file under `test_dir` the reviewer modified or deleted is
   restored from HEAD (`git checkout HEAD -- <path>`, index and working
-  tree) before the commit, the reviewer is sent back once
-  with the names already taken, and a second offence ends the run with
-  exit 1 and no test commit. A NEEDS_INFO round keeps its test files
+  tree) before the commit and the reviewer is sent back with the names already
+  taken; after the round's one bounce (for this or any other reason) such a
+  change ends the run with exit 1 and no test commit. After every reviewer attempt, any change
+  outside `test_dir` and the state directory that `git status` reports is
+  undone: a tracked file is restored with `git checkout HEAD -- <path>`, a
+  new file or directory is deleted (a staged one is unstaged first with
+  `git rm --cached`), and the run stops with exit 1, "the reviewer modified
+  files outside <test_dir> (reverted)". revali cannot tell who made the
+  change, so an edit or new file of yours outside `test_dir` made while the
+  reviewer session runs is lost; ignored files are not touched.
+  A NEEDS_INFO round keeps its test files
   uncommitted in `test_dir`: the state file lists them, the clean-tree check
   tolerates exactly those paths, and the next round commits or removes
   them. Do not commit them by hand; a file you commit becomes one the
@@ -107,7 +135,8 @@ stated.
 - after a failed validation whose diagnosis marks a failure `cause: code`
   and `introduced_by: base` (with `[validate] issue_on`, the default): one
   `gh issue create` as the author, title `Pre-existing: <test> fails on
-  <base>`, body from [templates/issue.md](../templates/issue.md), `--label bug` only when
+  <base>` (`Pre-existing: <test> and <n> more fail on <base>` when there are
+  several, `<test>` the first in sort order), body from [templates/issue.md](../templates/issue.md), `--label bug` only when
   `gh label list` shows that label, `--assignee <author>` unless
   `issue_assignee = ""`; on a repository that is not private the output,
   the diagnosis text and the suggested fix are withheld from the body. The
@@ -144,7 +173,9 @@ stated.
   twice (revali checks out the base first when gh did not, and does not pull
   when that checkout fails); a pull or checkout that fails is printed as a
   note with git's error, saying the tree is not up to date, and the merge
-  still ends with exit 0; then
+  still ends with exit 0; then, when the tree is on the base and gh left the
+  local branch behind, `git branch -D <branch>`, its result in the `local:`
+  line; then
   the branch's state directory is moved to `[paths] archive_dir`
   (`~/.revali/archive/<owner>__<repo>/<pr>-<branch>/` by default; a name
   already taken gets a timestamp suffix; a move that fails leaves the
@@ -176,8 +207,9 @@ stated.
   when `revali merge` had already recorded the merge and stopped before its
   move), and the branch's
   state directory is moved to `[paths] archive_dir` as `revali merge` moves
-  it. CLOSED: the same with stage `closed`, and the local branch is left
-  alone. The remote branch, the base branch and the issues a commit fixes
+  it. CLOSED: stage `closed`, a history row with `stage_before` only (no
+  `merged_outside`), the same move of the state directory, and the local
+  branch is left alone. The remote branch, the base branch and the issues a commit fixes
   are not touched
 - after a review round that stops before its tests are committed (a failed
   or timed-out Reviewer session, unusable output, a smoke run that fails
@@ -188,8 +220,9 @@ stated.
   process); the state file remembers that until the cleanup has run, so a
   dry run or a failed preflight in between does not lose it. A run that
   ended with a verdict never triggers it (a NEEDS_INFO round's uncommitted
-  files are pending, not leftovers; they go only when the round after it
-  is interrupted, and a pending file that is a tracked file of the
+  files are pending, not leftovers; they go when the round after it stops
+  before its test commit or is interrupted, or on `revali reset`, and a
+  pending file that is a tracked file of the
   reviewer's own is then restored from HEAD instead). In both cases, and
   in `revali reset` after an interrupted round (also from a state file with
   fields of the wrong type, when the fields this cleanup reads are intact:
@@ -229,6 +262,9 @@ stated.
   This is the only deletion inside `test_dir` revali performs, so keep
   your own files off `test_file_pattern`
 
-It never modifies files outside `test_dir` and the state directory, never
+Outside `test_dir` and the state directory it changes only what this page
+lists, among them the ignore line of the first item, the revert of a reviewer's change above, the
+index marks of the lint gate, the local runner's worktree, and what `merge`
+and `archive` do to branches and the checkout. It never
 commits a change to a test file the reviewer did not write,
 never merges on its own, and never runs on a repo you do not own.

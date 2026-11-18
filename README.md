@@ -12,20 +12,22 @@ the existing suite, and the merge waits for the result. Three roles take part.
   diff against the acceptance criteria and writes the acceptance tests. It
   does not run them.
 - **Validator**: a sandbox run of the existing suite plus the Reviewer's
-  tests. On failure only, the Reviewer's tests run again on the base tip
-  and a diagnosis session reads the output and says whether the code, the
+  tests. When the Reviewer's tests fail, they run again on the base tip
+  (`[validate] rerun_on_base`), and on any failure a diagnosis session reads the output and says whether the code, the
   test, or the environment is at fault, and whether the branch or the base
   introduced it; a bug the base already had gets a GitHub issue.
 
 **Why separate sessions.** Each role runs in its own session with its own
 inputs, so nobody grades their own work: the Reviewer gets the acceptance
 criteria, the diff and the documents the diff concerns, not the Developer's reasoning, the Validator is a
-test run, not an opinion, and the diagnosis session sees only the failure
-output. The models can differ by tier (`auto` puts the Reviewer one tier
+test run, not an opinion, and the diagnosis session gets change.md, tests.md, the
+Reviewer's test files, the failing step's output, the base rerun and the other platforms'
+outcomes, with read-only
+access to the repository, but neither the Developer's nor the Reviewer's reasoning. The models can differ by tier (`auto` puts the Reviewer one tier
 above the Developer) and, at the engine seam, by vendor
 (only `claude` exists today). Fresh context removes the author's bias toward
 its own change, not the blind spots the models share, which is why
-`revali stats` tracks the first-try approval rate. The full argument is in
+`revali stats` tracks the first-try pass rate. The full argument is in
 [docs/workflow.md](docs/workflow.md).
 
 ```mermaid
@@ -55,7 +57,7 @@ sequenceDiagram
                 R->>G: PR marked ready
                 R-->>D: READY TO MERGE, exit 0
             else FAIL
-                R->>V: the new tests again, on the base tip
+                R->>V: new tests failed: the new tests again, on the base tip
                 V->>V: diagnosis session (code / test / env, introduced by branch or base)
                 opt bug the base already had
                     R->>G: issue
@@ -85,7 +87,7 @@ not a FAIL verdict.
 |---|---|---|---|---|
 | Developer | the user | the request, the repo | `change.md`, code, its own tests | whatever the user's session runs; recorded as `author_model` |
 | Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir` (committed once they pass the project's `lint` line and a smoke run; with `[review] tests = "archive"` kept under `.revali/<branch>/tests/` instead and never committed), and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment; does not run the tests | `auto`: one tier above the Developer |
-| Validator | revali, after APPROVE | a sandbox clone of the branch; on FAIL, one of the base tip with the Reviewer's tests copied in | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers (with `introduced_by`: branch or base) and revali writes `diagnose-n.json` (one per failing platform when several are listed), and opens a GitHub issue for a bug the base already had | the runner needs none; diagnosis `auto`: one tier below the Developer |
+| Validator | revali, after APPROVE | a sandbox clone of the branch; when the Reviewer's tests fail, one of the base tip with them copied in | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers (with `introduced_by`: branch or base) and revali writes `diagnose-n.json` (one per failing platform when several are listed), and opens a GitHub issue for a bug the base already had | the runner needs none; diagnosis `auto`: one tier below the Developer |
 
 Three user actions (approve the AC, `/revali`, `revali merge`) are the gates;
 everything between them is automatic. Exit codes: `0` done / ready to merge,
@@ -110,7 +112,7 @@ revali reviews its own changes on this public one.
 ## Usage
 
 ```
-python <path-to>/revali.py preflight        # checks only, changes nothing
+python <path-to>/revali.py preflight        # checks only (no lint, no baseline); fetches the base, commits and pushes nothing
 python <path-to>/revali.py run              # detached; then:
 python <path-to>/revali.py wait --timeout 9m
 python <path-to>/revali.py merge            # after READY TO MERGE (docs/files.md, stages); waits for CI
@@ -123,8 +125,8 @@ as a baseline, by default running on alongside the next two steps), push + draft
 reviewer round (`claude -p` with the diff, change.md, the checklist and the documents related to the diff; writes tests into `test_dir`; the script
 checks AC coverage, runs `lint` over them, smoke-runs them, commits or archives them), validation
 (the new tests in the sandbox, plus the existing suite unless nothing but
-the reviewer's test commits changed since the baseline ran it; on failure
-the new tests run once more on the base tip, a diagnoser session says whether
+the reviewer's test commits changed since the baseline ran it; when the new
+tests fail they run once more on the base tip; on any failure a diagnoser session says whether
 code, test or environment is at fault and whether the branch or the base
 introduced it, and a bug the base already had gets a GitHub issue), then
 READY TO MERGE. Each stage's and each sandbox session's seconds go to the log

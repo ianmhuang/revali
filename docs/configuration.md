@@ -1,9 +1,13 @@
 # Configuration
 
-Three layers, the most specific wins, and every key may appear in any of
-them:
+Three layers, the most specific wins. A key may appear in any of them,
+except the user-level ones: `checklist` and `history_path` at the top level
+and `[paths] history_file` belong in `~/.revali/config.toml`, and revali.toml
+setting one of them is a configuration error.
 
-1. `defaults.toml` in the revali checkout: every key with its default. Edit
+1. `defaults.toml` in the revali checkout: every key with its default,
+   except `[project] config_version`, which must match this revali's config
+   version (1). Edit
    it only when a new model generation arrives (the model ladders live
    here, under `[engines.<name>]`).
 2. `~/.revali/config.toml`: your machine, every project. `checklist`,
@@ -92,7 +96,9 @@ diagnosis of a failed validation marks a failure `cause: code` and
 `introduced_by: base`: the reviewer's test fails on the base tip for the
 same reason as on the branch, so the code was wrong before the branch. The
 issue is created with `gh issue create` as the author, titled
-`Pre-existing: <test id> fails on <base>`, labelled `bug` when the
+`Pre-existing: <test id> fails on <base>` (`Pre-existing: <test id> and <n>
+more fail on <base>` when there are several, `<test id>` the first in sort
+order), labelled `bug` when the
 repository has that label (revali creates no label), and assigned to the
 author's gh login when `issue_assignee = "author"` (the default; `""`
 leaves it unassigned). Its body is [templates/issue.md](../templates/issue.md) in revali, a
@@ -101,18 +107,24 @@ leaves it unassigned). Its body is [templates/issue.md](../templates/issue.md) i
 `$base`, `$base_sha`, `$tests`, `$evidence`,
 `$diagnosis`, `$acceptance`, `$fix`); `issue_template` names a project file
 to use instead. On a repository that is not private the output, the
-diagnosis text and the suggested fix are withheld, as in PR comments. One
-validation opens one issue for all such failures; a later validation whose
-failing tests an earlier issue of the branch already names links that issue
-instead. The issue numbers are in `state.json` (`issues`), `tests.md`, the
+diagnosis text and the suggested fix are withheld, as in PR comments. Each
+failing platform is diagnosed on its own, and each diagnosis opens at most
+one issue for its base-introduced failures, so a validation that fails on two
+platforms with different failing tests opens two. When the branch's earlier
+issues already name every failing test, revali links them instead of opening
+one, and an open issue in the repository with exactly the same title (opened
+from another branch or worktree) is reused: it is recorded as found, not
+opened. The issue numbers are in `state.json` (`issues`), `tests.md`, the
 PR comment and the `ACTION NEEDED` summary; `revali merge` comments on
 every one a branch commit references with `Fixes #n` (see
 [docs/side-effects.md](side-effects.md)). False opens nothing.
 `[project] lint` is one shell line (`ruff check . && black --check .`, say)
-that preflight runs on the working tree and stops on with exit 2; the same
-line gates the reviewer's tests: after the reviewer writes them the line
-runs again, a failure sends the reviewer back once, a second failure ends
-the run. Whenever the line runs over the reviewer's tests, the reviewer's
+that the preflight of `revali run` runs on the working tree and stops on with
+exit 2 (`revali preflight` and `run --dry-run` print it and do not run it); the
+same line gates the reviewer's tests: after the reviewer writes them the line
+runs again and a failure sends the reviewer back, once per round whatever the
+reason, so a failure on the attempt after that bounce ends the run (see
+[docs/side-effects.md](side-effects.md)). Whenever the line runs over the reviewer's tests, the reviewer's
 new files are intent-to-add (`git add -N`), so `git ls-files` lists them and a line that checks only
 tracked files sees them; they are untracked again afterwards (see
 [docs/side-effects.md](side-effects.md)). Leave it empty and nothing checks formatting or style, for your
@@ -203,12 +215,17 @@ did the work, recorded as `model_actual` and checked for a fallback, is
 picked among the other rows.
 
 Reserved keys: defaults.toml carries a few keys this version accepts but
-does not act on, so a configuration that sets them stays valid.
-`[project] change_source` only accepts `manual` (any other value is a
-configuration error); `[merge] auto_merge = true` is ignored with a warning,
-merges stay manual; `[project] context_files`, `[review] small_max_lines`,
+does not act on. `[project] change_source` only accepts `manual` and
+`[review] strategy` only `prompt` (any other value is a configuration
+error); `[merge] auto_merge = true` is ignored with a warning, merges stay
+manual; `[project] context_files`, `[review] small_max_lines`,
 `[review] security_paths`, `[validate.platform] network` and
-`[validate.platform] check_name` are read and not used. `[review] strategy`
-is reserved the same way.
+`[validate.platform] check_name` are read and not used, so a configuration
+that sets them stays valid.
 
-`REVALI_DISABLE=1` in the environment switches revali off entirely.
+`REVALI_DISABLE=1` in the environment (any value but empty, `0` or `false`)
+stops `run` (the detached run ends at once with exit 1, which `wait`
+reports), `run --dry-run` and `preflight` with exit 1, "REVALI_DISABLE is
+set; revali is switched off on this machine", and makes `reset` leave the
+reviewer's leftover test files for you to delete. `wait`, `status`, `stop`,
+`clean`, `merge` and `archive` do not read it.
