@@ -75,7 +75,9 @@ class DocsTests(unittest.TestCase):
         text = read("README.md")
         line = next(line for line in text.splitlines() if line.startswith("Status:"))
         self.assertIn(VERSION, line + text.split("Status:", 1)[1][:400])
-        self.assertIn("#21", text.split("Status:", 1)[1][:400])
+        # feature/release-steps AC-3: the release notes moved from Status to CHANGELOG.md
+        changelog = read("CHANGELOG.md")
+        self.assertIn("#21", changelog.split("\n## 0.2.0 - ", 1)[1].split("\n## ", 1)[0])
 
 
 class WorktreeFollowUpTests(RepoCase):

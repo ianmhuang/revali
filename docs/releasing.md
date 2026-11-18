@@ -63,4 +63,30 @@ could not start, for instance with the engine's executable missing). A session t
 or answers outside the schema, marks its document `error` and the audit goes on with the
 next one; a failed session that reported no cost (a timeout) is charged its cap.
 
-A high or medium finding blocks the release until it is fixed; low findings do not.
+## Making a release
+
+1. When: a release is made when the maintainer decides, normally when a milestone is done;
+   there is no fixed schedule.
+2. Audit main with [tools/doc_audit.py](../tools/doc_audit.py), as above. A high or medium
+   finding blocks the release until a change fixes it; low findings do not block and go
+   into the release's changelog section as known issues.
+3. Pick the version. Before 1.0, raise the minor number for new behaviour or an interface
+   change (a CLI flag, a `revali.toml` key, an exit code, a file under `.revali/<branch>/`)
+   and the patch number for fixes only.
+4. One change, through revali like any other, that:
+   - sets `VERSION` in [revali/__init__.py](../revali/__init__.py)
+   - adds the section `## <version> - <YYYY-MM-DD>` at the top of
+     [CHANGELOG.md](../CHANGELOG.md), dated the day of the tag: what the changes merged
+     since the previous tag added or changed, with their PR numbers
+     (`git log --oneline v<previous>..main`), and the audit's low findings as known issues
+   - updates the version in README's Status paragraph
+   - updates the tests that pin the version: tests/test_docs_split.py and
+     tests/test_review_docssplit.py. tests/test_changelog.py fails when a test that pins the
+     version is not named here, and when the newest changelog section is not `VERSION`.
+5. After the merge, and only on the maintainer's word: an annotated tag on the merge commit,
+   pushed to origin.
+
+   ```
+   git tag -a v<version> -m "revali <version>: <what it brings>" <merge commit>
+   git push origin v<version>
+   ```

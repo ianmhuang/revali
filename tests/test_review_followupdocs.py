@@ -174,10 +174,14 @@ class ReadmeParagraphs(unittest.TestCase):
         m = re.search(r"^Status:.*?(?=\n\n)", self.text, flags=re.M | re.S)
         self.assertIsNotNone(m)
         p = " ".join(m.group(0).split())
-        self.assertRegex(p, r"PR #28 to #33")  # AC-6
-        self.assertIn("PR #21 to #24", p)
+        # feature/release-steps AC-3: the release notes moved from Status to CHANGELOG.md
+        changelog = repo_file("CHANGELOG.md")
+        v030 = " ".join(changelog.split("\n## 0.3.0 - ", 1)[1].split("\n## ", 1)[0].split())
+        v020 = " ".join(changelog.split("\n## 0.2.0 - ", 1)[1].split("\n## ", 1)[0].split())
+        self.assertRegex(v030, r"PR #28 to #33")  # AC-6
+        self.assertIn("PR #21 to #24", v020)
         for word in ("timing", "baseline", "base tip", "lint", "issue"):
-            self.assertIn(word, p, word)
+            self.assertIn(word, v030, word)
         self.assertIn("package version %s" % VERSION, p)
         self.assertIn("Verified end to end on a private GitHub repository", p)
 
