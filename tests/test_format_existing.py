@@ -14,7 +14,8 @@ from tests.test_tests_archive import FILE, SECOND, SECOND_TEXT, approving, reque
 
 
 class Deleted(TwoRounds):
-    """Round 1 writes FILE; round 2 deletes it and writes SECOND (archive mode by default)."""
+    """Round 1 writes FILE; round 2 deletes it and writes SECOND. Runs in archive mode;
+    DeletedCommitMode reruns every test here in commit mode."""
 
     def revali_log(self):
         return self.read(".revali/feature__mul/logs/revali.log")
@@ -33,7 +34,7 @@ class Deleted(TwoRounds):
     def format_lines(self):
         return [ln for ln in self.revali_log().splitlines() if "] review: format of" in ln]
 
-    def test_archive_mode_formats_only_what_exists(self):  # AC-1
+    def test_formats_only_what_exists(self):  # AC-1
         code, out = self.round_two_deletes()
         self.assertEqual(fmt_calls(self)[-1], [SECOND], out)
         self.assertIn("format of 1 test file(s) with `", self.format_lines()[-1])
@@ -53,6 +54,7 @@ class DeletedCommitMode(Deleted):
         code, out = self.round_two_deletes()
         self.assertEqual(code, EXIT_OK, out)
         self.assertEqual(fmt_calls(self)[-1], [SECOND], out)
+        self.assertIn("format of 1 test file(s) with `", self.format_lines()[-1])
 
 
 class Wording(TwoRounds):
