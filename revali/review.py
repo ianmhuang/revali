@@ -1102,7 +1102,7 @@ def lint_check(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> Op
     # a command the shell cannot find is a non-zero exit like any other red lint result;
     # preflight ran the same line first and normally stops there
     if log:
-        # a path the reviewer deleted is still listed; count what lint actually saw
+        # a path the reviewer deleted is still listed; count the listed files that exist
         present = [p for p in test_files if os.path.isfile(os.path.join(ctx.repo_root, p))]
         log.stage(
             "review",
