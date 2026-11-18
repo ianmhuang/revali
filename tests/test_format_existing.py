@@ -1,5 +1,6 @@
 """fix/format-scope-cleanup: the format call gets only files that exist (AC-1), and the
-format, preflight and smoke lines stop calling the reviewer's files "new" (AC-2..AC-4)."""
+format, preflight, smoke and lint lines stop calling the reviewer's files "new" (AC-2..AC-4,
+AC-6); the lint line counts only files that exist (AC-6)."""
 
 import unittest
 from unittest import mock
@@ -8,6 +9,7 @@ from revali import EXIT_ACTION, EXIT_OK
 from revali.preflight import preflight
 from revali.procs import ProcTimeout
 from revali.review import format_files
+from tests.fixtures.make_sample_repo import PY
 from tests.helpers import TEST_REVIEW_MUL, run_cli
 from tests.test_format_scope import TwoRounds, fmt_calls
 from tests.test_tests_archive import FILE, SECOND, SECOND_TEXT, approving, requesting_changes
@@ -34,6 +36,20 @@ class Deleted(TwoRounds):
     def format_lines(self):
         return [ln for ln in self.revali_log().splitlines() if "] review: format of" in ln]
 
+    def lint_lines(self):
+        return [ln for ln in self.revali_log().splitlines() if "] review: lint of" in ln]
+
+    def enable_lint(self):
+        toml = self.read("revali.toml")
+        self.assertIn('lint = ""', toml)
+        self.write("revali.toml", toml.replace('lint = ""', 'lint = "%s lintcheck.py"' % PY))
+        self.commit_all("lint line")
+
+    def test_lint_line_counts_what_exists(self):  # AC-6
+        self.enable_lint()
+        code, out = self.round_two_deletes()
+        self.assertRegex(self.lint_lines()[-1], r"lint of 1 test file\(s\) with `.*`: exit 0$")
+
     def test_formats_only_what_exists(self):  # AC-1
         code, out = self.round_two_deletes()
         self.assertEqual(fmt_calls(self)[-1], [SECOND], out)
@@ -55,6 +71,12 @@ class DeletedCommitMode(Deleted):
         self.assertEqual(code, EXIT_OK, out)
         self.assertEqual(fmt_calls(self)[-1], [SECOND], out)
         self.assertIn("format of 1 test file(s) with `", self.format_lines()[-1])
+
+    def test_lint_line_with_only_a_deletion(self):  # AC-6
+        self.enable_lint()
+        self.round_two_deletes(keep_second=False)
+        # lint still runs over the tree; the line counts no files
+        self.assertRegex(self.lint_lines()[-1], r"lint of 0 test file\(s\) with `.*`: exit 0$")
 
 
 class Wording(TwoRounds):
