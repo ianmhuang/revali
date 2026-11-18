@@ -215,7 +215,8 @@ class MovedTextIsVerbatim(unittest.TestCase):
             "workflow.md",
             "Fresh context removes the author's bias toward its own change; it does not remove "
             "blind spots the models share, which is why `revali stats` tracks the first-try "
-            "approval rate.",
+            # fix/audit-docs AC-8: the stats column is the first-try pass rate
+            "pass rate (branches that reached `ready_to_merge` with no fix cycle).",
         ),
         (
             "workflow.md",
@@ -240,9 +241,9 @@ class MovedTextIsVerbatim(unittest.TestCase):
         ("sandbox.md", '`runner = "local"` uses a git worktree on the host with no isolation.'),
         (
             "side-effects.md",
-            "It never modifies files outside `test_dir` and the state directory, never commits a "
-            "change to a test file the reviewer did not write, never merges on its own, and "
-            "never runs on a repo you do not own.",
+            # fix/audit-docs AC-2: the "never modifies files outside test_dir" clause was false
+            "It never commits a change to a test file the reviewer did not write, never merges "
+            "on its own, and never runs on a repo you do not own.",
         ),
         (
             "side-effects.md",

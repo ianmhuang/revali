@@ -11,12 +11,16 @@ their own work: the Developer never reviews the change it wrote; the
 Reviewer gets the acceptance criteria, the diff and the documents the diff
 concerns, not the Developer's reasoning, and derives its tests from the
 criteria; the Validator is a test
-run, not an opinion; the diagnosis session sees only the failure output. The
+run, not an opinion; the diagnosis session gets change.md, tests.md, the
+Reviewer's test files, the failing step's command and output, the rerun on the base
+tip and the other platforms' outcomes, and reads the repository read-only, but gets
+neither the Developer's nor the Reviewer's reasoning. The
 models can differ by tier (`auto` puts the Reviewer one tier above the
 Developer); the engine seam is where a second vendor would plug in
 (only `claude` exists today). Fresh context removes the author's bias toward
 its own change; it does not remove blind spots the models share, which is
-why `revali stats` tracks the first-try approval rate.
+why `revali stats` tracks the first-try pass rate (branches that reached
+`ready_to_merge` with no fix cycle).
 
 ## Workflow
 
@@ -80,8 +84,10 @@ print one identity line first,
 `repo: <working tree root>  branch: <branch>` (`preflight` prints it only
 before a state file it cannot use; its own first line names the repo and
 branch otherwise), so several sessions running
-revali in different checkouts can tell their output apart; every message
-that reports a live or dead run carries its pid. Which revali ran is in the
+revali in different checkouts can tell their output apart; the messages that
+name a live run carry its pid: `started revali run`, `run`'s refusal while
+another run holds the branch or the tree, `wait`'s still-running line,
+`status`'s `running: yes` and the pid `stop` stopped. Which revali ran is in the
 run's own records: preflight's first line, `repo <root>, branch <branch>,
 revali <build>` (in `logs/revali.log`, and in `logs/run.log` for a detached
 run), the `started revali run` line, and the history row's `revali_build`.
@@ -162,9 +168,10 @@ made one) is still refused with "nothing changed", naming the round and its
 `review-<n>.md`, and the next run on a new commit counts the cycle once. A
 test commit that was not pushed goes out with the next run that gets past
 preflight.
-The exit 2 message (and the `revali wait` line) lists what blocks and also
-the findings that did not block, with the blocking / non-blocking counts and
-the path of `review-<n>.md`: a `low` or `medium convention` finding left
+The exit 2 message lists what blocks and also the findings that did not
+block, with the path of `review-<n>.md` (a detached run writes it to the end
+of `logs/run.log`); the `revali wait` line carries the blocking /
+non-blocking counts and that path, and the findings are read there: a `low` or `medium convention` finding left
 unanswered comes back as unresolved in the next round.
 
 A run that stops without a result (the process was killed, the machine went
