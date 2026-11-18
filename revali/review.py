@@ -1019,8 +1019,11 @@ def format_files(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> 
     """Run `[project] format` on `test_files`, the files under `test_dir` that differ from
     HEAD after the attempt (in archive mode the earlier rounds' placed-back files too), so a
     file that only needs formatting costs no bounce (the reviewer has no shell to run a
-    formatter). Its exit code is logged, not judged: lint runs next and decides."""
+    formatter). A deleted file is a difference from HEAD too; it is left out, so the formatter
+    only gets paths that exist. Its exit code is logged, not judged: lint runs next and
+    decides."""
     cmd = ctx.cfg.project.format.strip()
+    test_files = [p for p in test_files if os.path.isfile(os.path.join(ctx.repo_root, p))]
     if not cmd or not test_files:
         return
     cmd = cmd.replace(FILES_PLACEHOLDER, files_argument(test_files))
@@ -1035,14 +1038,13 @@ def format_files(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> 
         if log:
             log.stage(
                 "review",
-                "format of %d new test file(s) with `%s`: %s" % (len(test_files), cmd, exc),
+                "format of %d test file(s) with `%s`: %s" % (len(test_files), cmd, exc),
             )
         return
     if log:
         log.stage(
             "review",
-            "format of %d new test file(s) with `%s`: exit %d"
-            % (len(test_files), cmd, res.returncode),
+            "format of %d test file(s) with `%s`: exit %d" % (len(test_files), cmd, res.returncode),
         )
 
 
@@ -1100,10 +1102,11 @@ def lint_check(ctx: Context, test_files: List[str], log: Optional[RunLog]) -> Op
     # a command the shell cannot find is a non-zero exit like any other red lint result;
     # preflight ran the same line first and normally stops there
     if log:
+        # a path the reviewer deleted is still listed; count the listed files that exist
+        present = [p for p in test_files if os.path.isfile(os.path.join(ctx.repo_root, p))]
         log.stage(
             "review",
-            "lint of %d new test file(s) with `%s`: exit %d"
-            % (len(test_files), cmd, res.returncode),
+            "lint of %d test file(s) with `%s`: exit %d" % (len(present), cmd, res.returncode),
         )
     if res.ok:
         return None
@@ -1137,7 +1140,7 @@ def smoke_run(
     }
     label = "smoke-r%d-%d" % (round_no, attempt)
     if log:
-        log.stage("review", "smoke run of %d new test file(s) on %s" % (len(extra), runner.name))
+        log.stage("review", "smoke run of %d test file(s) on %s" % (len(extra), runner.name))
     # new_test names this round's files when it asks for {files}
     steps = steps_with_files(
         plat, ["setup", "build", "new_test"], sorted(extra), log.stage if log else None, "review"
