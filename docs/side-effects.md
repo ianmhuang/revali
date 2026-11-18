@@ -36,10 +36,12 @@ stated.
   the commit subject on the base branch; a failure is a warning in the log and
   the run goes on. A title changed on GitHub by hand is overwritten the same
   way: change.md is the source
-- runs `[project] format` on the host over the test files the reviewer
-  wrote in each attempt, just before the `lint` line below, and only over
-  those files (`{files}`); the formatter rewrites them in place, uncommitted.
-  An empty `format` line skips this
+- runs `[project] format` on the host after each reviewer attempt, just
+  before the `lint` line below, and only over the files under `test_dir`
+  that differ from HEAD then (`{files}`): those the reviewer wrote or
+  changed in the attempt, and with `[review] tests = "archive"` also the
+  earlier rounds' files placed back for the round; the formatter rewrites
+  them in place, uncommitted. An empty `format` line skips this
 - runs `[project] lint` a second time after the reviewer has written its test
   files, over the working tree with those files in it (preflight ran the same
   line before the reviewer started, so a failure now is the reviewer's files);

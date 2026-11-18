@@ -13,7 +13,7 @@ base_branch = "main"              # empty = the repo's default branch (via gh)
 platforms = ["linux"]             # linux and/or windows, each with a [validate.<name>] table
 lint = ""                         # e.g. "ruff check . && black --check ."; also run on the reviewer's
                                   # test files before they are committed; a failure blocks the run
-format = ""                       # e.g. "black {files}"; formats the reviewer's new test files
+format = ""                       # e.g. "black {files}"; formats the reviewer's test files that differ from HEAD
                                   # before the lint line runs on them; needs {files}
 test_dir = "tests"                # a directory inside the repository, relative to its root;
                                   # ./tests, tests/ and tests\ all mean tests
