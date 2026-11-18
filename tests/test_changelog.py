@@ -3,6 +3,7 @@ Status paragraph pointing at it (AC-3), and the release steps in docs/releasing.
 every place a version bump touches (AC-4, AC-5)."""
 
 import ast
+import datetime
 import os
 import re
 import unittest
@@ -36,6 +37,10 @@ def changelog_problems(text, version):
         if not m:
             problems.append("heading not `## x.y.z - YYYY-MM-DD`: %s" % line)
             continue
+        try:
+            datetime.date(*(int(n) for n in m.group(4, 5, 6)))
+        except ValueError:
+            problems.append("not a date: %s" % line)
         versions.append(tuple(int(n) for n in m.group(1, 2, 3)))
     if not versions:
         return problems + ["no release section"]
@@ -59,14 +64,17 @@ def status_paragraph(readme):
 
 
 def pins_version(source, version):
-    """True when an `assert...(...)` call in `source` holds a string literal naming `version`:
-    the test fails once VERSION moves on, so a release has to update it."""
-    token = re.compile(r"(?<![\d.])%s(?!\.?\d)" % re.escape(version))
+    """True when an `assert...(...)` call or an `assert` statement in `source` holds a string
+    literal naming `version`: the test fails once VERSION moves on, so a release has to
+    update it. A changelog heading (`## <version> - `) in a literal is a lookup, not a pin.
+    A literal held in a variable and compared later is not seen."""
+    token = re.compile(r"(?<![\d.])(?<!## )%s(?!\.?\d)(?! - )" % re.escape(version))
     for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Call):
-            continue
-        name = getattr(node.func, "attr", getattr(node.func, "id", ""))
-        if not name.startswith("assert"):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "attr", getattr(node.func, "id", ""))
+            if not name.startswith("assert"):
+                continue
+        elif not isinstance(node, ast.Assert):
             continue
         for inner in ast.walk(node):
             if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
@@ -112,6 +120,14 @@ class ChangelogChecker(unittest.TestCase):
                 )
                 self.assertTrue(any("heading not" in p for p in problems), problems)
 
+    def test_date_must_exist(self):
+        for bad in ("## 7.3.0 - 2026-13-07", "## 7.3.0 - 2026-02-30", "## 7.3.0 - 2026-09-00"):
+            with self.subTest(bad=bad):
+                problems = changelog_problems(
+                    self.GOOD.replace("## 7.3.0 - 2026-09-07", bad), "7.3.0"
+                )
+                self.assertEqual(problems, ["not a date: %s" % bad])
+
     def test_versions_descend(self):
         swapped = "## 7.2.0 - 2026-09-05\n\n## 7.3.0 - 2026-09-07\n"
         self.assertTrue(any("not newer" in p for p in changelog_problems(swapped, "7.2.0")))
@@ -139,7 +155,8 @@ class Changelog(unittest.TestCase):
         self.assertEqual(headings[-len(tail) :], tail)
 
     def test_no_unreleased_section(self):
-        self.assertNotIn("unreleased", self.text.lower())
+        headings = [line for line in self.text.splitlines() if line.startswith("#")]
+        self.assertEqual([h for h in headings if "unreleased" in h.lower()], [])
 
     def test_each_section_names_its_prs(self):
         expected = {
@@ -218,6 +235,7 @@ class BumpPlaces(unittest.TestCase):
             'self.assertIn("9.8.7", line)',
             'self.assertEqual(\n    out,\n    "revali 9.8.7.",\n)',
             'assertEqual(x, "9.8.7")',
+            'assert VERSION == "9.8.7"',
         )
         for source in pins:
             with self.subTest(source=source):
@@ -229,15 +247,20 @@ class BumpPlaces(unittest.TestCase):
             'self.assertIn("9.8.7.1", line)',
             'words = ("9.8.7",)',
             'body = text.split("## 9.8.7 - ")',
+            # a changelog section looked up inside the assert call is not a pin either
+            'self.assertIn("#21", text.split("\\n## 9.8.7 - ", 1)[1])',
+            'self.assertIn("## 9.8.7 - 2026-12-01", text)',
+            'assert "9.8.7 - " in text',
         )
         for source in free:
             with self.subTest(source=source):
                 self.assertFalse(pins_version(source, "9.8.7"))
 
-    def test_the_pins_today(self):
-        self.assertEqual(
-            version_pins(VERSION), ["tests/test_docs_split.py", "tests/test_review_docssplit.py"]
-        )
+    def test_the_pins_today_are_found(self):
+        # the detector finds the known pins; a new pin needs no edit here, only in the page
+        found = version_pins(VERSION)
+        for known in ("tests/test_docs_split.py", "tests/test_review_docssplit.py"):
+            self.assertIn(known, found)
 
     def test_releasing_names_every_place(self):
         text = read("docs/releasing.md")
