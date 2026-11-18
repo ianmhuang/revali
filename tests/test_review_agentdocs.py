@@ -90,7 +90,9 @@ class ReadmeAgents(unittest.TestCase):
         text = read("README.md")
         paragraph = unwrap(text.split("\nStatus:", 1)[1].split("\n\n", 1)[0])
         self.assertIn("package version %s" % VERSION, paragraph)
-        self.assertIn("#21", paragraph)
+        # feature/release-steps AC-3: the release notes moved from Status to CHANGELOG.md
+        changelog = read("CHANGELOG.md")
+        self.assertIn("#21", changelog.split("\n## 0.2.0 - ", 1)[1].split("\n## ", 1)[0])
         for word in ("private", "public", "WSL", "ssh", "Reviewer"):
             self.assertIn(word, paragraph, word)
 
