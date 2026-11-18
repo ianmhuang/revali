@@ -371,8 +371,8 @@ def _lint_section(ctx: Context) -> str:
     fmt = ctx.cfg.project.format.strip()  # it runs with or without a lint line
     if fmt:
         text += (
-            "Before lint the script formats your test files with `%s`, so you need not "
-            "format them yourself.\n" % fmt
+            "%s the script formats your test files with `%s`, so you need not "
+            "format them yourself.\n" % ("Before lint" if cmd else "After your answer", fmt)
         )
     return text
 
