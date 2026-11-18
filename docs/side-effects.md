@@ -263,7 +263,7 @@ stated.
   your own files off `test_file_pattern`
 
 Outside `test_dir` and the state directory it changes only what this page
-lists: the ignore line of the first item, the revert of a reviewer's change above, the
+lists, among them the ignore line of the first item, the revert of a reviewer's change above, the
 index marks of the lint gate, the local runner's worktree, and what `merge`
 and `archive` do to branches and the checkout. It never
 commits a change to a test file the reviewer did not write,

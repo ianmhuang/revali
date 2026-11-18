@@ -21,7 +21,8 @@ the existing suite, and the merge waits for the result. Three roles take part.
 inputs, so nobody grades their own work: the Reviewer gets the acceptance
 criteria, the diff and the documents the diff concerns, not the Developer's reasoning, the Validator is a
 test run, not an opinion, and the diagnosis session gets change.md, tests.md, the
-Reviewer's test files, the failing step's output and the base rerun, with read-only
+Reviewer's test files, the failing step's output, the base rerun and the other platforms'
+outcomes, with read-only
 access to the repository, but neither the Developer's nor the Reviewer's reasoning. The models can differ by tier (`auto` puts the Reviewer one tier
 above the Developer) and, at the engine seam, by vendor
 (only `claude` exists today). Fresh context removes the author's bias toward
@@ -56,7 +57,7 @@ sequenceDiagram
                 R->>G: PR marked ready
                 R-->>D: READY TO MERGE, exit 0
             else FAIL
-                R->>V: failed new tests again, on the base tip
+                R->>V: new tests failed: the new tests again, on the base tip
                 V->>V: diagnosis session (code / test / env, introduced by branch or base)
                 opt bug the base already had
                     R->>G: issue

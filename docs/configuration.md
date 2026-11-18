@@ -119,10 +119,12 @@ PR comment and the `ACTION NEEDED` summary; `revali merge` comments on
 every one a branch commit references with `Fixes #n` (see
 [docs/side-effects.md](side-effects.md)). False opens nothing.
 `[project] lint` is one shell line (`ruff check . && black --check .`, say)
-that preflight runs on the working tree and stops on with exit 2; the same
-line gates the reviewer's tests: after the reviewer writes them the line
-runs again, a failure sends the reviewer back once, a second failure ends
-the run. Whenever the line runs over the reviewer's tests, the reviewer's
+that the preflight of `revali run` runs on the working tree and stops on with
+exit 2 (`revali preflight` and `run --dry-run` print it and do not run it); the
+same line gates the reviewer's tests: after the reviewer writes them the line
+runs again and a failure sends the reviewer back, once per round whatever the
+reason, so a failure on the attempt after that bounce ends the run (see
+[docs/side-effects.md](side-effects.md)). Whenever the line runs over the reviewer's tests, the reviewer's
 new files are intent-to-add (`git add -N`), so `git ls-files` lists them and a line that checks only
 tracked files sees them; they are untracked again afterwards (see
 [docs/side-effects.md](side-effects.md)). Leave it empty and nothing checks formatting or style, for your

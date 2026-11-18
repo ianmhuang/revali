@@ -31,7 +31,10 @@ class DiagnosisInput(unittest.TestCase):
         self.assertIn(
             "the rerun on the base tip and the other platforms' outcomes", text("docs/workflow.md")
         )
-        self.assertIn("the failing step's output and the base rerun", text("README.md"))
+        self.assertIn(
+            "the failing step's output, the base rerun and the other platforms' outcomes",
+            text("README.md"),
+        )
 
 
 class SideEffects(unittest.TestCase):
@@ -114,9 +117,9 @@ class HistoryRows(unittest.TestCase):
         self.assertNotIn("one row per `run` that started, `merge`, `stop` or `archive`", doc)
         for phrase in (
             "but not a finished `run --dry-run`",
-            "not one refused because the branch is not ready or a run holds it",
+            "a stop before `gh pr merge` (a dirty tree, HEAD moved, failed or pending CI) included",
             "not one that found nothing to stop",
-            "an `archive` that moved the branch, not one that stopped",
+            "even when the move of the state directory then fails",
         ):
             self.assertIn(phrase, doc)
 
@@ -143,7 +146,9 @@ class Conventions(unittest.TestCase):
 
     def test_preflight_and_lint(self):
         self.assertNotIn("`revali preflight` runs both", self.doc)
-        self.assertIn("`revali preflight` on its own prints the line and does not run it", self.doc)
+        self.assertIn(
+            "`revali preflight` and `run --dry-run` print the line and do not run it", self.doc
+        )
 
     def test_defaults_rule(self):
         self.assertNotIn("No default value in code", self.doc)

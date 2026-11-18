@@ -23,8 +23,8 @@ Things a linter cannot check; formatting is not listed.
 ## Style
 - Formatting is black's, lint is ruff's ([pyproject.toml](pyproject.toml)); revali's own
   `[project] lint` line runs both. The preflight of `revali run` runs that line and stops
-  with exit 2 on a failure (`revali preflight` on its own prints the line and does not run
-  it), and the reviewer's test files must pass it before they are committed, so neither the
+  with exit 2 on a failure (`revali preflight` and `run --dry-run` print the line and do
+  not run it), and the reviewer's test files must pass it before they are committed, so neither the
   author nor the reviewer spends a round on style. The reviewer does not comment on what
   they check.
 
