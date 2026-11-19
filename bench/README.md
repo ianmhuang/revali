@@ -23,7 +23,8 @@ the run before anything starts.
 
 `--dry-run` does everything up to the session for each case (clone, isolate, configuration,
 prompt, written to `<case>/prompt.md`), spends nothing and needs no budget; each case is
-`ready` or `error`, and exit 1 means one is not ready. Run it after adding a case.
+`ready`, `error` or `malformed` (a case directory that does not load), and exit 1 means one
+is not ready. Run it after adding a case.
 
 `--cases` may be given more than once; the cases of every directory run under one budget,
 and a case name found in two directories stops the run before anything starts.
@@ -37,7 +38,8 @@ what it spent (a timeout, output that is not JSON) counts as its whole cap again
 budget, and its line says the cost is unknown. `--model` sets the reviewer model for every
 case; without it the case repository's own configuration chooses, as `revali run` would.
 
-A case that fails in any way is reported as `error` and the next case runs, except a session
+A case that fails in any way is reported as `error` (or `malformed` when its directory does
+not load) and the next case runs, except a session
 stopped by its model's usage limit or by an overloaded model (the Reviewer has no auto
 fallback): that case and every later one are `not-run`, what the session reported spending
 is charged (0 included), and `--resume` after the reset, or later, runs them. Each case's line
@@ -79,10 +81,12 @@ has the file open), so a run killed while writing it leaves the previous version
 ## What a run does
 
 For each case: `git clone` the repository into a temporary directory, fetch the refs the
-case lists, remove the remote, check out the head commit on the case's branch, point the
-base branch (`[project] base_branch` of the case's repository, else the branch the source
-had checked out) at the case's base commit, delete every other ref, `FETCH_HEAD` and the
-reflogs, put the case's `change.md` in the state directory, build the round-1 prompt with
+case lists, remove the remote, check out the head commit on the case's branch, write the
+case's own `revali.toml` (when it has one) into the clone and its `change.md` into the
+state directory, read the configuration, point the base branch (`[project] base_branch` of
+the case's repository, else the branch the source had checked out) at the case's base
+commit, delete every other ref, `FETCH_HEAD`, `ORIG_HEAD` and the reflogs, build the
+round-1 prompt with
 revali's `build_prompt` and run one session with `spawn_reviewer`. The clone then looks as
 the original round did: `git log main`, `git diff main...HEAD` and the like show the base,
 not today's main with the fix merged. The objects of later commits are still in the clone's
@@ -93,8 +97,9 @@ temporary directory) keeps `<case>/prompt.md`, `<case>/review.raw.json`,
 `<case>/answer.json` and `results.json`, which also records the revali version and
 `PROMPT_VERSION` that ran.
 
-The prompt, schema and checklist are the ones of the revali running the benchmark; the case
-repository contributes its own `revali.toml` (model, budget, test pattern, project
+The prompt, schema and checklist are the ones of the revali running the benchmark, unless
+the case's `revali.toml` sets its own `[review] prompt`, `schema` or `checklist_builtin`;
+`~/.revali/config.toml` applies as in a normal run. The case repository contributes its own `revali.toml` (model, budget, test pattern, project
 checklist, `doc_roots`) and its documents at the case's head commit. A project that keeps `revali.toml` out of git has none in the clone: its cases
 carry a copy in the case directory, which is written into the clone first and replaces any
 the clone has. A case whose `revali.toml` this revali does not accept ends as `error`, and
@@ -105,8 +110,8 @@ one that is not valid TOML as `malformed`.
 A case is **caught** when a finding of kind correctness or security names the expected
 file at a line inside the expected range widened by `--line-margin` (15 by default).
 It is **strict** when that finding is medium or high and the verdict is
-`CHANGES_REQUESTED`, **loose** otherwise. Other findings are listed under the case, not
-scored. The summary line gives both rates over the cases that ended as caught or missed
+`CHANGES_REQUESTED`, **loose** otherwise. Other findings are recorded under the case in
+`results.json` (`other_findings`), not printed and not scored. The summary line gives both rates over the cases that ended as caught or missed
 (not `error`, `malformed`, `not-run`, `interrupted` or `started`) and the total cost.
 
 What the number does not say:
@@ -129,6 +134,10 @@ python tools/bench_case.py ~/.revali/archive/<owner>__<repo>/<pr>-<branch> \
     --round 1 --finding F1 --out bench/cases/<name> \
     --request "As you suggest." [--config <project>/revali.toml]
 ```
+
+`tools/bench_case.py` does not expand `~` itself: the lines above rely on the shell doing
+it, so where the shell does not (a quoted path, or a shell without tilde expansion) write
+the home directory out.
 
 Only a medium or high correctness or security finding with a line, which the next round
 marked resolved, makes a case; the tool refuses anything else, a head the repository cannot

@@ -24,7 +24,7 @@ from revali.runners import (
     tail,
 )
 from revali.state import RunLog, State, now_iso, read_text, safe_branch, write_text
-from revali.testarchive import archive_mode, read_archived, sandbox_files
+from revali.testarchive import archive_dir, archive_mode, read_archived, sandbox_files
 from revali.timing import fmt_duration
 
 PASS, FAIL = "PASS", "FAIL"
@@ -679,6 +679,31 @@ def _other_platforms(others: List[ValidationOutcome]) -> str:
     return "\n\nThe same validation on the other listed platforms:\n\n" + "\n".join(lines)
 
 
+def _test_files_for_prompt(ctx: Context, state: State, rdir: str) -> str:
+    """The reviewer's test files as the diagnosis prompt lists them. In archive mode they are
+    not in the working tree the session reads, so each line adds where the archived copy is:
+    relative to the repository root when the state directory is inside it, else absolute."""
+    if not state.test_files:
+        return "(none)"
+    if not archive_mode(ctx, state):
+        return "\n".join("- " + p for p in state.test_files)
+    root = os.path.realpath(ctx.repo_root)
+    lines = []
+    for rel in state.test_files:
+        full = os.path.realpath(os.path.join(archive_dir(rdir), *rel.split("/")))
+        inside = _same_drive(root, full) and os.path.normcase(
+            os.path.commonpath([root, full])
+        ) == os.path.normcase(root)
+        where = os.path.relpath(full, root).replace("\\", "/") if inside else full
+        lines.append("- %s (not in the working tree; read it at `%s`)" % (rel, where))
+    return "\n".join(lines)
+
+
+def _same_drive(a: str, b: str) -> bool:
+    # os.path.commonpath raises on Windows for paths on two drives
+    return os.path.splitdrive(a)[0].lower() == os.path.splitdrive(b)[0].lower()
+
+
 def _diagnose(
     ctx: Context,
     state: State,
@@ -717,7 +742,7 @@ def _diagnose(
         "timed_out_note": " (timed out)" if failed.timed_out else "",
         "change_md": ctx.doc.raw.strip(),
         "tests_md": read_text(tests_md_path).strip() if os.path.isfile(tests_md_path) else "(none)",
-        "test_files": "\n".join("- " + p for p in state.test_files) or "(none)",
+        "test_files": _test_files_for_prompt(ctx, state, rdir),
         "log_lines": LOG_LINES,
         "log_tail": tail(failed.text, LOG_LINES) or "(empty)",
         "base_sha": ctx.base_sha,

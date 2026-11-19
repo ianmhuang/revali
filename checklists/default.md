@@ -1,7 +1,8 @@
 # Built-in review checklist (generic, language-neutral)
 
 Findings from this list are kind `convention` unless they also break
-behaviour, in which case they are `correctness`.
+behaviour, in which case they are `correctness`, or expose secrets or
+confidential material as item 3 describes, in which case they are `security`.
 
 1. Behaviour changes have tests that fail without the change.
 2. Existing tests are not weakened, skipped, or deleted without a stated reason.

@@ -14,7 +14,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 HEADING = re.compile(r"^## (\d+)\.(\d+)\.(\d+) - (\d{4})-(\d{2})-(\d{2})$")
-RELEASED = (("0.3.0", "2026-09-07"), ("0.2.0", "2026-09-05"), ("0.1.0", "2026-08-30"))
+RELEASED = (
+    ("0.4.0", "2026-11-19"),
+    ("0.3.0", "2026-09-07"),
+    ("0.2.0", "2026-09-05"),
+    ("0.1.0", "2026-08-30"),
+)
 
 
 def read(rel):
@@ -163,6 +168,7 @@ class Changelog(unittest.TestCase):
             "0.1.0": ("#1", "#6", "#10", "#11"),
             "0.2.0": ("#12", "#18", "PR #21 to #24", "#25", "black", "ruff"),
             "0.3.0": ("#26", "PR #28 to #33", "#38", "#41", "#43"),
+            "0.4.0": ("PR #44 to #99", "#76", "#80", "#99", "Upgrading", "Known issues"),
         }
         for version, needles in expected.items():
             body = section(self.text, version)
