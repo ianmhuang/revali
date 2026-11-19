@@ -81,6 +81,13 @@ method = "squash"
 wait_for_checks = true
 checks_timeout_min = 30
 
+[pr]
+release_labels = ["major", "minor", "patch", "docs", "skip-changelog"]   # PR labels revali keeps
+                                  # in step for release notes (templates/release.yml); [] = off;
+                                  # dropping a label kind_labels maps to means setting it too
+kind_labels = { feature = "minor", fix = "patch", docs = "docs" }   # change.md kind -> label;
+                                  # `release: <label>` in change.md overrides it
+
 # [paths]
 # archive_dir = "archive"         # where `revali merge` / `archive` move .revali/<branch>/ (as
 #                                 # <owner>__<repo>/<pr>-<branch>/): relative = under ~/.revali/,

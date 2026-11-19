@@ -114,3 +114,9 @@ auto_merge = false
 method = "squash"
 wait_for_checks = true
 checks_timeout_min = 30
+
+[pr]
+release_labels = ["major", "minor", "patch", "docs", "skip-changelog"]   # the labels revali keeps in
+                                 # step on its PRs (one wanted, the others removed); [] = off
+kind_labels = { feature = "minor", fix = "patch", docs = "docs" }   # change.md kind -> its label;
+                                 # change.md `release: <label>` overrides it

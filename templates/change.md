@@ -12,7 +12,11 @@ status: draft
      Each AC is "- AC-n: text", optionally with a note before the colon
      ("- AC-2 (PR #30 F1): text") and indented continuation lines; any
      other line that starts like an AC stops preflight. A paragraph that
-     merely begins with an AC id, without a bullet or a colon, is prose. -->
+     merely begins with an AC id, without a bullet or a colon, is prose.
+     Optional front matter: "release: <label>" gives the PR that release
+     label instead of the one [pr] kind_labels maps the kind to (a fix that
+     adds a flag is "minor", say); it must be one of [pr] release_labels,
+     in any case. -->
 
 ## Request
 <the user's instruction to the author session, verbatim, in its original language>

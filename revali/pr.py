@@ -2,11 +2,14 @@
 
 import os
 import re
-from typing import Optional
+import time
+import urllib.parse
+from typing import List, Optional
 
 from revali import EXIT_ERROR, changedoc, gitops
+from revali.config import release_label, release_problem
 from revali.preflight import Context, Stop, check_tree_unmoved
-from revali.procs import ProcError, resolve, run, run_retry
+from revali.procs import RETRY_WAIT_S, ProcError, one_line, resolve, run, run_retry
 from revali.secretscan import scan_text
 from revali.state import RunLog, State, write_text
 
@@ -69,6 +72,7 @@ def ensure_pr(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> N
         state.save(rdir)
         number, url = create_draft(ctx, rdir, log)
         state.pending_effect = ""
+        current: Optional[List[str]] = []
     else:
         number, url = int(pr.get("number", 0)), pr.get("url", "")
         if log:
@@ -76,9 +80,125 @@ def ensure_pr(ctx: Context, state: State, rdir: str, log: Optional[RunLog]) -> N
         problem = sync_title(root, number, pr.get("title"), ctx.doc.title, log, "pr")
         if problem and log:
             log.stage("pr", "warning: could not update the PR title: %s" % problem)
+        current = label_names(pr)
     state.pr_number = number
     state.pr_url = url
     state.save(rdir)
+    if number:
+        sync_labels(root, number, current, ctx.cfg, ctx.doc, log, "pr")
+
+
+def label_names(pr: dict) -> Optional[List[str]]:
+    """The label names of a PR as gh's JSON gives them (`labels: [{name}]`); None when the
+    answer has no usable `labels` list."""
+    labels = pr.get("labels") if isinstance(pr, dict) else None
+    if not isinstance(labels, list):
+        return None
+    return [str(lb.get("name", "")) for lb in labels if isinstance(lb, dict) and lb.get("name")]
+
+
+LABEL_DESCRIPTION = "Release notes group (set by revali)"
+
+
+def sync_labels(
+    root: str,
+    number: int,
+    current: Optional[List[str]],
+    cfg,
+    doc,
+    log: Optional[RunLog],
+    stage: str,
+) -> None:
+    """Make PR `number`'s release labels match change.md (`release_label`): add the wanted
+    one, remove every other label of `[pr] release_labels`, leave the rest alone. Names
+    compare in any case, as GitHub's do. `current` None (unknown) is taken as no labels, so
+    nothing is removed. A label the repository lacks is created first. A `release:` that is
+    not a listed label (`release_problem`) changes nothing and is one warning. Never raises:
+    each failure is one warning line, and the caller's stage goes on."""
+    managed = list(cfg.pr.release_labels)
+    if not managed:
+        return
+    problem = release_problem(cfg, doc)
+    if problem:
+        # change.md changed after preflight (revali merge reads it without one)
+        if log:
+            log.stage(stage, "warning: %s; the PR's labels are left as they are" % problem)
+        return
+    wanted = release_label(cfg, doc)
+    have = list(current or [])
+    lowered = {n.lower() for n in have}
+    managed_lower = {n.lower() for n in managed}
+    add = wanted if wanted and wanted.lower() not in lowered else ""
+    remove = [n for n in have if n.lower() in managed_lower and n.lower() != wanted.lower()]
+    if not add and not remove:
+        return
+    if add and not _ensure_label(root, add, log, stage):
+        add = ""
+        if not remove:
+            return
+    args = ["pr", "edit", str(number)]
+    if add:
+        args += ["--add-label", add]
+    if remove:
+        args += ["--remove-label", ",".join(remove)]
+    try:
+        res = run_retry(resolve("gh") + args, cwd=root, log=_log(log), timeout=120)
+        problem = "" if res.ok else (res.text.strip()[:200] or "gh exited %d" % res.returncode)
+    except ProcError as exc:
+        problem = str(exc)
+    if not log:
+        return
+    if problem:
+        log.stage(
+            stage, "warning: could not update the release label of PR #%d: %s" % (number, problem)
+        )
+        return
+    change = (["+" + add] if add else []) + ["-" + n for n in remove]
+    log.stage(stage, "PR #%d release label: %s" % (number, " ".join(change)))
+
+
+def _ensure_label(root: str, name: str, log: Optional[RunLog], stage: str) -> bool:
+    """True when label `name` may be applied: the repository has it (GitHub looks a label up
+    in any case), it was created now, or the lookup failed for another reason than "not
+    found" (then applying it is still tried). False, with a warning, when creating it
+    failed. One exact lookup, so a repository with many labels is no different."""
+    path = "repos/{owner}/{repo}/labels/%s" % urllib.parse.quote(name, safe="")
+    try:
+        # no retry: "not found" is the usual answer the first time, not a transient failure
+        res = run(resolve("gh") + ["api", path], cwd=root, log=_log(log), timeout=120)
+        found = res.ok
+        problem = "" if res.ok or "HTTP 404" in res.text else (res.text or "gh api failed")
+    except ProcError as exc:
+        found, problem = False, str(exc)
+    if found:
+        return True
+    if problem:
+        if log:
+            log.stage(
+                stage,
+                "warning: could not check the label '%s': %s" % (name, one_line(problem)),
+            )
+        return True
+    create = resolve("gh") + ["label", "create", name, "--description", LABEL_DESCRIPTION]
+    try:
+        res = run(create, cwd=root, log=_log(log), timeout=120)
+        if not res.ok and "already exists" not in res.text:
+            # a transient failure gets one more try, as run_retry gives; "already exists"
+            # would only answer the same again
+            time.sleep(RETRY_WAIT_S)
+            res = run(create, cwd=root, log=_log(log), timeout=120)
+        problem = "" if res.ok else (res.text.strip()[:200] or "gh exited %d" % res.returncode)
+    except ProcError as exc:
+        problem = str(exc)
+    if "already exists" in problem:
+        return True  # another run created it since the lookup
+    if problem:
+        if log:
+            log.stage(stage, "warning: could not create the label '%s': %s" % (name, problem))
+        return False
+    if log:
+        log.stage(stage, "created the label '%s'" % name)
+    return True
 
 
 def sync_title(

@@ -76,6 +76,7 @@ class ChangeDoc:
     kind: str = ""
     author_model: str = ""
     status: str = ""
+    release: str = ""  # optional: the PR's release label, overriding `[pr] kind_labels`
     sections: Dict[str, str] = field(default_factory=dict)
     acs: List[Tuple[str, str]] = field(default_factory=list)
     # per AC, the text without its note (what the length check measures)
@@ -110,6 +111,8 @@ def parse(text: str) -> ChangeDoc:
                     doc.author_model = value
                 elif key == "status":
                     doc.status = value.lower()
+                elif key == "release":
+                    doc.release = value
             idx += 1
         idx += 1  # closing ---
     current = None

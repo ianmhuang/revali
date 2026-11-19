@@ -53,6 +53,17 @@ stated.
   the commit subject on the base branch; a failure is a warning in the log and
   the run goes on. A title changed on GitHub by hand is overwritten the same
   way: change.md is the source
+- with `[pr] release_labels` not empty (the default), after the PR is opened
+  or reused: `gh pr edit <n> --add-label <label> --remove-label <others>` so
+  that of the labels in `release_labels` the PR carries exactly the one
+  change.md asks for (`release:`, else `[pr] kind_labels` for its kind), or
+  none of them when it asks for none; other labels are left alone, and a
+  label set by hand is overwritten the same way. A wanted label the
+  repository lacks (`gh api repos/{owner}/{repo}/labels/<label>` answers
+  404) is first created with `gh label create <label> --description
+  "Release notes group (set by revali)"`. Any
+  failure is a warning in the log and the run goes on; a dry run only names
+  the label
 - runs `[project] format` on the host after each reviewer attempt, just
   before the `lint` line below, and only over the files under `test_dir`
   that differ from HEAD then (`{files}`): those the reviewer wrote or
@@ -164,7 +175,12 @@ stated.
 - before `revali merge` waits for CI (next item): `gh pr view <n> --json title`, and
   `gh pr edit <n> --title <title>` when the title differs from change.md's;
   when that edit fails nothing is merged (exit 1). A title that cannot be read,
-  or a missing change.md, is a warning and the merge goes on
+  or a missing change.md, is a warning and the merge goes on. Then, with
+  `[pr] release_labels` not empty, `gh pr view <n> --json labels` and the
+  same label edit (and creation) as during a run; here every failure is a
+  warning and the merge goes on, since labels never reach the base branch.
+  A change.md edited since the run to a `release:` outside the list changes
+  no label and is a warning
 - on `revali merge` (human-started, refused unless a run ended READY TO
   MERGE, no run has started its `pr` stage since, and HEAD has not moved; a
   later run that stopped before that stage does not count): waits for CI checks if the PR has any,

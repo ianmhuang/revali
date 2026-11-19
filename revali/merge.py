@@ -189,6 +189,7 @@ def do_merge(cwd: str, rdir: str, state: State, log: RunLog) -> int:
 
     # before the CI wait, like the worktree check: a refusal must not cost that wait
     check_title(state, rdir, root, log)
+    check_labels(cfg, state, rdir, root, log)
 
     if cfg.merge.wait_for_checks:
         wait_for_checks(state.pr_number, root, cfg.merge.checks_timeout_min, log)
@@ -378,6 +379,50 @@ def check_title(state: State, rdir: str, root: str, log: RunLog) -> None:
             "Fix the title on GitHub or merge again"
             % (state.pr_number, current.strip(), wanted.strip(), problem),
         )
+
+
+def check_labels(cfg, state: State, rdir: str, root: str, log: RunLog) -> None:
+    """Make the PR's release labels match change.md once more before the merge, as each run
+    does (`pr.sync_labels`). Never refuses: the labels group release notes and do not reach
+    the base branch, so whatever cannot be read or changed is a warning."""
+    from revali import changedoc
+    from revali.pr import label_names, sync_labels
+
+    path = os.path.join(rdir, "change.md")
+    if not cfg.pr.release_labels or not os.path.isfile(path):
+        return  # a missing change.md was already reported by check_title
+    try:
+        doc = changedoc.load(path)
+    except (OSError, ValueError):
+        return  # reported by check_title
+    try:
+        res = run(
+            resolve("gh") + ["pr", "view", str(state.pr_number), "--json", "labels"],
+            cwd=root,
+            log=log.detail,
+            timeout=120,
+        )
+    except ProcError as exc:
+        reason = str(exc)
+    else:
+        current = None
+        if res.ok:
+            try:
+                current = label_names(json.loads(res.stdout))
+            except ValueError:
+                current = None
+        if current is not None:
+            reason = ""
+        elif res.ok:
+            reason = "no labels in gh's answer"
+        else:
+            reason = res.text.strip()[:200] or "gh exited %d" % res.returncode
+    if reason:
+        log.stage(
+            "merge", "warning: could not read the PR's labels (%s); merging without them" % reason
+        )
+        return
+    sync_labels(root, state.pr_number, current, cfg, doc, log, "merge")
 
 
 def pr_view_state(pr_number: int, cwd: str, log: Optional[RunLog]) -> Tuple[str, str]:

@@ -109,7 +109,10 @@ class PreflightFailures(RepoCase):
         self.write(".revali/feature__mul/change.md", text)
         lines = []
         preflight(self.repo, log=_ListLog(lines))
-        self.assertIn("preflight: ok: Add mul to calc (feature, 2 AC: AC-1, AC-2)", lines)
+        # feature/release-labels AC-2 appends the PR's release label to this line
+        self.assertIn(
+            "preflight: ok: Add mul to calc (feature, 2 AC: AC-1, AC-2; label minor)", lines
+        )
 
     def test_dirty_tree(self):
         self.write("src/calc.py", "# dirty\n")

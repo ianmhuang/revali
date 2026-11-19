@@ -98,3 +98,23 @@ next one; a failed session that reported no cost (a timeout) is charged its cap.
    git tag -a v<version> -m "revali <version>: <what it brings>" <merge commit>
    git push origin v<version>
    ```
+
+   Then the maintainer publishes the GitHub Release for that tag. GitHub generates the list
+   of merged PRs since the previous tag, grouped by their release labels through
+   [.github/release.yml](../.github/release.yml); `--notes` puts one lead line above it,
+   saying why the version exists (the first sentence of its changelog section will do):
+
+   ```
+   gh release create v<version> --verify-tag --generate-notes --notes "<lead line>"
+   ```
+
+## Release notes for a project that uses revali
+
+Every PR revali opens carries one release label (`major`, `minor`, `patch` or `docs` by
+default) taken from its change.md: the `release:` field when it has one, else the label
+`[pr] kind_labels` gives its kind ([docs/configuration.md](configuration.md)). Copy
+[templates/release.yml](../templates/release.yml) to `.github/release.yml` in the project,
+and `gh release create v<version> --verify-tag --generate-notes --notes "<lead line>"` after
+each tag gives the same grouped notes: Major, Minor, Patch and Docs changes, the rest under
+Other, a PR labelled `skip-changelog` left out. A project that labels PRs another way sets
+`[pr] release_labels = []`, and revali leaves its labels alone.

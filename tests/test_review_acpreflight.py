@@ -69,12 +69,19 @@ class OkLineListsTheIds(RepoCase):
         self.write(CHANGE_MD_REL, text.replace(AC_2, block))
         log = _StageLog()
         preflight(self.repo, log=log)
-        self.assertIn("preflight: ok: Add mul to calc (feature, 3 AC: AC-1, AC-2, AC-3)", log.lines)
+        # feature/release-labels AC-2 appends the PR's release label to this line
+        self.assertIn(
+            "preflight: ok: Add mul to calc (feature, 3 AC: AC-1, AC-2, AC-3; label minor)",
+            log.lines,
+        )
 
     def test_ok_line_on_the_plain_fixture(self):
         log = _StageLog()
         preflight(self.repo, log=log)
-        self.assertIn("preflight: ok: Add mul to calc (feature, 2 AC: AC-1, AC-2)", log.lines)
+        # feature/release-labels AC-2 appends the PR's release label to this line
+        self.assertIn(
+            "preflight: ok: Add mul to calc (feature, 2 AC: AC-1, AC-2; label minor)", log.lines
+        )
 
 
 if __name__ == "__main__":
