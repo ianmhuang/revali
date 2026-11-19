@@ -117,10 +117,10 @@ auto fallback ([docs/configuration.md](configuration.md)).
    gh release create v<version> --verify-tag --generate-notes --notes "<lead line>"
    ```
 
-   Last, once the release is published and while no run from it is in progress, move the
-   checkout other projects run from to the new tag (`git -C <revali dir> fetch --tags`,
-   then `git -C <revali dir> checkout v<version>`; see Installing revali in
-   [workflow.md](workflow.md)).
+   Last, once the release is published, move the checkout other projects run from to the
+   new tag while no run from that checkout is in progress
+   (`git -C <revali dir> fetch --tags`, then `git -C <revali dir> checkout v<version>`;
+   see Installing revali in [workflow.md](workflow.md)).
 
 ## Release notes for a project that uses revali
 

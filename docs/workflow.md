@@ -3,6 +3,7 @@
 How a change moves from a request to a merged PR, what the three sessions
 see, and how several agent sessions share one repository. The command
 reference is in the README; configuration keys are in [docs/configuration.md](configuration.md).
+To install revali first, see Installing revali below.
 
 ## Why separate sessions
 
@@ -299,8 +300,8 @@ merge. `revali clean <branch>` deletes the review files instead
 ## Installing revali
 
 Clone the repository and check out the newest release tag (the repository's GitHub
-Releases page lists them, or `git tag --sort=-v:refname` after the clone), not main: main changes with every merged PR, `PROMPT_VERSION`
-included, so a checkout that follows it changes the review of every project that
+Releases page lists them, or `git tag --sort=-v:refname` after the clone), not main: main changes with every merged PR, and `PROMPT_VERSION`
+with some of them, so a checkout that follows it changes the review of every project that
 runs from it. The checkout is then a detached HEAD at the tag, which is expected.
 
 ```
@@ -309,12 +310,29 @@ git -C <revali dir> checkout v<version>
 ```
 
 Link its `skill/` directory as `~/.claude/skills/revali`, so Claude Code finds the
-`/revali` skill: a junction on Windows, a symbolic link elsewhere.
+`/revali` skill: a junction on Windows, a symbolic link elsewhere. The first line of
+each pair below creates `~/.claude/skills` if it is not there yet; `~/.claude/skills/revali`
+itself must not exist yet (`ln -s` would put the link inside an existing directory).
+
+In PowerShell:
 
 ```
-New-Item -ItemType Junction -Path "$HOME\.claude\skills\revali" -Target "<revali dir>\skill"   # PowerShell
-mklink /J "%USERPROFILE%\.claude\skills\revali" "<revali dir>\skill"                         # cmd
-ln -s "<revali dir>/skill" ~/.claude/skills/revali                                           # Linux, macOS
+New-Item -ItemType Directory -Force "$HOME\.claude\skills"
+New-Item -ItemType Junction -Path "$HOME\.claude\skills\revali" -Target "<revali dir>\skill"
+```
+
+In cmd:
+
+```
+if not exist "%USERPROFILE%\.claude\skills" mkdir "%USERPROFILE%\.claude\skills"
+mklink /J "%USERPROFILE%\.claude\skills\revali" "<revali dir>\skill"
+```
+
+On Linux or macOS:
+
+```
+mkdir -p ~/.claude/skills
+ln -s "<revali dir>/skill" ~/.claude/skills/revali
 ```
 
 The project's `CLAUDE.md` names that checkout as `<revali dir>` (see Project setup

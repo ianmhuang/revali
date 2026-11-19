@@ -133,19 +133,19 @@ revali reviews its own changes on this public one.
 ## Usage
 
 ```
-python <path-to>/revali.py preflight [--base <b>]   # checks only (no lint, no baseline); fetches the base, commits and pushes nothing
-python <path-to>/revali.py run [--base <b>] [--reviewer-model <m>]   # detached (<m>: this run's reviewer); then:
-python <path-to>/revali.py wait --timeout 9m        # repeat until it returns other than 4; --branch <b> for another branch's run
-python <path-to>/revali.py merge                    # after READY TO MERGE (docs/files.md, stages); waits for CI
-python <path-to>/revali.py run --dry-run | --foreground   # what a run would do, sending nothing | run in this process
-python <path-to>/revali.py status [--branch <b>]    # stage, last message, rounds, fix cycles, cost, PR
-python <path-to>/revali.py stop                     # kill this working tree's run, or record a run that died as stopped
-python <path-to>/revali.py reset                    # drop the branch's state.json, keep its files
-python <path-to>/revali.py clean <branch>           # delete a branch's state directory
-python <path-to>/revali.py archive [--branch <b>]   # record a PR merged or closed without revali merge, archive its files
-python <path-to>/revali.py stats                    # the run history per repository: first-try pass rate, rounds, cost
-python <path-to>/revali.py version                  # the version; --version prints the same line
-python <path-to>/revali.py --verbose <command>      # echo every command revali runs to the terminal
+python <revali dir>/revali.py preflight [--base <b>]   # checks only (no lint, no baseline); fetches the base, commits and pushes nothing
+python <revali dir>/revali.py run [--base <b>] [--reviewer-model <m>]   # detached (<m>: this run's reviewer); then:
+python <revali dir>/revali.py wait --timeout 9m        # repeat until it returns other than 4; --branch <b> for another branch's run
+python <revali dir>/revali.py merge                    # after READY TO MERGE (docs/files.md, stages); waits for CI
+python <revali dir>/revali.py run --dry-run | --foreground   # what a run would do, sending nothing | run in this process
+python <revali dir>/revali.py status [--branch <b>]    # stage, last message, rounds, fix cycles, cost, PR
+python <revali dir>/revali.py stop                     # kill this working tree's run, or record a run that died as stopped
+python <revali dir>/revali.py reset                    # drop the branch's state.json, keep its files
+python <revali dir>/revali.py clean <branch>           # delete a branch's state directory
+python <revali dir>/revali.py archive [--branch <b>]   # record a PR merged or closed without revali merge, archive its files
+python <revali dir>/revali.py stats                    # the run history per repository: first-try pass rate, rounds, cost
+python <revali dir>/revali.py version                  # the version; --version prints the same line
+python <revali dir>/revali.py --verbose <command>      # echo every command revali runs to the terminal
 ```
 
 What a run does, in order: preflight (ending with the existing suite in the sandbox
