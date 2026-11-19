@@ -37,7 +37,7 @@ context_files = []
 engine = "claude"
 strategy = "prompt"              # reserved: hybrid (v1.x)
 model = "auto"
-fallback_model = "auto"          # auto = the tiers below the chosen one, strongest first
+fallback_model = "auto"          # auto = none: the reviewer runs on its model or the run stops
 effort = "high"
 max_fixes = 2
 max_diff_lines = 800

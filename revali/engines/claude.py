@@ -4,13 +4,22 @@ import json
 from typing import List, Optional
 
 from revali import EXIT_ERROR
-from revali.engines.base import Engine, EngineRequest, EngineResult, SessionCancelled
+from revali.engines.base import (
+    Engine,
+    EngineRequest,
+    EngineResult,
+    ModelBusy,
+    SessionCancelled,
+    UsageLimit,
+)
 from revali.preflight import Stop
 from revali.procs import ExeNotFound, ProcCancelled, ProcTimeout, resolve, run
 from revali.state import RunLog, write_text
 
 READ_ONLY_TOOLS = "Read,Grep,Glob"
 BUDGET_SUBTYPE = "error_max_budget_usd"
+USAGE_LIMIT = "usage_limit_reached"  # the result's `api_error` when the model's limit is reached
+OVERLOADED_STATUS = "529"  # the API's "overloaded" status in `api_error_status`, number or text
 
 
 def failure_message(
@@ -128,6 +137,22 @@ class ClaudeEngine(Engine):
                 EXIT_ERROR, "%s output is not a JSON object; saved to %s" % (role, request.raw_path)
             )
         if payload.get("is_error") or res.returncode != 0:
+            unavailable = (
+                UsageLimit
+                if payload.get("api_error") == USAGE_LIMIT
+                else (
+                    ModelBusy if str(payload.get("api_error_status")) == OVERLOADED_STATUS else None
+                )
+            )
+            if unavailable is not None:
+                text = " ".join(str(payload.get("result") or "").split())[:300]
+                raise unavailable(
+                    role,
+                    request.model,
+                    text or "no text from the engine",
+                    request.raw_path,
+                    _cost(payload),
+                )
             raise Stop(
                 EXIT_ERROR,
                 failure_message(

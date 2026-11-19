@@ -134,7 +134,7 @@ revali reviews its own changes on this public one.
 
 ```
 python <path-to>/revali.py preflight [--base <b>]   # checks only (no lint, no baseline); fetches the base, commits and pushes nothing
-python <path-to>/revali.py run [--base <b>]         # detached; then:
+python <path-to>/revali.py run [--base <b>] [--reviewer-model <m>]   # detached (<m>: this run's reviewer); then:
 python <path-to>/revali.py wait --timeout 9m        # repeat until it returns other than 4; --branch <b> for another branch's run
 python <path-to>/revali.py merge                    # after READY TO MERGE (docs/files.md, stages); waits for CI
 python <path-to>/revali.py run --dry-run | --foreground   # what a run would do, sending nothing | run in this process

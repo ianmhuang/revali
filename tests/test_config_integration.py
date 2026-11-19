@@ -51,7 +51,9 @@ class ModelResolutionTests(RepoCase):
         self.assertEqual(code, EXIT_OK, out)
         argv = self.fake_calls("claude")[0]["argv"]
         self.assertEqual(argv_after(argv, "--model"), "fable")
-        self.assertEqual(argv_after(argv, "--fallback-model"), "opus,sonnet,haiku")
+        self.assertNotIn(
+            "--fallback-model", argv
+        )  # feature/usage-limit AC-8: a Reviewer has no auto fallback
         self.assertIn("not on the ladder", out)
         review_md = self.read(".revali/feature__mul/review-1.md")
         self.assertIn("model_reason: auto:", review_md)
@@ -70,7 +72,8 @@ class ModelResolutionTests(RepoCase):
         run_cli(["run", "--foreground"])
         argv = self.fake_calls("claude")[-1]["argv"]
         self.assertEqual(argv_after(argv, "--model"), "opus")
-        self.assertEqual(argv_after(argv, "--fallback-model"), "sonnet,haiku")
+        # feature/usage-limit AC-8: a Reviewer has no auto fallback
+        self.assertNotIn("--fallback-model", argv)
 
     def test_diagnoser_one_below_author(self):
         self.set_author("claude-fable-5")

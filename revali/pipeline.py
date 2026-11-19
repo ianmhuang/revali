@@ -135,6 +135,10 @@ def state_error_line(exc: StateError) -> str:
 
 
 def cmd_run(args) -> int:
+    model = getattr(args, "reviewer_model", None)
+    if model is not None and not model.strip():
+        print("ERROR: --reviewer-model needs a model name (e.g. --reviewer-model opus)")
+        return EXIT_ERROR
     if args.foreground or args.dry_run:  # a dry run spawns nothing, not even itself
         return _run_foreground(args)
     return _run_detached(args)
@@ -178,6 +182,8 @@ def _run_detached(args) -> int:
     cmd = [python_exe(), _entry_script(), "run", "--foreground"]
     if args.base:
         cmd += ["--base", args.base]
+    if getattr(args, "reviewer_model", None):
+        cmd += ["--reviewer-model", args.reviewer_model.strip()]
     if args.dry_run:
         cmd.append("--dry-run")
     if args.verbose:
@@ -554,6 +560,7 @@ def _stages(args, cwd: str, rdir: str, state: State, log: RunLog) -> int:
         before_tree=cleanup_hook,
         tolerate=state.pending_test_files,
     )
+    ctx.reviewer_model = (getattr(args, "reviewer_model", None) or "").strip()
     job = jobs[0] if jobs else None
     if job is None:
         return _after_preflight(args, ctx, state, rdir, log, None)
@@ -635,6 +642,12 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
             "round %d was approved at %s but the previous run stopped before validation; "
             "continuing there without a new review" % (resume_round, ctx.head_sha[:10]),
         )
+        if ctx.reviewer_model:  # PR #99 round 1 follow-up: say the option did nothing
+            log.stage(
+                "run",
+                "--reviewer-model %s is not used: this run has no review round"
+                % ctx.reviewer_model,
+            )
         record = state.rounds[-1]
         return _validate_and_finish(
             ctx,
@@ -667,6 +680,7 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
             outcome.cost,
             [a[0] for a in ctx.doc.acs],
             ctx.cfg.paths.state_dir,
+            model_note=outcome.model_reason if ctx.reviewer_model else "",
         )
     prstage.post_comment(ctx, state, rdir, "review-%d" % outcome.round_no, comment, log)
 

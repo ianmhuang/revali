@@ -23,6 +23,79 @@ class SessionCancelled(Stop):
         super().__init__(EXIT_ERROR, "%s session stopped before it answered" % role)
 
 
+class ModelUnavailable(Stop):
+    """A session stopped because its model could not serve it. `text` is the engine's own
+    words. Its own message gives no advice: what the user can do next differs for the
+    Reviewer and the diagnosis, so each caller passes it to `line` (PR #99 round 1)."""
+
+    what = "could not run"  # in the line: "<role> model <m> <what>: <text>"
+    past = "could not run"  # "... the model <past> on an earlier <item>"
+    when = "later"  # when the same model may serve again
+
+    def __init__(self, role: str, model: str, text: str, raw_path: str, cost: float):
+        self.role, self.model, self.text, self.raw_path = role, model, text, raw_path
+        super().__init__(EXIT_ERROR, self.line(""), cost=cost)
+
+    def with_advice(self, way_on: str) -> "ModelUnavailable":
+        """The same stop, its message carrying the caller's advice; still of its class, so a
+        caller further up can tell it from other failures."""
+        out = type(self)(self.role, self.model, self.text, self.raw_path, self.cost)
+        out.message = out.line(way_on)
+        out.args = (out.message,)
+        return out
+
+    def line(self, way_on: str) -> str:
+        """The one line: what happened, `way_on` (the caller's advice, may be empty), where
+        the raw output is."""
+        return "%s model %s %s: %s; %sraw output saved to %s" % (
+            self.role,
+            self.model,
+            self.what,
+            self.text,
+            way_on + "; " if way_on else "",
+            self.raw_path,
+        )
+
+
+class UsageLimit(ModelUnavailable):
+    """The model's usage limit is reached; `text` carries the reset time."""
+
+    what = past = "hit its usage limit"
+    when = "after the reset"
+
+
+class ModelBusy(ModelUnavailable):
+    """The model is overloaded (`api_error_status` 529) and no fallback took its place: the
+    Reviewer and the auditor have none unless the user names one (PR #99 round 5), the
+    diagnosis may have used its own up. Not verified against a real busy result."""
+
+    what = "is overloaded"
+    past = "was overloaded"
+
+
+def run_advice(stop: ModelUnavailable) -> str:
+    """What a `revali run` whose Reviewer model could not serve can do next."""
+    return (
+        "nothing is lost: run `revali run` again %s, or `revali run --reviewer-model <model>` "
+        "for this run only" % stop.when
+    )
+
+
+def loop_advice(items: str, stop: ModelUnavailable) -> str:
+    """The advice in a tool that runs one session per item (tools/doc_audit.py,
+    tools/review_bench.py) and stops at a model that cannot serve; `--resume` keeps the
+    recorded model, so another model is a new run."""
+    return (
+        "the %s left are not run; continue with `--resume <dir>` %s, or start a new run with "
+        "`--model <model>`" % (items, stop.when)
+    )
+
+
+def loop_stopped(item: str, stop: ModelUnavailable) -> str:
+    """Why an item after the one whose model could not serve is not run."""
+    return "not run: the model %s on an earlier %s" % (stop.past, item)
+
+
 @dataclass
 class EngineRequest:
     role: str  # "reviewer" | "diagnoser", for messages

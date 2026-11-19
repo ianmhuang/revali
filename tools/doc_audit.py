@@ -37,6 +37,7 @@ sys.path.insert(0, ROOT)
 from revali import VERSION, docgraph, engines, gitops, models, procs  # noqa: E402
 from revali.config import ConfigError, load_project_config, load_user_config  # noqa: E402
 from revali.engines import EngineRequest  # noqa: E402
+from revali.engines.base import ModelUnavailable, loop_advice, loop_stopped  # noqa: E402
 from revali.preflight import Stop  # noqa: E402
 from revali.state import write_json_atomic  # noqa: E402
 
@@ -176,7 +177,12 @@ def settings(cfg, args, engine: engines.Engine) -> Settings:
     )
 
 
-def audit_one(engine, s: Settings, repo: str, doc: str, prompt: str, out: str) -> Result:
+def audit_one(
+    engine, s: Settings, repo: str, doc: str, prompt: str, out: str
+) -> Tuple[Result, str]:
+    """One document's session: its result, and why the documents after it are not run
+    ("" when they are)."""
+    stop_reason = ""
     started = time.monotonic()
     try:
         rr = engine.run(
@@ -194,6 +200,15 @@ def audit_one(engine, s: Settings, repo: str, doc: str, prompt: str, out: str) -
                 read_only=True,
             )
         )
+    except ModelUnavailable as limit:  # its usage limit, or overloaded (PR #99 round 6)
+        result = Result(
+            doc,
+            ERROR,
+            cost=limit.cost,
+            charged=limit.cost,
+            message=limit.with_advice(loop_advice("documents", limit)).message,
+        )
+        stop_reason = loop_stopped("document", limit)  # the documents after it would too
     except Stop as stop:
         result = Result(doc, ERROR, cost=stop.cost, charged=stop.cost, message=stop.message)
         if not stop.cost:  # a timeout or unreadable output: it may have spent up to its cap
@@ -213,7 +228,7 @@ def audit_one(engine, s: Settings, repo: str, doc: str, prompt: str, out: str) -
                 rr.data["findings"], key=lambda f: (order[f["severity"]], f["line"])
             )
     result.duration_s = round(time.monotonic() - started, 1)
-    return result
+    return result, stop_reason
 
 
 def counts(result: Result) -> dict:
@@ -490,7 +505,7 @@ def _main(args) -> int:
         return [record[d] for d in selected if d in record]
 
     spent = earlier
-    stopped = False
+    stopped = ""  # why the documents left are not run
     for doc in selected:
         if doc in record and record[doc].status == DONE:
             continue
@@ -500,19 +515,19 @@ def _main(args) -> int:
             record[doc] = Result(doc, READY, message="prompt %d lines" % prompt.count("\n"))
             print("  %s: ready" % doc)
             continue
-        if stopped or spent + s.cap > budget:
-            stopped = True
-            record[doc] = Result(
-                doc,
-                NOT_RUN,
-                message="$%.2f spent + the cap $%.2f would pass the budget $%.2f"
-                % (spent, s.cap, budget),
+        if not stopped and spent + s.cap > budget:
+            stopped = "$%.2f spent + the cap $%.2f would pass the budget $%.2f" % (
+                spent,
+                s.cap,
+                budget,
             )
+        if stopped:
+            record[doc] = Result(doc, NOT_RUN, message=stopped)
             continue
         # recorded first: if the run ends inside the session, its cap counts on --resume
         record[doc] = Result(doc, STARTED, charged=s.cap)
         run.save(results(), spent + s.cap)
-        result = audit_one(engine, s, repo, doc, prompt, out)
+        result, stop_reason = audit_one(engine, s, repo, doc, prompt, out)
         spent += result.charged
         record[doc] = result
         _write(os.path.join(out, slug(doc) + ".md"), report(result))
@@ -530,6 +545,7 @@ def _main(args) -> int:
             )
         )
         run.save(results(), spent)
+        stopped = stopped or stop_reason
     final = results()
     run.save(final, spent)
     if args.dry_run:

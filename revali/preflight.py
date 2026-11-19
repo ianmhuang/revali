@@ -68,6 +68,7 @@ class Context:
     diagnose_prompt: str = ""
     diagnose_schema: str = ""
     issue_template: str = ""  # body of the issue opened for a pre-existing bug
+    reviewer_model: str = ""  # `run --reviewer-model`: this run's reviewer over [review] model
 
     def say(self, msg: str) -> None:
         if self.log:

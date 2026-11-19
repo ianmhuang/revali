@@ -229,6 +229,21 @@ of `logs/run.log`); the `revali wait` line carries the blocking /
 non-blocking counts and that path, and the findings are read there: a `low` or `medium convention` finding left
 unanswered comes back as unresolved in the next round.
 
+A Reviewer session that stops because its model's usage limit is reached ends
+the run with exit 1 (stage `error`) and one line: `reviewer model <m> hit its
+usage limit: <the engine's text, with the reset time>; nothing is lost: run
+`revali run` again after the reset, or `revali run --reviewer-model <model>`
+for this run only`. What the session spent is counted, and the stop itself
+uses no fix cycle. A Reviewer model that is overloaded (status 529) ends the run
+the same way: `reviewer model <m> is overloaded: ...; nothing is lost: run
+`revali run` again later, or ...`; with the default `fallback_model = "auto"` the
+Reviewer has no fallback, so it never runs on another model unasked. revali does not switch to a lower tier by itself, since that would put
+the Reviewer at or below the author's tier; `--reviewer-model` is that choice,
+made by the user for one run ([docs/configuration.md](configuration.md)). A
+diagnosis session that hits the limit, or whose model is overloaded, leaves the
+validation result as it is, and its "diagnosis unavailable" line names the limit
+or the overload and `[validate] model`.
+
 A run that stops without a result (the process was killed, the machine went
 down, an unexpected error) is reported as such: an unexpected error is
 recorded as stage `error` with exit 1 and the traceback in `logs/run.log`;

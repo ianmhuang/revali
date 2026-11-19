@@ -37,7 +37,10 @@ what it spent (a timeout, output that is not JSON) counts as its whole cap again
 budget, and its line says the cost is unknown. `--model` sets the reviewer model for every
 case; without it the case repository's own configuration chooses, as `revali run` would.
 
-A case that fails in any way is reported as `error` and the next case runs. Each case's line
+A case that fails in any way is reported as `error` and the next case runs, except a session
+stopped by its model's usage limit or by an overloaded model (the Reviewer has no auto
+fallback): that case and every later one are `not-run`, what the session reported spending
+is charged (0 included), and `--resume` after the reset, or later, runs them. Each case's line
 is printed and `results.json` rewritten as soon as the case ends, and once more just before
 its session starts, with the case marked `started` and its session cap charged. A run stopped
 with Ctrl-C marks the case `interrupted` (its cap charged if the session had started, since
@@ -55,8 +58,9 @@ python tools/review_bench.py --resume ../bench-out --budget-usd 95
 directory. Cases that ended with a result (`caught-strict`, `caught-loose`, `missed`,
 `error`, `malformed`) are kept and reported as kept; cases that are `started`,
 `interrupted` or `not-run`, and cases in the case directories that the file does not list,
-run. A `started` or `interrupted` case keeps the cap already charged for it, said in its
-message, and runs again. To run an `error` case again, run it by name into a new output
+run. A `started` or `interrupted` case keeps the cap already charged for it, and a
+`not-run` case stopped by the usage limit or an overloaded model keeps what its session
+spent in both `cost` and `charged`; either is said in its message, and the case runs again. To run an `error` case again, run it by name into a new output
 directory.
 
 `--budget-usd` is the total of every invocation: what `results.json` already charges counts

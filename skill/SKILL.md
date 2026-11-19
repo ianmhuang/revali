@@ -98,6 +98,10 @@ Acting on the result:
   Answer each finding you do not fix in
   `.revali/<branch>/response-<n>.md` (`- F1: wontfix: <reason>`).
 - `1` (ERROR): report the message to the user and stop; do not retry blindly.
+  When the message says a model "hit its usage limit" or "is overloaded", tell
+  the user what it quotes (the reset time for a limit) and the two ways on (run
+  again later, or `revali run --reviewer-model <model>` for this run), and ask
+  which; run with `--reviewer-model` only when the user names the model.
 - `3` (NEEDS A HUMAN): summarise both sides' reasons to the user and stop.
 - `0`: report "ready to merge" with the summary (tests landing or archived, rounds, cost)
   from the end of `.revali/<branch>/logs/run.log`, or from `revali status`.

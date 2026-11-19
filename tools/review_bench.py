@@ -41,6 +41,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 from revali import PROMPT_VERSION, VERSION, gitops  # noqa: E402
+from revali.engines.base import ModelUnavailable, loop_advice, loop_stopped  # noqa: E402
 from revali.preflight import Stop, locate, review_left_out  # noqa: E402
 from revali.review import CHANGES_REQUESTED, build_prompt, spawn_reviewer  # noqa: E402
 from revali.state import State, safe_branch, write_json_atomic  # noqa: E402
@@ -298,24 +299,27 @@ def isolate(clone: str, branch: str, base_branch: str, base: str) -> None:
     _git(["reflog", "expire", "--expire=now", "--all"], clone)
 
 
-def run_case(case: Case, args, spent: float, out_dir: str, on_session=None) -> Result:
-    """One case. `on_session(cap)` is called just before the session starts."""
+def run_case(case: Case, args, spent: float, out_dir: str, on_session=None) -> Tuple[Result, str]:
+    """One case and why the cases after it are not run ("" when they are). `on_session(cap)`
+    is called just before the session starts."""
     started = time.monotonic()
     tmp = tempfile.mkdtemp(prefix="revali bench ")
     try:
-        result = _run_in(case, args, spent, out_dir, tmp, on_session)
+        result, stop_reason = _run_in(case, args, spent, out_dir, tmp, on_session)
     finally:
         _rmtree(tmp)
     result.duration_s = time.monotonic() - started
     if os.path.exists(tmp):
         result.message = "; ".join(m for m in (result.message, "clone left at " + tmp) if m)
-    return result
+    return result, stop_reason
 
 
-def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str, on_session=None) -> Result:
+def _run_in(
+    case: Case, args, spent: float, out_dir: str, tmp: str, on_session=None
+) -> Tuple[Result, str]:
     cap = args.session_budget_usd
     if not args.dry_run and cap and spent + cap > args.budget_usd:  # known before the clone
-        return _not_run(case, spent, cap, args)
+        return _not_run(case, spent, cap, args), ""
     session = False
     try:
         case_out = os.path.join(out_dir, case.name)
@@ -328,16 +332,21 @@ def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str, on_session=N
             ctx.cfg.review.budget_usd = cap
         cap = ctx.cfg.review.budget_usd
         if not args.dry_run and spent + cap > args.budget_usd:
-            return _not_run(case, spent, cap, args)
+            return _not_run(case, spent, cap, args), ""
         prompt = build_prompt(ctx, State(), ctx.rdir, 1)
         _write(os.path.join(case_out, "prompt.md"), prompt)
         if args.dry_run:  # everything a session needs is in place; nothing is spent
-            return Result(case.name, READY, message="prompt.md %d lines" % prompt.count("\n"))
+            return (
+                Result(case.name, READY, message="prompt.md %d lines" % prompt.count("\n")),
+                "",
+            )
         if on_session:
             on_session(cap)
         session = True
         try:
-            rr = spawn_reviewer(ctx, prompt, ctx.rdir, 1, 1, None)
+            rr = spawn_reviewer(
+                ctx, prompt, ctx.rdir, 1, 1, None, advice=lambda stop: loop_advice("cases", stop)
+            )
         finally:
             _keep_raw(ctx, case_out)
         session = False
@@ -345,11 +354,28 @@ def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str, on_session=N
         result = score(case, rr.data, args.line_margin)
         result.model = rr.model_actual or rr.model_requested
         result.cost = result.charged = rr.cost
-        return result
+        return result, ""
+    except ModelUnavailable as exc:  # its usage limit, or overloaded (PR #99 round 6)
+        # not reviewed, so `not-run` (--resume runs it again); the result object was read,
+        # so its cost is what the session spent, 0 included (PR #99 round 3 F2); and every
+        # case after it would hit the same limit
+        limited = Result(case.name, "not-run", cost=exc.cost, charged=exc.cost, message=exc.message)
+        return limited, loop_stopped("case", exc)
     except Stop as exc:
-        return _error(case, exc.message, exc.cost, cap if session else 0.0)
+        return _error(case, exc.message, exc.cost, cap if session else 0.0), ""
     except (CaseError, gitops.GitError, OSError, ValueError) as exc:
-        return _error(case, str(exc), 0.0, cap if session else 0.0)
+        return _error(case, str(exc), 0.0, cap if session else 0.0), ""
+
+
+def _carried_note(carried: float, carried_cost: float) -> str:
+    """What a rerun case's result says about what earlier sessions of it were charged: the
+    known part as spent, the rest as an interrupted session of unknown cost."""
+    unknown = "charged for an interrupted earlier session (cost unknown)"
+    if carried_cost >= carried:
+        return "includes $%.2f spent by an earlier session of this case" % carried
+    if carried_cost > 0:
+        return "includes $%.2f spent and $%.2f %s" % (carried_cost, carried - carried_cost, unknown)
+    return "includes $%.2f %s" % (carried, unknown)
 
 
 def _not_run(case: Case, spent: float, cap: float, args) -> Result:
@@ -680,11 +706,14 @@ def main(argv=None) -> int:
             _print_case(earlier, kept=True)
             continue
         carried = earlier.charged if earlier is not None else 0.0  # already in `spent`
+        carried_cost = earlier.cost if earlier is not None else 0.0  # what it reported
+        stop_reason = ""
         session = {"cap": 0.0}
 
-        def on_session(cap, name=name, carried=carried, session=session):
+        def on_session(cap, name=name, carried=carried, carried_cost=carried_cost, session=session):
             session["cap"] = cap
-            save(Result(name, "started", charged=cap + carried, message=STARTED))
+            # the earlier known spend stays in `cost` while this session runs (PR #99 round 4 F1)
+            save(Result(name, "started", cost=carried_cost, charged=cap + carried, message=STARTED))
 
         try:
             case = load_case(path)
@@ -695,22 +724,18 @@ def main(argv=None) -> int:
                 result = Result(name, "not-run", message=stopped)
             else:
                 try:
-                    result = run_case(case, args, spent, out_dir, on_session)
+                    result, stop_reason = run_case(case, args, spent, out_dir, on_session)
                 except KeyboardInterrupt:
                     result = _interrupted(name, session["cap"])
                     stopped = "the run was interrupted"
         if carried:
             result.charged += carried
-            result.message = "; ".join(
-                m
-                for m in (
-                    result.message,
-                    "includes $%.2f charged for an interrupted earlier session (cost unknown)"
-                    % carried,
-                )
-                if m
-            )
+            result.cost += carried_cost  # PR #99 round 3 F1: a known earlier spend stays known
+            note = _carried_note(carried, carried_cost)
+            result.message = "; ".join(m for m in (result.message, note) if m)
         spent += result.charged - carried
+        if stop_reason and not stopped:
+            stopped = stop_reason
         if result.outcome == "not-run" and not stopped:
             stopped = result.message
         results.append(result)
