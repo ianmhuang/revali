@@ -39,8 +39,10 @@ acceptance tests come on top of the author's tests, not instead of them.
 
 Each acceptance criterion is one bullet, `- AC-n: text`, with at least one
 such line and at least eight characters of text in each. A note may stand in
-parentheses before the colon (`- AC-2 (PR #30 F1): text`), and the text may go
-on over indented continuation lines. Any other line that starts like an AC
+parentheses before the colon (`- AC-2 (PR #30 F1): text`), and the text goes
+on over the lines after it, indented continuation lines or unindented ones, up
+to a blank line, a heading or a list item indented no deeper than the AC. Only
+the Acceptance criteria section is checked: any other line in it that starts like an AC
 (`- **AC-3**: ...`, `- AC-3 text`, `1. AC-4: ...`) stops preflight with exit 1,
 listed with the line's number among the other change.md problems; a paragraph
 that merely begins with an AC id, without a bullet or a colon, is prose.
@@ -67,7 +69,8 @@ share a name, never share a directory.
 `merge` from a linked worktree merges the PR, deletes the remote branch,
 detaches the worktree at the merged base and drops the local branch; the
 worktree itself stays until you run `git worktree remove <path>` from the
-primary tree, where `git pull` brings in the merge. `merge` in the primary
+primary tree, and `git pull` in the tree that holds the base (the merge
+output's `worktree:` line names it) brings in the merge. `merge` in the primary
 tree while a linked worktree holds the base branch is refused. Two clones
 with the same branch checked out are not a supported layout: they would
 share the PR.
@@ -155,7 +158,10 @@ differs from the mode the branch's rounds ran in. `run --dry-run` ends at
 `preflight` with exit 0. A run that dies
 without recording a result keeps its last stage, and `wait` and `status` report
 it as died (below). `revali archive` records `merged` or `closed` from any stage
-once the branch has a PR.
+once the branch has a PR. `revali merge` also merges from the stage a later run
+stopped in before its `pr` stage (`error`, `stopped`, `needs_action`, or
+`preflight` after `run --dry-run`) while HEAD is still the commit the last
+validation passed on ([docs/files.md](files.md)).
 
 A run goes preflight, PR, review, validate. Preflight runs `git fetch
 origin <base>` and compares the branch against `origin/<base>`; a fetch
@@ -203,7 +209,9 @@ with exit 1 (stage `error`) and commits and pushes nothing from that point.
 
 After exit code 2 the author fixes or answers in
 `.revali/<branch>/response-<n>.md` (`- F1: fixed` / `- F1: wontfix: <reason>`),
-commits, and runs again; each such cycle counts against `review.max_fixes`.
+commits, and runs again; a cycle after a CHANGES_REQUESTED round or a failed
+validation counts against `review.max_fixes`, and answering a NEEDS_INFO round
+or fixing a preflight refusal does not.
 The cycle is owed from the moment a CHANGES_REQUESTED round is saved (from
 the exit 2 of a failed validation) until a run passes preflight on a new
 commit and counts it. A run that stops before the review (preflight, the
@@ -225,8 +233,9 @@ A run that stops without a result (the process was killed, the machine went
 down, an unexpected error) is reported as such: an unexpected error is
 recorded as stage `error` with exit 1 and the traceback in `logs/run.log`;
 when nothing could record anything, `wait` prints `died at stage '<stage>'
-without a result` and returns 1, and `status` says the same after its
-`stage:` line. `revali stop` acknowledges such a run: with no live process
+without a result` and returns 1, and `status` prints `running: no; the last
+run stopped at stage '<stage>' without a result` after its `stage:` line.
+`revali stop` acknowledges such a run: with no live process
 and no result recorded it sets stage `stopped` (exit 1) and removes the
 stale lock, after which `wait` and `status` report a stopped run; a state
 that already holds a result is left alone (`no run in progress`). Every

@@ -2,10 +2,16 @@
 #
 # Three layers, most specific wins:
 #   <revali>/defaults.toml  <  ~/.revali/config.toml  <  this file
-# Every key below is optional; leave a key out (or delete it) to inherit the
-# user or tool default. defaults.toml lists every key with its default.
-# Commands run through the platform shell from the repo root (or from the
-# sandbox clone for the [validate.*] tables).
+# Every key below is optional except the one marked "required", which each
+# listed platform needs in its [validate.<name>] table (here or in
+# ~/.revali/config.toml); leave any other key out (or delete it) to inherit the
+# user or tool default.
+# defaults.toml lists every key with its default, except config_version; the
+# [validate.<name>] keys are under its [validate.platform].
+# Commands run through the platform shell from the repo root. The [validate.*]
+# steps run in a sandbox checkout instead: a clone run by bash in the distro or
+# on the ssh host, or a temporary git worktree run by the host shell for the
+# local runner.
 
 [project]
 config_version = 1
@@ -67,13 +73,16 @@ distro = "Ubuntu"                 # wsl only
 command_timeout_min = 15
 # max_procs = 4096                # wsl and ssh: ulimit -u, shared by all of the user's processes
 #                                 # in the distro / on the host; 0 = no limit
-# sandbox_dir = "~/.revali/sandbox"      # inside the distro; default from defaults.toml
+# sandbox_dir = "~/.revali/sandbox"      # wsl and ssh: in the distro / on the ssh host,
+#                                        # no whitespace for ssh; default from defaults.toml
 setup = "python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt"
 build = ""
 test = ".venv/bin/python -m pytest -q"            # existing suite; may be empty
-# required: how to run the reviewer's tests. {files} stands for their paths (this round's
-# files in the smoke run, every reviewer file on the branch in validation); a command
-# without {files} runs as written, e.g. ".venv/bin/python -m pytest -q tests".
+# required: how to run the reviewer's tests. {files} stands for their paths: in the
+# smoke run the reviewer's files under test_dir that differ from HEAD (plus the
+# earlier rounds' with tests = "archive"), in validation every reviewer file on the
+# branch, and no file to name skips the step; a command without {files} runs as
+# written, e.g. ".venv/bin/python -m pytest -q tests".
 new_test = ".venv/bin/python -m pytest -q {files}"
 
 [merge]

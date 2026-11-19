@@ -11,11 +11,13 @@ Things a linter cannot check; formatting is not listed.
   `runners.py`; every Reviewer / diagnosis session goes through an `Engine`
   in `revali/engines/` ([revali/engines/claude.py](revali/engines/claude.py) is the only place that
   knows a `claude` flag); every
-  external executable revali names (git, gh, claude, wsl, ssh, scp) is
+  external executable revali starts on the host (git, gh, claude, wsl, ssh, scp) is
   resolved by `procs.resolve` so tests can replace it with
   `REVALI_<NAME>_CMD`. The exceptions are `taskkill` on Windows, the platform
   shell that runs the configured command lines, and the Python interpreter
-  that starts the detached run.
+  that starts the detached run. Programs run inside a wsl or ssh sandbox
+  (`bash`, `git`, `timeout`, `wslpath`) are named as written; tests replace
+  `wsl` or `ssh` instead.
 - Exit codes are fixed: 0 ok / ready, 1 pipeline error, 2 the author must
   act, 3 a human must decide, 4 (`wait` only) still running. A new failure
   must map onto one of these, not add a code.
@@ -59,6 +61,8 @@ Things a linter cannot check; formatting is not listed.
   `config.toml`, ...) stay in code.
 - Files revali writes are read with `newline=""` and written with `newline="\n"` (LF);
   the exceptions are `logs/run.log`, the detached run's standard output, which takes the
-  platform's line ending (CRLF on Windows), and the fake runner's test log. Subprocesses
-  use UTF-8 with `errors="replace"`.
+  platform's line ending (CRLF on Windows), the fake runner's test log, and the
+  line-oriented reads of the wsl retries record and of what the sandbox writes to `logs/`
+  (step logs, `<label>.results`, `<label>-script.log`), which strip line endings anyway.
+  Subprocesses use UTF-8 with `errors="replace"`.
 - Prompts, schemas, comments, commit messages, and docs are in English.

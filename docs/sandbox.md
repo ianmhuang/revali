@@ -28,8 +28,9 @@ Windows (whose `.git` file names a Windows path that git inside WSL cannot
 read) validates like the primary tree. A
 `new_test` command may contain `{files}`: it is replaced by the reviewer's
 test files (paths relative to the repository root, space separated, quoted
-when they contain whitespace), this round's files in the smoke run and every
-reviewer file on the branch in validation, so only the new tests run rather
+when they contain whitespace): in the smoke run the reviewer's files under
+`test_dir` that differ from HEAD (plus the earlier rounds' with `tests =
+"archive"`), and in validation every reviewer file on the branch, so only the new tests run rather
 than everything a pattern matches; when `{files}` would name no file the
 step is skipped and the log says so. Without `{files}` the command runs as
 written. Validation leaves `test` out when the baseline already ran it on

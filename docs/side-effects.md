@@ -165,7 +165,8 @@ stated.
   code stand
 - once `revali merge` has merged the PR, for every such issue that a commit
   in `<base sha>..HEAD` references with `Fixes #n`, `Closes #n` or
-  `Resolves #n`: one
+  `Resolves #n`, or another form of those keywords (`fix`, `fixed`, `close`,
+  `closed`, `resolve`, `resolved`, in any case) followed by `#n`: one
   `gh issue comment` naming the merged PR, the commit, and the diagnosis
   cause and suggested fix recorded when the issue was opened (for an issue
   reused because it was open already, the ones recorded when this PR hit
@@ -183,8 +184,10 @@ stated.
   no label and is a warning
 - on `revali merge` (human-started, refused unless a run ended READY TO
   MERGE, no run has started its `pr` stage since, and HEAD has not moved; a
-  later run that stopped before that stage does not count): waits for CI checks if the PR has any,
-  then `gh pr merge --<method> --delete-branch`, which also deletes the
+  later run that stopped before that stage does not count): with `[merge]
+  wait_for_checks` (the default), waits for CI checks if the PR has any, up to
+  `[merge] checks_timeout_min` (30); failed or cancelled checks end the merge
+  with exit 2, checks still pending with exit 1; then `gh pr merge --<method> --delete-branch`, which also deletes the
   local branch and checks out the base branch; then `git pull --prune`, tried
   twice (revali checks out the base first when gh did not, and does not pull
   when that checkout fails); a pull or checkout that fails is printed as a

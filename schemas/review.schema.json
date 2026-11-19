@@ -58,7 +58,7 @@
     },
     "test_changes": {
       "type": "array",
-      "description": "One entry per existing test file the diff modifies or deletes.",
+      "description": "One entry per existing test file the diff modifies, deletes or renames.",
       "items": {
         "type": "object",
         "additionalProperties": false,

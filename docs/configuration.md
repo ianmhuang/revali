@@ -99,7 +99,7 @@ issue is created with `gh issue create` as the author, titled
 `Pre-existing: <test id> fails on <base>` (`Pre-existing: <test id> and <n>
 more fail on <base>` when there are several, `<test id>` the first in sort
 order), labelled `bug` when the
-repository has that label (revali creates no label), and assigned to the
+repository has that label (revali does not create `bug`), and assigned to the
 author's gh login when `issue_assignee = "author"` (the default; `""`
 leaves it unassigned). Its body is [templates/issue.md](../templates/issue.md) in revali, a
 `$placeholder` template (`$pr`, `$pr_url`, `$round`, `$validation`,
@@ -116,7 +116,7 @@ one, and an open issue in the repository with exactly the same title (opened
 from another branch or worktree) is reused: it is recorded as found, not
 opened. The issue numbers are in `state.json` (`issues`), `tests.md`, the
 PR comment and the `ACTION NEEDED` summary; `revali merge` comments on
-every one a branch commit references with `Fixes #n` (see
+every one a branch commit references with `Fixes #n` or another closing keyword (see
 [docs/side-effects.md](side-effects.md)). False opens nothing.
 `[project] lint` is one shell line (`ruff check . && black --check .`, say)
 that the preflight of `revali run` runs on the working tree and stops on with
@@ -225,19 +225,22 @@ revali keeps in step, and `[pr] kind_labels`, by default
 kind (`feature`, `fix`, `docs`) to one of them. A PR carries the label
 change.md's optional `release:` field names, else the one its kind maps to,
 else none of them; each run that opens or reuses the PR and `revali merge`
-add that label and remove the list's others ([docs/side-effects.md](side-effects.md)). A
+add that label (creating it first when the repository lacks it) and remove the
+list's others ([docs/side-effects.md](side-effects.md)). A
 layer that sets `kind_labels` replaces the whole table, and a layer whose
 `release_labels` drops a label the table maps to (by default `minor`,
 `patch`, `docs`) sets `kind_labels` too; adding a label needs no more.
 Label names compare in any case, as GitHub's do, the PR gets the list's
 spelling, and a name listed twice is an error. A `kind_labels` key
-that is not a change.md kind or a value outside `release_labels`, or a
-label with a comma or surrounding spaces, is a configuration error, and a
+outside `feature`, `fix`, `docs`, `refactor`, `hotfix` and `small` or a value
+outside `release_labels`, or a label with a comma or surrounding spaces, is a
+configuration error; `refactor`, `hotfix` and `small` are kinds this version
+refuses in change.md, so those keys are accepted and never apply. A
 `release:` value outside the list stops preflight; preflight's `ok:` line
 ends with `; label <name>`. If change.md is edited after the run to such a
 value, `revali merge` warns and leaves the PR's labels as they are.
 `release_labels = []` turns it off: no label is
-added or removed. [templates/release.yml](../templates/release.yml) groups the release
+added or removed, and `kind_labels` is not checked. [templates/release.yml](../templates/release.yml) groups the release
 notes GitHub generates by these labels ([docs/releasing.md](releasing.md)). With the
 defaults:
 
