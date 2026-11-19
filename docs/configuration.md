@@ -186,8 +186,12 @@ count (a test's identifiers would list documents the change does not concern); a
 test file, or its whole path, does. Files the diff
 leaves out do not count: `[review] exclude` and the reviewer's test pattern,
 each matching a changed file's whole path, its file name, or a `dir/**`
-prefix (a renamed file by its new name); the same files are left out of the
-reviewer's diff and of preflight's diff size. Documents
+prefix (a renamed file by its new name). The test pattern leaves out only the
+files the branch adds; a file already on the base, an earlier change's
+reviewer test included, is reviewed and counted like any other change. So is
+a file git reports as renamed from a base file the branch deletes (renames are
+found at 50% similarity), even when the reviewer wrote it on this branch. The
+same files are left out of the reviewer's diff and of preflight's diff size. Documents
 outside the graph are not searched, and a document the diff changes itself
 is marked so. The list ends with a map of the graph's documents and their
 depth, at most `doc_map_max` of them (default 100; 0 leaves the map out).

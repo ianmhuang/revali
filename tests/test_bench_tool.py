@@ -320,6 +320,27 @@ class Isolation(BenchCase):
         self.assertFalse(os.path.exists(os.path.join(clone, ".git", "FETCH_HEAD")))
         self.assertEqual(git(["rev-parse", "HEAD"], clone).strip(), self.head)
 
+    def test_an_earlier_reviewer_test_on_the_base_is_reviewed(self):
+        """fix/review-modified-tests round 1 F1: the bench leaves out what preflight does, so a
+        base file on the test pattern the branch edits is changed, not omitted"""
+        git(["checkout", "-q", "main"], self.repo)
+        self.write("tests/test_review_old.py", "old_marker = 1\n")
+        self.commit_all("an earlier reviewer test")
+        git(["checkout", "-q", "feature/mul"], self.repo)
+        git(["rebase", "-q", "main"], self.repo)
+        self.write("tests/test_review_old.py", "old_marker = 2\n")
+        self.write("tests/test_review_new.py", "new_marker = 1\n")
+        self.commit_all("edit it, add a new one")
+        self.base = git(["rev-parse", "main"], self.repo).strip()
+        self.head = git(["rev-parse", "feature/mul"], self.repo).strip()
+        case = bench.load_case(self.make_case("a-base-test"))
+        tmp = os.path.join(self.tmp, "basetest")
+        os.makedirs(tmp)
+        clone, default = bench.prepare_clone(case, tmp)
+        ctx = bench.locate_case(case, clone, default)
+        self.assertIn("tests/test_review_old.py", ctx.changed_files)
+        self.assertEqual(ctx.excluded_files, ["tests/test_review_new.py"])
+
     def test_a_case_on_the_base_branch_is_an_error(self):
         self.make_case("a-main")
         self.edit_case("a-main", 'branch = "bench/mul"', 'branch = "main"')

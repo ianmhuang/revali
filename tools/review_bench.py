@@ -41,7 +41,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 from revali import PROMPT_VERSION, VERSION, gitops  # noqa: E402
-from revali.preflight import Stop, locate  # noqa: E402
+from revali.preflight import Stop, locate, review_left_out  # noqa: E402
 from revali.review import CHANGES_REQUESTED, build_prompt, spawn_reviewer  # noqa: E402
 from revali.state import State, safe_branch, write_json_atomic  # noqa: E402
 
@@ -389,13 +389,12 @@ def locate_case(case: Case, clone: str, default_branch: str):
     ctx.base_ref = case.base
     ctx.head_sha = _git(["rev-parse", "HEAD"], clone).strip()
     ctx.base_sha = _git(["rev-parse", case.base], clone).strip()
-    exclude = list(ctx.cfg.review.exclude)
-    exclude.append(ctx.cfg.project.test_file_pattern.replace("{topic}", "*"))
+    exclude, drop = review_left_out(ctx)
     for _added, _deleted, names in gitops.diff_numstat(case.base, "HEAD", clone):
-        # as preflight: one rule (`left_out`), a rename listed under its new name
-        (ctx.excluded_files if gitops.left_out(names, exclude) else ctx.changed_files).append(
-            names[-1]
-        )
+        # as preflight: one rule (`left_out` with `review_left_out`), a rename listed under
+        # its new name
+        out = gitops.left_out(names, exclude, drop)
+        (ctx.excluded_files if out else ctx.changed_files).append(names[-1])
     return ctx
 
 

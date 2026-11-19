@@ -99,22 +99,25 @@ class Renames(PromptCase):
         self.write("src/calc.py", self.read("src/calc.py") + "kept_marker = 1\n")
         self.commit_all("rename %s" % old)
 
-    def test_a_rename_into_the_test_pattern_is_left_out_whole(self):
+    def test_a_rename_into_the_test_pattern_is_reviewed_whole(self):
+        """Changed by fix/review-modified-tests (AC-1, AC-2 there): the test pattern leaves
+        out only files the branch adds, and tests/old_helper.py is on the base, so the rename
+        is in the diff whole. Still no half-rename: the old name is not a deletion."""
         self.rename("tests/old_helper.py", "tests/test_review_moved.py", "moved_edit")
         ctx, diff, omitted, prompt = self.build()
         self.assertIn("kept_marker = 1", diff)
-        # no half-rename: the old name is not shown as a deletion
-        self.assertNotIn("old_helper.py", diff)
-        self.assertNotIn("test_review_moved.py", diff)
-        self.assertNotIn("moved_edit", diff)
-        self.assertEqual(ctx.excluded_files, ["tests/test_review_moved.py"])
-        self.assertIn("tests/test_review_moved.py", omitted)
-        self.assertEqual(ctx.changed_files, ["src/calc.py"])
-        self.assertEqual(ctx.diff_lines, 1)  # the calc line; the rename's two are not counted
+        self.assertIn("rename from tests/old_helper.py", diff)
+        self.assertIn("rename to tests/test_review_moved.py", diff)
+        self.assertIn("moved_edit", diff)
+        self.assertNotIn("deleted file mode", diff)
+        self.assertEqual(ctx.excluded_files, [])
+        self.assertEqual(omitted, "(none)")
+        self.assertEqual(sorted(ctx.changed_files), ["src/calc.py", "tests/test_review_moved.py"])
+        self.assertEqual(ctx.diff_lines, 3)  # the calc line and the rename's two
         # AC-4: the related documents see the same files as the diff
         links = link_lines(prompt)
         self.assertTrue([ln for ln in links if "`src/calc.py`" in ln], links)
-        self.assertFalse([ln for ln in links if "old_helper.py" in ln], links)
+        self.assertTrue([ln for ln in links if "old_helper.py" in ln], links)
 
     def test_a_rename_out_of_an_excluded_name_is_reviewed(self):
         """The new name decides (AC-3 as changed after round 1 F3): here only the old one
@@ -141,13 +144,15 @@ class Renames(PromptCase):
         status = git(["diff", "--name-status", "main...HEAD"], self.repo)
         self.assertRegex(status, r"(?m)^D\ttests/old_helper\.py$")  # what the config asks for
         ctx, diff, omitted, _ = self.build()
+        # changed by fix/review-modified-tests: the rename is reviewed whole (see above)
         self.assertIn("kept_marker = 1", diff)
-        self.assertNotIn("old_helper.py", diff)
-        self.assertNotIn("test_review_moved.py", diff)
-        self.assertEqual(ctx.excluded_files, ["tests/test_review_moved.py"])
-        self.assertIn("tests/test_review_moved.py", omitted)
-        self.assertEqual(ctx.changed_files, ["src/calc.py"])
-        self.assertEqual(ctx.diff_lines, 1)
+        self.assertIn("rename from tests/old_helper.py", diff)
+        self.assertIn("rename to tests/test_review_moved.py", diff)
+        self.assertNotIn("deleted file mode", diff)
+        self.assertEqual(ctx.excluded_files, [])
+        self.assertEqual(omitted, "(none)")
+        self.assertEqual(sorted(ctx.changed_files), ["src/calc.py", "tests/test_review_moved.py"])
+        self.assertEqual(ctx.diff_lines, 3)
 
     def test_a_copy_found_by_the_git_config_does_not_take_its_source_out(self):
         """AC-3, AC-2: with `diff.renames = copies` git alone reports the reviewer's test as a

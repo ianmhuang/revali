@@ -5,7 +5,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Collection, Dict, FrozenSet, List, Optional, Tuple
 
 from revali.procs import ExeNotFound, ProcError, Result, resolve, run, run_retry
 
@@ -208,12 +208,32 @@ def _entries(base: str, head: str, cwd: str) -> List[Tuple[str, Tuple[str, ...]]
     return entries
 
 
-def left_out(names: Tuple[str, ...], exclude: Optional[List[str]]) -> bool:
+def name_status(base: str, head: str, cwd: str) -> List[Tuple[str, Tuple[str, ...]]]:
+    """(status letter, names) of each changed file of `base...head`, as `_entries` gives them:
+    `A`dded, `M`odified, `D`eleted, `R`enamed (names old, new) or `T`ype changed."""
+    return _entries(base, head, cwd)
+
+
+def added_matching(base: str, head: str, cwd: str, patterns: List[str]) -> FrozenSet[str]:
+    """The files `base...head` adds (status `A`; renames found with -M, so a file renamed from
+    one on the base is not added) whose name matches a pattern by `matches_any`."""
+    if not patterns:
+        return frozenset()
+    return frozenset(
+        names[0]
+        for status, names in _entries(base, head, cwd)
+        if status == "A" and matches_any(names[0], patterns)
+    )
+
+
+def left_out(
+    names: Tuple[str, ...], exclude: Optional[List[str]], drop: Collection[str] = ()
+) -> bool:
     """The one rule for what the review leaves out: a changed file is out when its current name
-    (the new one, for a rename) matches a pattern by `matches_any`. A rename left out is left
-    out under both names, so its old name is not shown as a deletion; a file renamed out of
-    an excluded name is reviewed like any other."""
-    return bool(exclude) and matches_any(names[-1], exclude)
+    (the new one, for a rename) matches a pattern by `matches_any`, or is one of the paths in
+    `drop`. A rename left out is left out under both names, so its old name is not shown as a
+    deletion; a file renamed out of an excluded name is reviewed like any other."""
+    return (bool(exclude) and matches_any(names[-1], exclude)) or names[-1] in drop
 
 
 def _plain_name(name: str) -> bool:
@@ -221,7 +241,9 @@ def _plain_name(name: str) -> bool:
     return name.isascii() and name.isprintable() and '"' not in name and "\\" not in name
 
 
-def _without_sections(text: str, entries, exclude: List[str]) -> Optional[str]:
+def _without_sections(
+    text: str, entries, exclude: List[str], drop: Collection[str] = ()
+) -> Optional[str]:
     """`text` without the sections of the entries `left_out` leaves out, or None when its
     sections cannot be paired with `entries`. A section starts at a `diff --git ` line (a
     content line always starts with a space, `+`, `-` or `\\`); there is one per entry, in
@@ -241,12 +263,18 @@ def _without_sections(text: str, entries, exclude: List[str]) -> Optional[str]:
             all(_plain_name(n) for n in names) and not all(s.startswith(header) for s in mine)
         ):
             return None
-        if not left_out(names, exclude):
+        if not left_out(names, exclude, drop):
             kept += mine
     return "".join(kept) if i == len(sections) else None
 
 
-def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> str:
+def diff_text(
+    base: str,
+    head: str,
+    cwd: str,
+    exclude: Optional[List[str]] = None,
+    drop: Collection[str] = (),
+) -> str:
     """The unified diff without the files `left_out` leaves out, with `a/` / `b/` prefixes
     whatever the user's `diff.noprefix` or `diff.mnemonicPrefix` says (`diff_changed_lines`
     strips them), and no colour, external diff driver or submodule log whatever the user's
@@ -265,21 +293,27 @@ def diff_text(base: str, head: str, cwd: str, exclude: Optional[List[str]] = Non
         "%s...%s" % (base, head),
     ]
     text = git_ok(args, cwd).stdout
-    entries = _entries(base, head, cwd) if exclude else []
-    if not any(left_out(names, exclude) for _, names in entries):
+    entries = _entries(base, head, cwd) if exclude or drop else []
+    if not any(left_out(names, exclude, drop) for _, names in entries):
         return text
-    cut = _without_sections(text, entries, exclude)
+    cut = _without_sections(text, entries, exclude, drop)
     if cut is not None:
         return cut
-    out = [n for _, names in entries if left_out(names, exclude) for n in names]
+    out = [n for _, names in entries if left_out(names, exclude, drop) for n in names]
     paths = [":(top)"] + [":(top,exclude,literal)%s" % n for n in out]
     return git_ok(args + ["--"] + paths, cwd).stdout
 
 
-def diff_paths(base: str, head: str, cwd: str, exclude: Optional[List[str]] = None) -> List[str]:
+def diff_paths(
+    base: str,
+    head: str,
+    cwd: str,
+    exclude: Optional[List[str]] = None,
+    drop: Collection[str] = (),
+) -> List[str]:
     """Every path the diff touches, "/" separated: both names of a rename; a file `left_out`
     leaves out is not listed under either name."""
-    return [n for _, e in _entries(base, head, cwd) if not left_out(e, exclude) for n in e]
+    return [n for _, e in _entries(base, head, cwd) if not left_out(e, exclude, drop) for n in e]
 
 
 _C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}

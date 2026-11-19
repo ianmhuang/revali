@@ -12,7 +12,7 @@ Branch `$branch` against `$base`. Change kind: `$kind`. Round $round$round_note.
 
 $change_md
 
-## The diff (base...HEAD; files matching `$test_file_pattern` and `$exclude` are omitted)
+## The diff (base...HEAD; files this branch adds that match `$test_file_pattern`, and files matching `$exclude`, are omitted)
 
 ```diff
 $diff
@@ -73,8 +73,9 @@ Write 1-3 test files into `$test_dir/`, named by the pattern
 `$test_file_pattern` (replace `{topic}` with a short lowercase topic). Derive
 them from the AC, not from the implementation: black-box tests against the
 public interface; white-box only when an AC demands it. Seed randomness,
-freeze time, avoid network and credentials (the sandbox has none). A test
-must be one that fails on the base branch and passes on this branch.
+freeze time. A test must not depend on network access or credentials: the
+sandbox neither provides nor blocks them. A test must be one that fails on
+the base branch and passes on this branch.
 
 Each file goes into `tests` with `covers` listing the AC ids it checks and
 `expected` stating input, expected output, and why that follows from the AC.
