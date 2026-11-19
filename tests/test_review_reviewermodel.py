@@ -46,8 +46,8 @@ class TheRunUsesTheNamedModel(Case):
         self.assertEqual(code, EXIT_OK, out)
         argv = self.reviewer_argv()
         self.assertEqual(value_after(argv, "--model"), "sonnet")
-        # as for an explicit `[review] model`: the tiers below it, strongest first
-        self.assertEqual(value_after(argv, "--fallback-model"), "haiku")
+        # as for an explicit `[review] model`, which since AC-8 has no auto fallback
+        self.assertNotIn("--fallback-model", argv)
 
     def test_the_bottom_tier_has_no_fallback(self):
         self.claude(claude_entry())
@@ -69,7 +69,8 @@ class TheRunUsesTheNamedModel(Case):
         self.assertEqual(value_after(calls[0]["argv"], "--model"), "sonnet")
         # `[review] model = "auto"`: one tier above the author
         self.assertEqual(value_after(calls[1]["argv"], "--model"), "fable")
-        self.assertEqual(value_after(calls[1]["argv"], "--fallback-model"), "opus,sonnet,haiku")
+        # AC-8: a Reviewer has no auto fallback
+        self.assertNotIn("--fallback-model", calls[1]["argv"])
 
     def test_the_detached_run_reviews_on_it(self):
         with mock.patch("revali.pipeline.spawn_detached", return_value=DEAD_PID) as spawn:

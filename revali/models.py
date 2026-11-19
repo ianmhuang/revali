@@ -63,7 +63,9 @@ def resolve(
 
     auto, reviewer: one tier above the author (top stays top; unknown or foreign author -> top).
     auto, diagnoser: one tier below the author (bottom stays bottom; unknown -> one below top).
-    auto fallback: the tiers below the chosen one, strongest first ("" at the bottom).
+    auto fallback: the tiers below the chosen one, strongest first ("" at the bottom); for
+    the reviewer none: it runs on the model it was given or stops, and the user decides
+    (PR #99 round 5, Ian 2026-11-19). An explicit fallback is used as written.
     """
     if not tiers:
         raise ValueError("engine has no tiers")
@@ -103,7 +105,7 @@ def resolve(
 
     if fallback_requested.strip().lower() == AUTO:
         j = tier_index(model, tiers)
-        fallback = ",".join(reversed(tiers[:j])) if j else ""
+        fallback = ",".join(reversed(tiers[:j])) if j and role != REVIEWER else ""
     else:
         fallback = fallback_requested.strip()
     return Resolved(model=model, fallback=fallback, reason=reason)

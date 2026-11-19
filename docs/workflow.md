@@ -234,7 +234,10 @@ the run with exit 1 (stage `error`) and one line: `reviewer model <m> hit its
 usage limit: <the engine's text, with the reset time>; nothing is lost: run
 `revali run` again after the reset, or `revali run --reviewer-model <model>`
 for this run only`. What the session spent is counted, and the stop itself
-uses no fix cycle. revali does not switch to a lower tier by itself, since that would put
+uses no fix cycle. A Reviewer model that is overloaded (status 529) ends the run
+the same way: `reviewer model <m> is overloaded: ...; nothing is lost: run
+`revali run` again later, or ...`; with the default `fallback_model = "auto"` the
+Reviewer has no fallback, so it never runs on another model unasked. revali does not switch to a lower tier by itself, since that would put
 the Reviewer at or below the author's tier; `--reviewer-model` is that choice,
 made by the user for one run ([docs/configuration.md](configuration.md)). A
 diagnosis session that hits the limit leaves the validation result as it is,

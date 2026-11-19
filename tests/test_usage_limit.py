@@ -151,7 +151,7 @@ class ReviewerModelOption(Case):
         self.assertEqual(code, EXIT_OK, out)
         argv = self.fake_calls("claude")[0]["argv"]
         self.assertEqual(argv_after(argv, "--model"), "opus")
-        self.assertEqual(argv_after(argv, "--fallback-model"), "sonnet,haiku")
+        self.assertNotIn("--fallback-model", argv)  # AC-8: a Reviewer has no auto fallback
         reason = "--reviewer-model, the same tier as author claude-opus-5"
         self.assertIn("reviewer opus (%s)" % reason, out)
         head = self.read(os.path.join(".revali", "feature__mul", "review-1.md"))
@@ -224,6 +224,9 @@ class Docs(unittest.TestCase):
         conf = self.flat("docs", "configuration.md")
         self.assertIn("`revali run --reviewer-model <model>` puts `<model>` in place of", conf)
         self.assertIn("revali never lowers the Reviewer's tier on its own", conf)
+        # AC-8
+        self.assertIn("For the Reviewer `auto` means no fallback", conf)
+        self.assertIn("is overloaded", self.flat("docs", "workflow.md"))
         flow = self.flat("docs", "workflow.md")
         self.assertIn("hit its usage limit", flow)
         self.assertIn("the stop itself uses no fix cycle", flow)
@@ -357,6 +360,67 @@ class CarriedNote(unittest.TestCase):
             note(1.0, 0.0),
             "includes $1.00 charged for an interrupted earlier session (cost unknown)",
         )
+
+
+class ReviewerHasNoAutoFallback(unittest.TestCase):
+    """AC-8 (Ian 2026-11-19): the Reviewer runs on the model it was given or stops; only a
+    fallback the user names is used. PR #99 round 5 had run on Opus through `--fallback-model
+    opus,sonnet,haiku`."""
+
+    TIERS = ["haiku", "sonnet", "opus", "fable"]
+
+    def reviewer(self, author, requested="auto", fallback="auto"):
+        return models.resolve(models.REVIEWER, requested, fallback, author, self.TIERS)
+
+    def test_auto_is_none_whatever_the_author(self):
+        for author in ("claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5", "fixture", ""):
+            with self.subTest(author=author):
+                self.assertEqual(self.reviewer(author).fallback, "")
+        self.assertEqual(self.reviewer("claude-haiku-4-5", requested="fable").fallback, "")
+
+    def test_an_explicit_fallback_is_used_as_written(self):
+        self.assertEqual(self.reviewer("claude-opus-5-5", fallback="opus").fallback, "opus")
+
+    def test_the_diagnosis_is_unchanged(self):
+        r = models.resolve(models.DIAGNOSER, "auto", "auto", "claude-opus-5-5", self.TIERS)
+        self.assertEqual((r.model, r.fallback), ("sonnet", "haiku"))
+
+
+class ReviewerRunNoFallbackAndBusy(Case):
+    """AC-8 end to end: the claude call carries no fallback, and a busy Reviewer model stops
+    the run with its own line."""
+
+    def test_an_opus_author_gives_fable_no_fallback(self):
+        self.set_author("claude-opus-5-5")
+        self.claude(claude_entry())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        argv = self.fake_calls("claude")[0]["argv"]
+        self.assertEqual(argv_after(argv, "--model"), "fable")
+        self.assertNotIn("--fallback-model", argv)
+
+    def test_a_busy_reviewer_model_stops_the_run(self):
+        busy = json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": True,
+                "num_turns": 1,
+                "total_cost_usd": 0.0,
+                "terminal_reason": "api_error",
+                "api_error_status": 529,
+                "result": "API Error: Overloaded",
+                "modelUsage": {},
+            }
+        )
+        self.claude({"exit": 1, "raw_stdout": busy, "write_tests": False})
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        line = next(ln for ln in out.splitlines() if "is overloaded" in ln)
+        self.assertIn("reviewer model fable is overloaded: API Error: Overloaded", line)
+        self.assertIn("nothing is lost: run `revali run` again later", line)
+        self.assertIn("`revali run --reviewer-model <model>` for this run only", line)
+        self.assertNotIn("usage limit", out)
 
 
 class AgainstAuthor(unittest.TestCase):

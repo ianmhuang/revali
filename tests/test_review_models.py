@@ -33,7 +33,7 @@ class AutoResolution(unittest.TestCase):
     def test_reviewer_is_one_tier_above_the_author(self):
         self.assertEqual(
             (self.reviewer("claude-sonnet-5").model, self.reviewer("claude-sonnet-5").fallback),
-            ("opus", "sonnet,haiku"),
+            ("opus", ""),  # feature/usage-limit AC-8: a Reviewer has no auto fallback
         )
         self.assertEqual(self.reviewer("claude-opus-5").model, "fable")
         self.assertEqual(self.reviewer("claude-haiku-4-5-20251001").model, "sonnet")
@@ -43,7 +43,9 @@ class AutoResolution(unittest.TestCase):
         self.assertEqual(self.reviewer("fixture").model, "fable")
         self.assertEqual(self.reviewer("").model, "fable")
         r = self.reviewer("gpt-5", foreign=[["gpt-5-mini", "gpt-5"]])
-        self.assertEqual((r.model, r.fallback), ("fable", "opus,sonnet,haiku"))
+        self.assertEqual(
+            (r.model, r.fallback), ("fable", "")
+        )  # feature/usage-limit AC-8: a Reviewer has no auto fallback
         for r in (self.reviewer("claude-fable-5"), self.reviewer("fixture"), self.reviewer("")):
             self.assertTrue(r.reason, "auto needs a reason")
 
@@ -82,7 +84,9 @@ class PipelineUsesAuto(RepoCase):
         self.assertEqual(code, EXIT_OK, out)
         argv = self.fake_calls("claude")[0]["argv"]
         self.assertEqual(argv_after(argv, "--model"), "opus")
-        self.assertEqual(argv_after(argv, "--fallback-model"), "sonnet,haiku")
+        self.assertNotIn(
+            "--fallback-model", argv
+        )  # feature/usage-limit AC-8: a Reviewer has no auto fallback
         # AC-4: the run log states the model and why
         self.assertIn("reviewer opus (auto: one tier above author claude-sonnet-5)", out)
         log = self.read(".revali/feature__mul/logs/revali.log")
@@ -100,7 +104,9 @@ class PipelineUsesAuto(RepoCase):
         self.assertEqual(code, EXIT_OK, out)
         argv = self.fake_calls("claude")[0]["argv"]
         self.assertEqual(argv_after(argv, "--model"), "fable")
-        self.assertEqual(argv_after(argv, "--fallback-model"), "opus,sonnet,haiku")
+        self.assertNotIn(
+            "--fallback-model", argv
+        )  # feature/usage-limit AC-8: a Reviewer has no auto fallback
         self.assertIn("model_reason: auto:", self.read(".revali/feature__mul/review-1.md"))
 
     def test_diagnoser_model_and_reason(self):

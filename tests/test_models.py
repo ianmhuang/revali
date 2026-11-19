@@ -23,7 +23,9 @@ class TierLookupTests(unittest.TestCase):
 class AutoResolutionTests(unittest.TestCase):
     def test_reviewer_one_above(self):
         r = resolve(REVIEWER, "auto", "auto", "claude-opus-5", TIERS)
-        self.assertEqual((r.model, r.fallback), ("fable", "opus,sonnet,haiku"))
+        self.assertEqual(
+            (r.model, r.fallback), ("fable", "")
+        )  # feature/usage-limit AC-8: a Reviewer has no auto fallback
         self.assertIn("one tier above", r.reason)
 
     def test_reviewer_capped_at_top(self):
@@ -60,7 +62,7 @@ class AutoResolutionTests(unittest.TestCase):
 
     def test_explicit_model_passes_through(self):
         r = resolve(REVIEWER, "sonnet", "auto", "claude-fable-5", TIERS)
-        self.assertEqual((r.model, r.fallback, r.reason), ("sonnet", "haiku", ""))
+        self.assertEqual((r.model, r.fallback, r.reason), ("sonnet", "", ""))  # AC-8
         r = resolve(REVIEWER, "sonnet", "opus", "claude-fable-5", TIERS)
         self.assertEqual((r.model, r.fallback), ("sonnet", "opus"))
         r = resolve(DIAGNOSER, "claude-opus-5", "auto", "", TIERS)

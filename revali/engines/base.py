@@ -23,20 +23,21 @@ class SessionCancelled(Stop):
         super().__init__(EXIT_ERROR, "%s session stopped before it answered" % role)
 
 
-class UsageLimit(Stop):
-    """A session stopped because its model's usage limit is reached. `text` is the engine's
-    own words, which carry the reset time. Its own message gives no advice: what the user
-    can do next differs for the Reviewer and the diagnosis, so each caller passes it to
-    `line` (PR #99 round 1)."""
+class ModelUnavailable(Stop):
+    """A session stopped because its model could not serve it. `text` is the engine's own
+    words. Its own message gives no advice: what the user can do next differs for the
+    Reviewer and the diagnosis, so each caller passes it to `line` (PR #99 round 1)."""
+
+    what = "could not run"
 
     def __init__(self, role: str, model: str, text: str, raw_path: str, cost: float):
         self.role, self.model, self.text, self.raw_path = role, model, text, raw_path
         super().__init__(EXIT_ERROR, self.line(""), cost=cost)
 
-    def with_advice(self, way_on: str) -> "UsageLimit":
-        """The same stop, its message carrying the caller's advice; still a UsageLimit, so a
+    def with_advice(self, way_on: str) -> "ModelUnavailable":
+        """The same stop, its message carrying the caller's advice; still of its class, so a
         caller further up can tell it from other failures."""
-        out = UsageLimit(self.role, self.model, self.text, self.raw_path, self.cost)
+        out = type(self)(self.role, self.model, self.text, self.raw_path, self.cost)
         out.message = out.line(way_on)
         out.args = (out.message,)
         return out
@@ -44,13 +45,27 @@ class UsageLimit(Stop):
     def line(self, way_on: str) -> str:
         """The one line: what happened, `way_on` (the caller's advice, may be empty), where
         the raw output is."""
-        return "%s model %s hit its usage limit: %s; %sraw output saved to %s" % (
+        return "%s model %s %s: %s; %sraw output saved to %s" % (
             self.role,
             self.model,
+            self.what,
             self.text,
             way_on + "; " if way_on else "",
             self.raw_path,
         )
+
+
+class UsageLimit(ModelUnavailable):
+    """The model's usage limit is reached; `text` carries the reset time."""
+
+    what = "hit its usage limit"
+
+
+class ModelBusy(ModelUnavailable):
+    """The model is overloaded and no fallback was allowed to take its place (a Reviewer has
+    none unless the user names one, PR #99 round 5)."""
+
+    what = "is overloaded"
 
 
 def loop_advice(items: str) -> str:

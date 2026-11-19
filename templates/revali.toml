@@ -29,7 +29,8 @@ test_guide = ""                   # optional doc telling the reviewer how tests 
 [review]
 engine = "claude"                 # which CLI runs the reviewer; see [engines.*] in defaults.toml
 model = "auto"                    # auto = one tier above the Developer's model (change.md author_model)
-fallback_model = "auto"           # auto = the tiers below the chosen one, strongest first
+fallback_model = "auto"           # auto = none: the reviewer runs on its model, or the run
+                                  # stops at its usage limit or when it is busy
 effort = "high"
 max_fixes = 2                     # fix cycles the author may make before a human is asked
 max_diff_lines = 800

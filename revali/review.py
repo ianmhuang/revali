@@ -11,7 +11,7 @@ from typing import Collection, Dict, List, Optional, Sequence, Tuple
 
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
-from revali.engines.base import UsageLimit
+from revali.engines.base import ModelBusy, UsageLimit
 from revali.preflight import (
     Context,
     Stop,
@@ -546,6 +546,10 @@ def validate_shape(data) -> List[str]:
     return problems
 
 
+RUN_BUSY_ADVICE = (
+    "nothing is lost: run `revali run` again later, or `revali run --reviewer-model <model>` "
+    "for this run only"
+)
 RUN_LIMIT_ADVICE = (
     "nothing is lost: run `revali run` again after the reset, or `revali run --reviewer-model "
     "<model>` for this run only"
@@ -623,6 +627,8 @@ def spawn_reviewer(
         result = engine.run(request, log)
     except UsageLimit as limit:
         raise limit.with_advice(limit_advice or RUN_LIMIT_ADVICE) from limit
+    except ModelBusy as busy:
+        raise busy.with_advice(limit_advice or RUN_BUSY_ADVICE) from busy
     problems = validate_shape(result.data)
     if problems:
         raise Stop(
