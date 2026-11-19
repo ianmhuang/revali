@@ -298,13 +298,18 @@ def check_base(ctx: Context) -> None:
         raise Stop(EXIT_ERROR, "no commits on this branch beyond %s; nothing to review" % ref)
 
 
+def test_pattern_glob(ctx: Context) -> str:
+    return ctx.cfg.project.test_file_pattern.replace("{topic}", "*")
+
+
 def review_left_out(ctx: Context) -> Tuple[List[str], FrozenSet[str]]:
     """What the review leaves out, as `gitops.left_out` takes it: the `[review] exclude`
     patterns, and the files this branch adds that match `test_file_pattern` (the reviewer's
     own tests). A file already on the base is reviewed like any other change, an earlier
-    change's reviewer test included, whether it is modified, deleted or renamed."""
-    pattern = ctx.cfg.project.test_file_pattern.replace("{topic}", "*")
-    drop = gitops.added_matching(ctx.base_ref, "HEAD", ctx.repo_root, [pattern])
+    change's reviewer test included, whether it is modified, deleted or renamed; so is a
+    pattern file git pairs by -M with a base file this branch deletes, even one the
+    reviewer wrote on this branch."""
+    drop = gitops.added_matching(ctx.base_ref, "HEAD", ctx.repo_root, [test_pattern_glob(ctx)])
     return list(ctx.cfg.review.exclude), drop
 
 

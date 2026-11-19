@@ -136,6 +136,7 @@ class EarlierReviewerTest(RepoCase):
         ctx, prompt = self.build()
         self.assertNotIn("weakened_marker", diff_block(prompt))
         self.assertEqual(omitted_line(prompt), OLD)
+        self.assertEqual(modified_line(prompt), OLD)  # AC-1 lists it all the same
         self.assertEqual(ctx.excluded_files, [OLD])
 
     def test_the_related_documents_see_it(self):

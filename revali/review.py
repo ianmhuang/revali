@@ -11,7 +11,13 @@ from typing import Collection, Dict, List, Optional, Sequence, Tuple
 
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
-from revali.preflight import Context, Stop, check_tree_unmoved, review_left_out
+from revali.preflight import (
+    Context,
+    Stop,
+    check_tree_unmoved,
+    review_left_out,
+    test_pattern_glob,
+)
 from revali.procs import ProcTimeout, resolve, run, run_shell
 from revali.runners import (
     FILES_PLACEHOLDER,
@@ -119,10 +125,6 @@ def assemble_checklist(ctx: Context) -> str:
                 "### Project (overrides the layers above on conflict)\n\n" + read_text(path).strip()
             )
     return "\n\n".join(parts) if parts else "(no checklist configured)"
-
-
-def test_pattern_glob(ctx: Context) -> str:
-    return ctx.cfg.project.test_file_pattern.replace("{topic}", "*")
 
 
 def modified_existing_tests(ctx: Context) -> List[str]:
