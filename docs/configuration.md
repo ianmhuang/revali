@@ -226,10 +226,11 @@ kind (`feature`, `fix`, `docs`) to one of them. A PR carries the label
 change.md's optional `release:` field names, else the one its kind maps to,
 else none of them; each run that opens or reuses the PR and `revali merge`
 add that label and remove the list's others ([docs/side-effects.md](side-effects.md)). A
-layer that sets `kind_labels` replaces the whole table, and a layer that
-changes `release_labels` sets `kind_labels` too, since the default table
-names the default labels. Label names compare in any case, as GitHub's do,
-and the PR gets the list's spelling. A `kind_labels` key
+layer that sets `kind_labels` replaces the whole table, and a layer whose
+`release_labels` drops a label the table maps to (by default `minor`,
+`patch`, `docs`) sets `kind_labels` too; adding a label needs no more.
+Label names compare in any case, as GitHub's do, the PR gets the list's
+spelling, and a name listed twice is an error. A `kind_labels` key
 that is not a change.md kind or a value outside `release_labels`, or a
 label with a comma or surrounding spaces, is a configuration error, and a
 `release:` value outside the list stops preflight; preflight's `ok:` line

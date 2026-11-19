@@ -363,8 +363,24 @@ class ReviewRound1(LabelCase):
     def test_a_list_changed_alone_says_to_set_kind_labels(self):  # F2
         text = self.problems('[pr]\nrelease_labels = ["feat", "bugfix"]\n')
         self.assertIn("pr.kind_labels.feature", text)
-        self.assertIn("a layer that changes release_labels sets kind_labels too", text)
-        self.assertIn("sets `kind_labels` too", self.flat_doc())
+        # round 2 follow-up: the hint names the case exactly (dropping a mapped label)
+        self.assertIn("a layer that drops a label kind_labels maps to sets kind_labels too", text)
+        self.assertIn("sets `kind_labels` too; adding a label needs no more", self.flat_doc())
+
+    def test_a_list_that_only_adds_a_label_needs_no_kind_labels(self):  # round 2 follow-up
+        cfg = self.parse(
+            '[pr]\nrelease_labels = ["major", "minor", "patch", "docs", "skip-changelog", '
+            '"security"]\n'
+        )
+        self.assertEqual(cfg.pr.release_labels[-1], "security")
+        self.assertEqual(cfg.pr.kind_labels["feature"], "minor")
+
+    def test_a_label_listed_twice_in_any_case_is_refused(self):  # round 2 follow-up
+        text = self.problems('[pr]\nrelease_labels = ["minor", "patch", "Minor", "docs"]\n')
+        self.assertIn(
+            "pr.release_labels lists 'Minor' more than once (label names compare in any case)",
+            text,
+        )
 
     def flat_doc(self):
         with open(os.path.join(ROOT, "docs", "configuration.md"), encoding="utf-8") as fh:

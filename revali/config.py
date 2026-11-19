@@ -392,12 +392,20 @@ def _pr_problems(pr: PrCfg) -> List[str]:
     each `kind_labels` entry a change.md kind mapped to one of them. With `release_labels`
     empty the feature is off and `kind_labels` is not checked."""
     problems = []
+    seen = set()
     for name in pr.release_labels:
         if not isinstance(name, str) or not name.strip() or "," in name or name != name.strip():
             problems.append(
                 "pr.release_labels must list label names without commas or surrounding "
                 "spaces (got %r)" % (name,)
             )
+        elif name.lower() in seen:
+            problems.append(
+                "pr.release_labels lists '%s' more than once (label names compare in any case)"
+                % name
+            )
+        else:
+            seen.add(name.lower())
     if not pr.release_labels:
         return problems
     for kind, label in pr.kind_labels.items():
@@ -407,11 +415,11 @@ def _pr_problems(pr: PrCfg) -> List[str]:
                 % (kind, kind, ", ".join(ALL_KINDS))
             )
         elif not listed_label(pr.release_labels, label):
-            # the default table names the default labels, so a layer that changes the list
-            # alone meets this error for a key it never wrote
+            # the default table names minor, patch and docs, so a layer that drops one of
+            # them from the list alone meets this error for a key it never wrote
             problems.append(
                 "pr.kind_labels.%s: %r is not one of pr.release_labels (%s); a layer that "
-                "changes release_labels sets kind_labels too"
+                "drops a label kind_labels maps to sets kind_labels too"
                 % (kind, label, ", ".join(str(n) for n in pr.release_labels))
             )
     return problems
