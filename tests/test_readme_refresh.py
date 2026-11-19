@@ -2,6 +2,7 @@
 is described, and three checks keep its command list, its tool list and the stage diagram
 in docs/workflow.md from drifting from the code."""
 
+import ast
 import glob
 import os
 import re
@@ -134,6 +135,32 @@ def diagram_states(markdown):
             found.add(m.group(1))
     found.discard("[*]")
     return found
+
+
+# the exit-2 refusals docs/workflow.md names under the stage diagram, one phrase each
+PREFLIGHT_REFUSALS = (
+    "rebase",
+    "`{files}`",
+    "lint",
+    "diff is too large",
+    "state directory",
+    "nothing changed",
+    "`[review] tests`",
+)
+
+
+def exit_action_stops(node):
+    """How many `Stop(EXIT_ACTION, ...)` calls the syntax tree `node` holds."""
+    return sum(
+        1
+        for n in ast.walk(node)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "Stop"
+        and n.args
+        and isinstance(n.args[0], ast.Name)
+        and n.args[0].id == "EXIT_ACTION"
+    )
 
 
 class WhatItDoes(unittest.TestCase):
@@ -335,16 +362,27 @@ class StageDiagram(unittest.TestCase):
 
     def test_every_preflight_refusal_with_exit_2_is_named(self):  # round 3 follow-up
         flat = " ".join(read("docs", "workflow.md").split())
-        para = flat.split("It refuses with exit 2 when", 1)[1].split(".", 1)[0]
-        for reason in (
-            "rebase",
-            "lint",
-            "diff is too large",
-            "state directory",
-            "nothing changed",
-            "`[review] tests`",
-        ):
+        para = flat.split("It refuses with exit 2 when", 1)[1].split(". ", 1)[0]
+        for reason in PREFLIGHT_REFUSALS:
             self.assertIn(reason, para, reason)
+        self.assertIn("since a review or validation that asked for a fix", para)  # round 4
+
+    def test_the_named_refusals_are_as_many_as_the_code_raises(self):  # round 4 follow-up
+        # a new Stop(EXIT_ACTION, ...) before the preflight stage is recorded changes the
+        # count, so the paragraph and PREFLIGHT_REFUSALS get its reason too
+        pre = exit_action_stops(ast.parse(read("revali", "preflight.py")))
+        tree = ast.parse(read("revali", "pipeline.py"))
+        book = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_rerun_bookkeeping"
+        ]
+        self.assertEqual(len(book), 1)
+        self.assertEqual(pre + exit_action_stops(book[0]), len(PREFLIGHT_REFUSALS))
+
+    def test_the_stop_count_sees_a_new_refusal(self):
+        src = "def f():\n    raise Stop(EXIT_ACTION, 'a')\n    raise Stop(EXIT_ERROR, 'b')\n"
+        self.assertEqual(exit_action_stops(ast.parse(src)), 1)
 
 
 class OtherDocs(unittest.TestCase):

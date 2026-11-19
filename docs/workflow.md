@@ -148,9 +148,11 @@ tree moved, an unexpected exception) ends in `error`, and `revali stop` ends a r
 in `stopped`. `preflight` is recorded once preflight has passed, so a run it
 refuses goes from the previous run's stage straight to `needs_action`,
 `needs_human` or `error`. It refuses with exit 2 when the branch needs a
-rebase, the lint line fails, the diff is too large, git tracks files in the
-state directory, nothing changed since a round that asked for a fix, or
-`[review] tests` differs from the mode the branch's rounds ran in. `run --dry-run` ends at `preflight` with exit 0. A run that dies
+rebase, `[project] format` does not name `{files}`, the lint line fails, the
+diff is too large, git tracks files in the state directory, nothing changed
+since a review or validation that asked for a fix, or `[review] tests`
+differs from the mode the branch's rounds ran in. `run --dry-run` ends at
+`preflight` with exit 0. A run that dies
 without recording a result keeps its last stage, and `wait` and `status` report
 it as died (below). `revali archive` records `merged` or `closed` from any stage
 once the branch has a PR.
