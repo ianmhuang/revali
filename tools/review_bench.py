@@ -367,6 +367,17 @@ def _run_in(
         return _error(case, str(exc), 0.0, cap if session else 0.0), ""
 
 
+def _carried_note(carried: float, carried_cost: float) -> str:
+    """What a rerun case's result says about what earlier sessions of it were charged: the
+    known part as spent, the rest as an interrupted session of unknown cost."""
+    unknown = "charged for an interrupted earlier session (cost unknown)"
+    if carried_cost >= carried:
+        return "includes $%.2f spent by an earlier session of this case" % carried
+    if carried_cost > 0:
+        return "includes $%.2f spent and $%.2f %s" % (carried_cost, carried - carried_cost, unknown)
+    return "includes $%.2f %s" % (carried, unknown)
+
+
 def _not_run(case: Case, spent: float, cap: float, args) -> Result:
     return Result(
         case.name,
@@ -699,9 +710,10 @@ def main(argv=None) -> int:
         stop_reason = ""
         session = {"cap": 0.0}
 
-        def on_session(cap, name=name, carried=carried, session=session):
+        def on_session(cap, name=name, carried=carried, carried_cost=carried_cost, session=session):
             session["cap"] = cap
-            save(Result(name, "started", charged=cap + carried, message=STARTED))
+            # the earlier known spend stays in `cost` while this session runs (PR #99 round 4 F1)
+            save(Result(name, "started", cost=carried_cost, charged=cap + carried, message=STARTED))
 
         try:
             case = load_case(path)
@@ -719,12 +731,7 @@ def main(argv=None) -> int:
         if carried:
             result.charged += carried
             result.cost += carried_cost  # PR #99 round 3 F1: a known earlier spend stays known
-            note = (
-                "includes $%.2f spent by an earlier session of this case" % carried
-                if carried_cost >= carried
-                else "includes $%.2f charged for an interrupted earlier session (cost unknown)"
-                % carried
-            )
+            note = _carried_note(carried, carried_cost)
             result.message = "; ".join(m for m in (result.message, note) if m)
         spent += result.charged - carried
         if stop_reason and not stopped:

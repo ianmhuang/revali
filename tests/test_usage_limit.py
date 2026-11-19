@@ -298,6 +298,26 @@ class BenchStopsAtTheLimit(bench_tests.BenchCase):
         self.assertIn("usage limit was reached", b["message"])
         self.assertEqual(len(self.fake_calls("claude")), 1)
 
+    def test_a_resumed_session_in_progress_keeps_the_known_spend(self):  # PR #99 round 4 F1
+        self.make_case("a-one")
+        self.claude(limited(cost=0.4))
+        self.run_bench()
+        seen = {}
+
+        def spawn(*a, **kw):  # the file as a killed run would leave it, then stop the run
+            with open(os.path.join(self.out, "results.json"), encoding="utf-8") as fh:
+                seen.update({c["case"]: c for c in json.load(fh)["cases"]})
+            raise KeyboardInterrupt
+
+        buf = io.StringIO()
+        with mock.patch.object(bench_tests.bench, "spawn_reviewer", spawn):
+            with contextlib.redirect_stdout(buf):
+                bench_tests.bench.main(["--resume", self.out, "--budget-usd", "10"])
+        a = seen["a-one"]
+        self.assertEqual(a["outcome"], "started")
+        self.assertAlmostEqual(a["cost"], 0.4)
+        self.assertAlmostEqual(a["charged"], 1.4)  # the fixture's $1.00 cap + the $0.40
+
     def test_a_limit_that_reported_no_cost_charges_nothing(self):  # PR #99 round 3 F2
         self.make_case("a-one")
         self.claude(limited(cost=0))
@@ -320,6 +340,23 @@ class BenchStopsAtTheLimit(bench_tests.BenchCase):
         self.assertGreater(a["cost"], 0.4)
         self.assertIn("includes $0.40 spent by an earlier session of this case", a["message"])
         self.assertNotIn("cost unknown", a["message"])
+
+
+class CarriedNote(unittest.TestCase):
+    """PR #99 round 4 F1: what a rerun bench case says about earlier sessions."""
+
+    def test_each_mix_of_known_and_unknown(self):
+        note = bench_tests.bench._carried_note
+        self.assertEqual(note(0.4, 0.4), "includes $0.40 spent by an earlier session of this case")
+        self.assertEqual(
+            note(1.4, 0.4),
+            "includes $0.40 spent and $1.00 charged for an interrupted earlier session "
+            "(cost unknown)",
+        )
+        self.assertEqual(
+            note(1.0, 0.0),
+            "includes $1.00 charged for an interrupted earlier session (cost unknown)",
+        )
 
 
 class AgainstAuthor(unittest.TestCase):
