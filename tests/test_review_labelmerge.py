@@ -1,6 +1,7 @@
 """Review tests for feature/release-labels, the merge side (AC-4, with AC-5's creation):
 `revali merge` makes the PR's release labels match change.md once more before `gh pr merge`,
-as a run does, and a failure there is a warning, never a refusal.
+as a run does, and a failure there is a warning, never a refusal. A `release:` edited after
+the run to a value outside `[pr] release_labels` (AC-2) changes no label there.
 
 Each test first runs the pipeline to READY TO MERGE (draft PR #7, labelled `minor` for the
 fixture's kind `feature`), then sets what GitHub reports for the PR (`pr_labels`) and the
@@ -119,6 +120,47 @@ class LabelsAtMergeTests(LabelMergeCase):
         out, calls = self.merge()
         self.assertEqual(self.label_edits(calls), [])
         self.assertEqual(len(self.merge_at(calls)), 1)
+
+    def test_the_wanted_label_in_the_repositorys_case_is_kept(self):
+        # GitHub compares label names without regard to case: `Minor` is the wanted `minor`
+        self.ready()
+        self.scenario({"pr_labels": ["Minor", "patch"], "labels": ["Minor", "patch"]})
+        out, calls = self.merge()
+        self.assertEqual(self.changes(calls), ([], ["patch"]))
+        self.assertEqual([a for a in calls if a[:2] == ["label", "create"]], [])
+        self.assertEqual(len(self.merge_at(calls)), 1)
+
+
+class ReleaseOutsideTheListAtMergeTests(LabelMergeCase):
+    """AC-2 with AC-4: `revali merge` reads change.md without a preflight, and the file is not
+    tracked, so a `release:` edited after the run to a value outside `[pr] release_labels`
+    reaches it. The PR then keeps the labels it has, no label is created in the repository, a
+    warning names the value, and the PR is merged."""
+
+    def edited_to(self, value):
+        self.ready()
+        text = self.read(CHANGE_MD)
+        self.write(
+            CHANGE_MD,
+            text.replace("kind: feature\n", "kind: feature\nrelease: %s\n" % value, 1),
+        )
+        self.scenario({"pr_labels": ["minor", "bug"], "labels": ["bug", "minor"]})
+        return self.merge()
+
+    def assert_left_alone(self, value, out, calls):
+        self.assertEqual(self.label_edits(calls), [])
+        self.assertEqual([a for a in calls if a[:2] == ["label", "create"]], [])
+        self.assertTrue([w for w in self.label_warnings(out) if value in w], out)
+        self.assertEqual(len(self.merge_at(calls)), 1)
+
+    def test_a_mistyped_release_changes_no_label(self):
+        out, calls = self.edited_to("majr")
+        self.assert_left_alone("majr", out, calls)
+
+    def test_a_release_naming_two_labels_changes_no_label(self):
+        # gh would take the comma as a list of two labels
+        out, calls = self.edited_to("major,minor")
+        self.assert_left_alone("major,minor", out, calls)
 
 
 class LabelFailuresAtMergeTests(LabelMergeCase):

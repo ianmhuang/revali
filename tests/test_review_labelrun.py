@@ -206,6 +206,27 @@ class ReusedPrTests(LabelRunCase):
         self.assertEqual(self.label_edits(), [])
 
 
+class LabelCaseTests(LabelRunCase):
+    """AC-2, AC-4: label names compare without regard to case, as GitHub's do, and the PR gets
+    the spelling of `[pr] release_labels`."""
+
+    def test_release_in_another_case_gives_the_listed_label(self):
+        self.front("release: Major")
+        lines = self.ok_lines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("major", lines[0])
+        self.assertNotIn("minor", lines[0])
+        self.run_ok()
+        self.assertEqual(self.label_changes(7), (["major"], []))
+
+    def test_a_reused_pr_keeps_the_wanted_label_in_the_repositorys_case(self):
+        # `Minor` is the wanted `minor`; `Patch` is another release label and goes
+        self.scenario(open_pr("Minor", "Patch", "bug"))
+        self.run_ok()
+        self.assertEqual(self.label_changes(12), ([], ["Patch"]))
+        self.assertEqual(self.label_creates(), [])
+
+
 class MissingLabelTests(LabelRunCase):
     """AC-5: a wanted label the repository lacks is created once, then applied; a failure is
     one warning line and the run ends as it would have."""
