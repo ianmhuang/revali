@@ -65,8 +65,10 @@ class Exclusion(RepoCase):
         if os.name != "nt":
             self.assertIn("notes*.md", diff)
 
-    def test_a_rename_into_the_test_pattern_is_left_out_whole(self):
-        """AC-3: no half-rename shown as a deletion of the old name."""
+    def test_a_rename_into_the_test_pattern_is_reviewed_whole(self):
+        """AC-3: no half-rename shown as a deletion of the old name. Since
+        fix/review-modified-tests the test pattern leaves out only files the branch adds, so
+        a file on the base renamed into it is shown whole, as a rename."""
         self.write("tests/old_helper.py", "".join("line %d\n" % i for i in range(20)))
         self.commit_all("old helper")
         git(["push", "-q", "origin", "HEAD:main"], self.repo)
@@ -75,10 +77,12 @@ class Exclusion(RepoCase):
         self.commit_all("rename into the pattern")
         ctx, p = self.prompt()
         diff = diff_block(p)
-        self.assertNotIn("old_helper.py", diff)
-        self.assertNotIn("test_review_moved.py", diff)
-        self.assertIn("tests/test_review_moved.py", ctx.excluded_files)
-        self.assertNotIn("old_helper", " ".join(ctx.changed_files))
+        self.assertIn("rename from tests/old_helper.py", diff)
+        self.assertIn("rename to tests/test_review_moved.py", diff)
+        self.assertNotIn("deleted file mode", diff)
+        self.assertNotIn("tests/test_review_moved.py", ctx.excluded_files)
+        self.assertIn("tests/test_review_moved.py", ctx.changed_files)
+        # given the pattern as an `exclude`, the rename is left out under both names
         self.assertNotIn(
             "tests/old_helper.py",
             gitops.diff_paths(ctx.base_ref, "HEAD", self.repo, exclude=["test_review_*.py"]),

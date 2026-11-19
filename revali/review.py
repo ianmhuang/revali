@@ -7,11 +7,11 @@ import os
 import string
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Collection, Dict, List, Optional, Sequence, Tuple
 
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
-from revali.preflight import Context, Stop, check_tree_unmoved
+from revali.preflight import Context, Stop, check_tree_unmoved, review_left_out
 from revali.procs import ProcTimeout, resolve, run, run_shell
 from revali.runners import (
     FILES_PLACEHOLDER,
@@ -126,24 +126,14 @@ def test_pattern_glob(ctx: Context) -> str:
 
 
 def modified_existing_tests(ctx: Context) -> List[str]:
-    """Existing test files (present on base) that the diff modifies or deletes."""
-    root = ctx.repo_root
-    res = gitops._git(
-        [
-            "diff",
-            "--name-only",
-            "--diff-filter=MD",
-            "%s...HEAD" % ctx.base_ref,
-            "--",
-            ctx.cfg.project.test_dir,
-        ],
-        root,
-    )
-    pattern = test_pattern_glob(ctx)
+    """The files under test_dir on the base that the diff modifies, deletes or renames (a
+    rename under its old name), whatever their name: an earlier change's reviewer test is
+    listed like any other. A file the branch adds is not on the base and not listed."""
+    test_dir = ctx.cfg.project.test_dir
     return [
-        p.strip()
-        for p in res.stdout.splitlines()
-        if p.strip() and not gitops.matches_any(p.strip(), [pattern])
+        names[0]
+        for status, names in gitops.name_status(ctx.base_ref, "HEAD", ctx.repo_root)
+        if status in ("M", "D", "R", "T") and under_test_dir(names[0], test_dir)
     ]
 
 
@@ -416,7 +406,9 @@ def _lines_outside_tests(
     return {f: v for f, v in changed_lines.items() if not under_test_dir(f, test_dir)}
 
 
-def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
+def _related_docs_section(
+    ctx: Context, diff: str, exclude: List[str], drop: Collection[str] = ()
+) -> str:
     """The documents of the link graph that concern this diff, and a map of the graph's
     documents. Empty when `[review] doc_roots` is empty; a graph that cannot be read is
     logged and said, never an error of the run."""
@@ -429,7 +421,7 @@ def _related_docs_section(ctx: Context, diff: str, exclude: List[str]) -> str:
     try:
         graph = docgraph.build(ctx.repo_root, roots)
         # `diff` and these paths leave out the same files (`gitops.left_out`)
-        paths = gitops.diff_paths(ctx.base_ref, "HEAD", ctx.repo_root, exclude=exclude)
+        paths = gitops.diff_paths(ctx.base_ref, "HEAD", ctx.repo_root, exclude=exclude, drop=drop)
         changed = _lines_outside_tests(gitops.diff_changed_lines(diff), ctx.cfg.project.test_dir)
         found = docgraph.related(graph, paths, changed)
     except OSError as exc:
@@ -476,8 +468,8 @@ def build_prompt(
     ctx: Context, state: State, rdir: str, round_no: int, bounce_notes: str = ""
 ) -> str:
     cfg = ctx.cfg
-    exclude = list(cfg.review.exclude) + [test_pattern_glob(ctx)]
-    diff = gitops.diff_text(ctx.base_ref, "HEAD", ctx.repo_root, exclude=exclude)
+    exclude, drop = review_left_out(ctx)
+    diff = gitops.diff_text(ctx.base_ref, "HEAD", ctx.repo_root, exclude=exclude, drop=drop)
     kind = ctx.doc.kind
     tests_required = (
         "required for kind %s" % kind
@@ -506,7 +498,7 @@ def build_prompt(
         "excluded_files": ", ".join(ctx.excluded_files) or "(none)",
         "modified_tests": ", ".join(modified_existing_tests(ctx)) or "(none)",
         "manifests": ", ".join(manifests_touched(ctx)) or "(none)",
-        "related_docs_section": _related_docs_section(ctx, diff, exclude),
+        "related_docs_section": _related_docs_section(ctx, diff, exclude, drop),
         "prior_section": _prior_findings_section(rdir, round_no),
         "response_section": _response_section(rdir, round_no),
         "bounce_section": _bounce_section(bounce_notes),
