@@ -31,6 +31,7 @@ DEFAULT = {
     "labels": ["bug"],
     "label_list_exit": 0,
     "label_create_exit": 0,
+    "label_create_exists": [],  # names `label create` reports as already existing (a race)
     "label_view_exit": 0,  # `api repos/{owner}/{repo}/labels/<name>`: a failure other than 404
     "label_edit_exit": 0,  # `pr edit` with --add-label / --remove-label
     "pr_labels": [],  # the labels `pr view` reports on the PR
@@ -159,6 +160,14 @@ def main(argv):
         print(json.dumps([{"name": n} for n in sc["labels"]]))
         return 0
     if argv[:2] == ["label", "create"]:
+        if argv[2:3] and argv[2].lower() in {n.lower() for n in sc["label_create_exists"]}:
+            # gh's answer when the label appeared since the lookup
+            print(
+                'label with name "%s" already exists; use `--force` to update its color '
+                "and description" % argv[2],
+                file=sys.stderr,
+            )
+            return 1
         if int(sc["label_create_exit"]):
             print("gh_stub: label create failed", file=sys.stderr)
             return int(sc["label_create_exit"])

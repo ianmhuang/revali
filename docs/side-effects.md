@@ -178,7 +178,9 @@ stated.
   or a missing change.md, is a warning and the merge goes on. Then, with
   `[pr] release_labels` not empty, `gh pr view <n> --json labels` and the
   same label edit (and creation) as during a run; here every failure is a
-  warning and the merge goes on, since labels never reach the base branch
+  warning and the merge goes on, since labels never reach the base branch.
+  A change.md edited since the run to a `release:` outside the list changes
+  no label and is a warning
 - on `revali merge` (human-started, refused unless a run ended READY TO
   MERGE, no run has started its `pr` stage since, and HEAD has not moved; a
   later run that stopped before that stage does not count): waits for CI checks if the PR has any,

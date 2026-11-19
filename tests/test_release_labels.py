@@ -336,6 +336,58 @@ class AtMerge(LabelCase):
         self.assertEqual(len(self.merges()), 1)
 
 
+class ReviewRound1(LabelCase):
+    """PR round 1: F1 a `release:` edited after the run is checked again at merge; F2 the
+    error for a list changed alone says what to do; F3 label names compare in any case;
+    follow-up: a label another run created since the lookup is not a failure."""
+
+    def test_a_release_edited_after_the_run_changes_no_label_at_merge(self):  # F1
+        self.run_ok()
+        creates, edits = len(self.label_creates()), len(self.label_edits())
+        self.scenario({"pr_labels": ["minor"]})
+        self.front("release: majr")
+        code, out = run_cli(["merge"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("warning: change.md: release 'majr' is not one of [pr] release_labels", out)
+        self.assertIn("the PR's labels are left as they are", out)
+        self.assertEqual(len(self.label_creates()), creates)  # no `gh label create majr`
+        self.assertEqual(len(self.label_edits()), edits)  # `minor` stays on the PR
+        self.assertEqual(len(self.merges()), 1)
+
+    def test_a_release_with_a_comma_is_refused_too(self):  # F1: would be two labels to gh
+        self.front("release: major,minor")
+        with self.assertRaises(Stop) as cm:
+            preflight(self.repo)
+        self.assertIn("change.md: release 'major,minor' is not one of", cm.exception.message)
+
+    def test_a_list_changed_alone_says_to_set_kind_labels(self):  # F2
+        text = self.problems('[pr]\nrelease_labels = ["feat", "bugfix"]\n')
+        self.assertIn("pr.kind_labels.feature", text)
+        self.assertIn("a layer that changes release_labels sets kind_labels too", text)
+        self.assertIn("sets `kind_labels` too", self.flat_doc())
+
+    def flat_doc(self):
+        with open(os.path.join(ROOT, "docs", "configuration.md"), encoding="utf-8") as fh:
+            return " ".join(fh.read().split())
+
+    def test_release_in_another_case_gets_the_lists_spelling(self):  # F3
+        self.front("release: Major")
+        self.assertEqual(self.ok_line(), [OK_LINE % "; label major"])
+        self.run_ok()
+        self.assertEqual(self.label_edits(), [["pr", "edit", "7", "--add-label", "major"]])
+
+    def test_a_kind_label_in_another_case_is_accepted(self):  # F3
+        self.config('[pr]\nkind_labels = { feature = "MINOR" }\n')
+        self.assertEqual(self.ok_line(), [OK_LINE % "; label minor"])
+
+    def test_a_label_created_since_the_lookup_is_applied(self):  # follow-up
+        self.scenario({"label_create_exists": ["minor"]})
+        self.run_ok()
+        self.assertEqual(len(self.label_creates()), 1)
+        self.assertNotIn("could not create the label", self.read(REVALI_LOG))
+        self.assertEqual(self.label_edits(), [["pr", "edit", "7", "--add-label", "minor"]])
+
+
 class Files(LabelCase):
     """AC-7, AC-8"""
 

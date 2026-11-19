@@ -1,4 +1,5 @@
-# Groups for `gh release create --generate-notes`. Copy to .github/release.yml.
+# Groups for `gh release create --generate-notes`. Template: templates/release.yml;
+# a project copies it to .github/release.yml.
 # revali gives each PR one of these labels from change.md ([pr] release_labels,
 # kind_labels, or the `release:` field); see docs/releasing.md.
 changelog:

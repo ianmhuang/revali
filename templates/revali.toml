@@ -83,7 +83,8 @@ checks_timeout_min = 30
 
 [pr]
 release_labels = ["major", "minor", "patch", "docs", "skip-changelog"]   # PR labels revali keeps
-                                  # in step for release notes (templates/release.yml); [] = off
+                                  # in step for release notes (templates/release.yml); [] = off;
+                                  # changing the list means setting kind_labels too
 kind_labels = { feature = "minor", fix = "patch", docs = "docs" }   # change.md kind -> label;
                                   # `release: <label>` in change.md overrides it
 

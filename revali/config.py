@@ -175,13 +175,41 @@ class Config:
         return [list(e.tiers) for n, e in self.engines.items() if n != engine_name]
 
 
-def release_label(cfg: Config, doc) -> str:
-    """The release label a PR for change.md `doc` carries: its `release` field, else
-    `[pr] kind_labels` for its kind; "" when neither gives one or `release_labels` is empty
-    (the feature is off). Preflight has already refused a `release` outside the list."""
-    if not cfg.pr.release_labels:
+def listed_label(labels: List[str], name) -> str:
+    """`name` as `labels` spells it, compared in any case as GitHub compares label names;
+    "" when it is not listed (or not a string)."""
+    if not isinstance(name, str):
         return ""
-    return (getattr(doc, "release", "") or "").strip() or cfg.pr.kind_labels.get(doc.kind, "")
+    wanted = name.strip().lower()
+    for label in labels:
+        if isinstance(label, str) and label.lower() == wanted:
+            return label
+    return ""
+
+
+def release_problem(cfg: Config, doc) -> str:
+    """The problem with change.md's `release:` field, "" when it is unset or names a label of
+    `[pr] release_labels` (in any case). Preflight refuses on it; `revali merge` reads
+    change.md without preflight, and the file is untracked, so `pr.sync_labels` checks it
+    again and leaves the labels alone."""
+    release = (getattr(doc, "release", "") or "").strip()
+    if not release or listed_label(cfg.pr.release_labels, release):
+        return ""
+    return "change.md: release '%s' is not one of [pr] release_labels (%s)" % (
+        release,
+        ", ".join(cfg.pr.release_labels) or "empty: labels off",
+    )
+
+
+def release_label(cfg: Config, doc) -> str:
+    """The release label a PR for change.md `doc` carries, spelled as `[pr] release_labels`
+    spells it: its `release` field, else `[pr] kind_labels` for its kind; "" when neither
+    gives one, when `release` is not a listed label (`release_problem`), or when
+    `release_labels` is empty (the feature is off)."""
+    if not cfg.pr.release_labels or release_problem(cfg, doc):
+        return ""
+    release = (getattr(doc, "release", "") or "").strip()
+    return listed_label(cfg.pr.release_labels, release or cfg.pr.kind_labels.get(doc.kind, ""))
 
 
 def listed_platform(cfg: Config, name: str = "") -> PlatformCfg:
@@ -378,9 +406,12 @@ def _pr_problems(pr: PrCfg) -> List[str]:
                 "pr.kind_labels.%s: '%s' is not a change.md kind (%s)"
                 % (kind, kind, ", ".join(ALL_KINDS))
             )
-        elif label not in pr.release_labels:
+        elif not listed_label(pr.release_labels, label):
+            # the default table names the default labels, so a layer that changes the list
+            # alone meets this error for a key it never wrote
             problems.append(
-                "pr.kind_labels.%s: %r is not one of pr.release_labels (%s)"
+                "pr.kind_labels.%s: %r is not one of pr.release_labels (%s); a layer that "
+                "changes release_labels sets kind_labels too"
                 % (kind, label, ", ".join(str(n) for n in pr.release_labels))
             )
     return problems

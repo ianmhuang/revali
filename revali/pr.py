@@ -2,13 +2,14 @@
 
 import os
 import re
+import time
 import urllib.parse
 from typing import List, Optional
 
 from revali import EXIT_ERROR, changedoc, gitops
-from revali.config import release_label
+from revali.config import release_label, release_problem
 from revali.preflight import Context, Stop, check_tree_unmoved
-from revali.procs import ProcError, one_line, resolve, run, run_retry
+from revali.procs import RETRY_WAIT_S, ProcError, one_line, resolve, run, run_retry
 from revali.secretscan import scan_text
 from revali.state import RunLog, State, write_text
 
@@ -111,10 +112,17 @@ def sync_labels(
     """Make PR `number`'s release labels match change.md (`release_label`): add the wanted
     one, remove every other label of `[pr] release_labels`, leave the rest alone. Names
     compare in any case, as GitHub's do. `current` None (unknown) is taken as no labels, so
-    nothing is removed. A label the repository lacks is created first. Never raises: each
-    failure is one warning line, and the caller's stage goes on."""
+    nothing is removed. A label the repository lacks is created first. A `release:` that is
+    not a listed label (`release_problem`) changes nothing and is one warning. Never raises:
+    each failure is one warning line, and the caller's stage goes on."""
     managed = list(cfg.pr.release_labels)
     if not managed:
+        return
+    problem = release_problem(cfg, doc)
+    if problem:
+        # change.md changed after preflight (revali merge reads it without one)
+        if log:
+            log.stage(stage, "warning: %s; the PR's labels are left as they are" % problem)
         return
     wanted = release_label(cfg, doc)
     have = list(current or [])
@@ -171,16 +179,19 @@ def _ensure_label(root: str, name: str, log: Optional[RunLog], stage: str) -> bo
                 "warning: could not check the label '%s': %s" % (name, one_line(problem)),
             )
         return True
+    create = resolve("gh") + ["label", "create", name, "--description", LABEL_DESCRIPTION]
     try:
-        res = run_retry(
-            resolve("gh") + ["label", "create", name, "--description", LABEL_DESCRIPTION],
-            cwd=root,
-            log=_log(log),
-            timeout=120,
-        )
+        res = run(create, cwd=root, log=_log(log), timeout=120)
+        if not res.ok and "already exists" not in res.text:
+            # a transient failure gets one more try, as run_retry gives; "already exists"
+            # would only answer the same again
+            time.sleep(RETRY_WAIT_S)
+            res = run(create, cwd=root, log=_log(log), timeout=120)
         problem = "" if res.ok else (res.text.strip()[:200] or "gh exited %d" % res.returncode)
     except ProcError as exc:
         problem = str(exc)
+    if "already exists" in problem:
+        return True  # another run created it since the lookup
     if problem:
         if log:
             log.stage(stage, "warning: could not create the label '%s': %s" % (name, problem))

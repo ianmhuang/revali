@@ -19,6 +19,7 @@ from revali.config import (
     load_user_config,
     paths_for,
     release_label,
+    release_problem,
     tool_file,
 )
 from revali.procs import ProcTimeout, run_shell
@@ -151,11 +152,9 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
     else:
         ctx.doc = changedoc.load(doc_path)
         problems.extend(changedoc.validate(ctx.doc, V1_KINDS))
-        if ctx.cfg and ctx.doc.release and ctx.doc.release not in ctx.cfg.pr.release_labels:
-            problems.append(
-                "change.md: release '%s' is not one of [pr] release_labels (%s)"
-                % (ctx.doc.release, ", ".join(ctx.cfg.pr.release_labels) or "empty: labels off")
-            )
+        release = release_problem(ctx.cfg, ctx.doc) if ctx.cfg else ""
+        if release:
+            problems.append(release)
 
     if problems:
         raise Stop(EXIT_ERROR, "before revali can run:\n  - " + "\n  - ".join(problems))
