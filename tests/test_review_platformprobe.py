@@ -19,19 +19,21 @@ SSH_STUB = os.path.join(FAKE_BIN, "ssh_stub.py")
 SCP_STUB = os.path.join(FAKE_BIN, "scp_stub.py")
 
 # wsl.exe for the probe only: records the call, then starts (exit 0) or does not (exit 3)
-WSL_PROBE_STUB = """import json
-import os
+# (M3.31: it appends through fake_bin/fakelog.py, under the lock every writer of the log takes)
+WSL_PROBE_STUB = """import os
 import sys
+
+sys.path.insert(0, %r)
+import fakelog
 
 log = os.environ.get("REVALI_FAKE_LOG")
 if log:
-    with open(log, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"exe": "wsl", "argv": sys.argv[1:]}) + "\\n")
+    fakelog.record(log, {"exe": "wsl", "argv": sys.argv[1:]})
 if os.environ.get("REVIEW_FAKE_WSL_DOWN"):
     sys.stderr.write("the distribution could not be started\\n")
     sys.exit(3)
 print("git version 2.43.0 (fake)")
-"""
+""" % (FAKE_BIN,)
 
 WINDOWS_SSH = '\n[validate.windows]\nrunner = "ssh"\nhost = "winbox"\nnew_test = "pytest tests"\n'
 

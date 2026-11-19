@@ -14,6 +14,10 @@ import os
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import fakelog  # noqa: E402
+
 
 def scenario_path():
     return os.environ.get("REVALI_FAKE_SCENARIO", "")
@@ -46,11 +50,7 @@ def main(argv):
     prompt = sys.stdin.read() if not sys.stdin.isatty() else ""
     log = os.environ.get("REVALI_FAKE_LOG")
     if log:
-        with open(log, "a", encoding="utf-8") as fh:
-            fh.write(
-                json.dumps({"exe": "claude", "argv": argv, "prompt": prompt, "cwd": os.getcwd()})
-                + "\n"
-            )
+        fakelog.record(log, {"exe": "claude", "argv": argv, "prompt": prompt, "cwd": os.getcwd()})
     for rel, content in (entry.get("write_files") or {}).items():
         path = os.path.join(os.getcwd(), rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)

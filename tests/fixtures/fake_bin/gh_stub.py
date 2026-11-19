@@ -11,6 +11,10 @@ import os
 import sys
 import urllib.parse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import fakelog  # noqa: E402
+
 DEFAULT = {
     "auth_exit": 0,
     "login": "me",
@@ -68,8 +72,7 @@ def log(argv):
         if os.path.isfile(body_path):
             with open(body_path, "r", encoding="utf-8") as fh:
                 entry["body"] = fh.read()
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(entry) + "\n")
+    fakelog.record(path, entry)
 
 
 def main(argv):

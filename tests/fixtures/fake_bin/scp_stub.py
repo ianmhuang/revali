@@ -3,13 +3,13 @@ Local names are relative to the working directory, as revali passes them. Record
 call to $REVALI_FAKE_LOG. Use via REVALI_SCP_CMD="<python> <this file>".
 """
 
-import json
 import os
 import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import fakelog  # noqa: E402
 from ssh_stub import knob  # noqa: E402  (one reading of the knobs for both stubs)
 
 
@@ -45,8 +45,7 @@ def copy_into(src, dst_dir):
 def main(argv):
     log = os.environ.get("REVALI_FAKE_LOG")
     if log:
-        with open(log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"exe": "scp", "argv": argv, "cwd": os.getcwd()}) + "\n")
+        fakelog.record(log, {"exe": "scp", "argv": argv, "cwd": os.getcwd()})
     rest = []
     skip = False
     for tok in argv:

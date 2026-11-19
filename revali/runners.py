@@ -20,7 +20,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from revali.config import PlatformCfg
 from revali.procs import ExeNotFound, ProcError, ProcTimeout, one_line, resolve, run, run_shell
-from revali.state import write_text
+from revali.state import append_line, write_text
 
 Logger = Optional[Callable[[str], None]]
 FAKE_ENV = "REVALI_FAKE_RUNNER"
@@ -341,6 +341,11 @@ class LocalRunner(Runner):
         return report
 
 
+# how long the fake runner waits for the call log's lock before it writes anyway; the same
+# as tests/fixtures/fake_bin/fakelog.py
+FAKE_LOG_WINDOW_S = 10.0
+
+
 class FakeRunner(Runner):
     """Scenario file: {"default": 0, "results": {"<label>": {"<step>": <exit>}}, "outputs":
     {...}, "errors": {"<label>": "<message>"}}. Exit TIMEOUT_EXIT counts as a timeout, as in
@@ -380,26 +385,28 @@ class FakeRunner(Runner):
             time.sleep(delay)
         log_file = os.environ.get("REVALI_FAKE_LOG")
         if log_file:
-            with open(log_file, "a", encoding="utf-8") as fh:
-                fh.write(
-                    json.dumps(
-                        {
-                            "exe": "runner",
-                            "label": label,
-                            "ref": ref,
-                            "scope": scope,
-                            "key": key,
-                            "steps": [n for n, c in steps if c.strip()],
-                            "cmds": {n: c for n, c in steps if c.strip()},
-                            "extra_files": sorted(extra_files or {}),
-                            "t0": t0,
-                            "t1": time.time(),
-                            "held": held,
-                            "finished": True,
-                        }
-                    )
-                    + "\n"
-                )
+            # under the lock the stubs take too: on Windows a stub process appending at the
+            # same moment as this thread would otherwise tear the line (M3.31)
+            append_line(
+                log_file,
+                json.dumps(
+                    {
+                        "exe": "runner",
+                        "label": label,
+                        "ref": ref,
+                        "scope": scope,
+                        "key": key,
+                        "steps": [n for n, c in steps if c.strip()],
+                        "cmds": {n: c for n, c in steps if c.strip()},
+                        "extra_files": sorted(extra_files or {}),
+                        "t0": t0,
+                        "t1": time.time(),
+                        "held": held,
+                        "finished": True,
+                    }
+                ),
+                retry_s=FAKE_LOG_WINDOW_S,
+            )
         error = (sc.get("errors") or {}).get(label)
         if error:
             raise RunnerError(str(error))

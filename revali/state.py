@@ -648,11 +648,19 @@ def append_history(path: str, record: dict, retry_s: Optional[float] = None) -> 
     record.setdefault("at", now_iso())
     record.setdefault("revali_version", VERSION)
     record.setdefault("prompt_version", PROMPT_VERSION)
-    line = json.dumps(record, ensure_ascii=False) + "\n"
+    return append_line(path, json.dumps(record, ensure_ascii=False), retry_s)
+
+
+def append_line(path: str, line: str, retry_s: Optional[float] = None) -> str:
+    """Append `line` and an LF to `path` under the OS lock on `<path>.lock`. Appends are not
+    atomic on Windows (the C runtime seeks to the end, then writes), so concurrent writers
+    without the lock overwrite each other's lines. A lock not had within `retry_s` (else
+    `history_retry_s()`) still writes the line; the return value says why ("" when the line
+    was written under the lock)."""
     fd, unlocked = _lock_history(path + ".lock", retry_s)
     try:
         with open(path, "a", encoding="utf-8", newline="\n") as fh:
-            fh.write(line)
+            fh.write(line + "\n")
     finally:
         if fd is not None:
             _os_unlock(fd)
