@@ -10,7 +10,7 @@ from typing import List, Optional
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.config import PlatformCfg, listed_platform
 from revali.engines import EngineRequest
-from revali.engines.base import UsageLimit
+from revali.engines.base import ModelUnavailable
 from revali.issues import IssueRef, maybe_open
 from revali.preflight import Context, Stop
 from revali.review import TRAILER, under_test_dir
@@ -759,9 +759,9 @@ def _diagnose(
             stop.line(
                 "the validation FAIL stands without a diagnosis; a failing validation after a "
                 "fix is diagnosed again, on another model if `[validate] model` is changed, or "
-                "on this one after the reset"
+                "on this one %s" % stop.when
             )
-            if isinstance(stop, UsageLimit)
+            if isinstance(stop, ModelUnavailable)
             else stop.message
         )
         outcome.cost = stop.cost  # what the session spent before it failed; 0.0 when unknown

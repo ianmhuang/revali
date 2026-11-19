@@ -37,7 +37,7 @@ sys.path.insert(0, ROOT)
 from revali import VERSION, docgraph, engines, gitops, models, procs  # noqa: E402
 from revali.config import ConfigError, load_project_config, load_user_config  # noqa: E402
 from revali.engines import EngineRequest  # noqa: E402
-from revali.engines.base import UsageLimit, loop_advice, loop_stopped  # noqa: E402
+from revali.engines.base import ModelUnavailable, loop_advice, loop_stopped  # noqa: E402
 from revali.preflight import Stop  # noqa: E402
 from revali.state import write_json_atomic  # noqa: E402
 
@@ -200,15 +200,15 @@ def audit_one(
                 read_only=True,
             )
         )
-    except UsageLimit as limit:
+    except ModelUnavailable as limit:  # its usage limit, or overloaded (PR #99 round 6)
         result = Result(
             doc,
             ERROR,
             cost=limit.cost,
             charged=limit.cost,
-            message=limit.with_advice(loop_advice("documents")).message,
+            message=limit.with_advice(loop_advice("documents", limit)).message,
         )
-        stop_reason = loop_stopped("document")  # every document after it would hit it too
+        stop_reason = loop_stopped("document", limit)  # the documents after it would too
     except Stop as stop:
         result = Result(doc, ERROR, cost=stop.cost, charged=stop.cost, message=stop.message)
         if not stop.cost:  # a timeout or unreadable output: it may have spent up to its cap

@@ -41,7 +41,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 from revali import PROMPT_VERSION, VERSION, gitops  # noqa: E402
-from revali.engines.base import UsageLimit, loop_advice, loop_stopped  # noqa: E402
+from revali.engines.base import ModelUnavailable, loop_advice, loop_stopped  # noqa: E402
 from revali.preflight import Stop, locate, review_left_out  # noqa: E402
 from revali.review import CHANGES_REQUESTED, build_prompt, spawn_reviewer  # noqa: E402
 from revali.state import State, safe_branch, write_json_atomic  # noqa: E402
@@ -345,7 +345,7 @@ def _run_in(
         session = True
         try:
             rr = spawn_reviewer(
-                ctx, prompt, ctx.rdir, 1, 1, None, limit_advice=loop_advice("cases")
+                ctx, prompt, ctx.rdir, 1, 1, None, advice=lambda stop: loop_advice("cases", stop)
             )
         finally:
             _keep_raw(ctx, case_out)
@@ -355,12 +355,12 @@ def _run_in(
         result.model = rr.model_actual or rr.model_requested
         result.cost = result.charged = rr.cost
         return result, ""
-    except UsageLimit as exc:
+    except ModelUnavailable as exc:  # its usage limit, or overloaded (PR #99 round 6)
         # not reviewed, so `not-run` (--resume runs it again); the result object was read,
         # so its cost is what the session spent, 0 included (PR #99 round 3 F2); and every
         # case after it would hit the same limit
         limited = Result(case.name, "not-run", cost=exc.cost, charged=exc.cost, message=exc.message)
-        return limited, loop_stopped("case")
+        return limited, loop_stopped("case", exc)
     except Stop as exc:
         return _error(case, exc.message, exc.cost, cap if session else 0.0), ""
     except (CaseError, gitops.GitError, OSError, ValueError) as exc:

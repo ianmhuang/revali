@@ -13,6 +13,7 @@ import unittest
 from unittest import mock
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, models
+from revali.engines.base import ModelBusy, UsageLimit
 from revali.state import State, read_history
 from tests import test_bench_tool as bench_tests  # base classes only: no tests of theirs
 from tests import test_doc_audit as doc_audit_tests
@@ -141,6 +142,21 @@ class DiagnosisHitsTheLimit(Case):
         self.assertAlmostEqual(state.validations[0]["cost_usd"], 0.2)
 
 
+class DiagnosisBusy(Case):
+    """PR #99 round 6 F2: a 529 is named for the diagnosis too, with "later"."""
+
+    def test_the_fail_stands_and_the_line_says_later(self):
+        self.runner_scenario({"default": 0, "results": {"validate-r1": {"new_test": 1}}})
+        self.claude(claude_entry(), busy())
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        line = next(ln for ln in out.splitlines() if "diagnosis unavailable:" in ln)
+        self.assertIn("diagnoser model", line)
+        self.assertIn("is overloaded: API Error: Overloaded", line)
+        self.assertIn("`[validate] model`", line)
+        self.assertIn("or on this one later", line)
+
+
 class ReviewerModelOption(Case):
     """AC-5, AC-6"""
 
@@ -262,6 +278,28 @@ def limited(cost=0.4):
     return {"exit": 1, "raw_stdout": limit_payload(cost=cost), "write_tests": False}
 
 
+def busy_payload(cost=0.0):
+    """An overloaded model's result with no fallback left: the shape is assumed (status 529,
+    the API's overloaded status); a real one has not been seen."""
+    return json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": True,
+            "num_turns": 1,
+            "total_cost_usd": cost,
+            "terminal_reason": "api_error",
+            "api_error_status": 529,
+            "result": "API Error: Overloaded",
+            "modelUsage": {},
+        }
+    )
+
+
+def busy():
+    return {"exit": 1, "raw_stdout": busy_payload(), "write_tests": False}
+
+
 class DocAuditStopsAtTheLimit(doc_audit_tests.AuditCase):
     """PR #99 round 2 follow-up: doc_audit gives its own advice, and the documents after the
     one that hit the limit are not run (--resume runs them)."""
@@ -278,8 +316,64 @@ class DocAuditStopsAtTheLimit(doc_audit_tests.AuditCase):
         self.assertIn("continue with `--resume <dir>` after the reset", first["message"])
         self.assertNotIn("revali run", first["message"])
         self.assertEqual(by_doc["CONVENTIONS.md"]["status"], "not-run")
-        self.assertIn("usage limit was reached", by_doc["CONVENTIONS.md"]["message"])
+        self.assertIn(
+            "the model hit its usage limit on an earlier document",
+            by_doc["CONVENTIONS.md"]["message"],
+        )
         self.assertEqual(len(self.calls()), 1)  # the second document was not sent
+
+
+class DocAuditStopsWhenBusy(doc_audit_tests.AuditCase):
+    """PR #99 round 6 F1/F2: an overloaded auditor model stops the loop like a limit, says
+    "later", and is charged what it reported."""
+
+    def test_the_rest_is_not_run(self):
+        self.claude(busy(), claude_entry(doc_audit_tests.answer(), write_tests=False))
+        code, out = self.run_audit("--budget-usd", "10", "--only", "README.md", "CONVENTIONS.md")
+        self.assertEqual(code, 1, out)
+        _, by_doc = self.results()
+        first = by_doc["README.md"]
+        self.assertEqual((first["status"], first["charged"]), ("error", 0))
+        self.assertIn("auditor model fable is overloaded", first["message"])
+        self.assertIn("continue with `--resume <dir>` later", first["message"])
+        self.assertNotIn("cost unknown", first["message"])
+        self.assertEqual(by_doc["CONVENTIONS.md"]["status"], "not-run")
+        self.assertIn(
+            "the model was overloaded on an earlier document", by_doc["CONVENTIONS.md"]["message"]
+        )
+        self.assertEqual(len(self.calls()), 1)
+
+
+class BenchStopsWhenBusy(bench_tests.BenchCase):
+    """PR #99 round 6 F1: the bench's busy case gets the bench's advice, not a limit's."""
+
+    def test_the_rest_is_not_run(self):
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(busy(), claude_entry(bench_tests.answer(bench_tests.finding())))
+        _, out, cases, _ = self.run_bench()
+        a, b = cases["a-one"], cases["b-two"]
+        self.assertEqual((a["outcome"], a["charged"]), ("not-run", 0))
+        self.assertIn("reviewer model", a["message"])
+        self.assertIn("is overloaded", a["message"])
+        self.assertIn("continue with `--resume <dir>` later", a["message"])
+        self.assertNotIn("after the reset", a["message"])
+        self.assertEqual(b["outcome"], "not-run")
+        self.assertIn("the model was overloaded on an earlier case", b["message"])
+        self.assertEqual(len(self.fake_calls("claude")), 1)
+
+
+class WithAdvice(unittest.TestCase):
+    """PR #99 round 6 follow-up: the tools tell the stops apart by class and charge their cost."""
+
+    def test_keeps_the_class_and_the_cost(self):
+        for cls in (UsageLimit, ModelBusy):
+            with self.subTest(cls=cls.__name__):
+                stop = cls("reviewer", "fable", "text", "raw.json", 0.25).with_advice("do this")
+                self.assertIs(type(stop), cls)
+                self.assertAlmostEqual(stop.cost, 0.25)
+                self.assertIn("do this; raw output saved to raw.json", stop.message)
+                self.assertEqual(stop.args, (stop.message,))
 
 
 class BenchStopsAtTheLimit(bench_tests.BenchCase):
@@ -298,7 +392,7 @@ class BenchStopsAtTheLimit(bench_tests.BenchCase):
         self.assertIn("the cases left are not run", a["message"])
         self.assertNotIn("revali run --reviewer-model", a["message"])
         self.assertEqual(b["outcome"], "not-run")
-        self.assertIn("usage limit was reached", b["message"])
+        self.assertIn("the model hit its usage limit on an earlier case", b["message"])
         self.assertEqual(len(self.fake_calls("claude")), 1)
 
     def test_a_resumed_session_in_progress_keeps_the_known_spend(self):  # PR #99 round 4 F1

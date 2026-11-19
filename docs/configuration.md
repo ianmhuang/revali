@@ -216,7 +216,8 @@ written. The claude engine falls back when the model is busy or unavailable. Any
 through unchanged. The chosen model and the reason are printed at spawn
 time and recorded in the review and diagnosis headers.
 `revali run --reviewer-model <model>` puts `<model>` in place of `[review] model`
-for that run only (the fallback list follows from it as for an explicit name);
+for that run only (`fallback_model` is unaffected: none with `auto`, or the
+model the user named);
 the reason then reads `--reviewer-model, ` and where the model stands against
 the author's tier (above, the same tier as, below), and a non-private
 repository's PR comment carries it too. revali never lowers the Reviewer's tier

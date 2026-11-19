@@ -11,7 +11,7 @@ from typing import Collection, Dict, List, Optional, Sequence, Tuple
 
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.engines import EngineRequest
-from revali.engines.base import ModelBusy, UsageLimit
+from revali.engines.base import ModelUnavailable, run_advice
 from revali.preflight import (
     Context,
     Stop,
@@ -546,16 +546,6 @@ def validate_shape(data) -> List[str]:
     return problems
 
 
-RUN_BUSY_ADVICE = (
-    "nothing is lost: run `revali run` again later, or `revali run --reviewer-model <model>` "
-    "for this run only"
-)
-RUN_LIMIT_ADVICE = (
-    "nothing is lost: run `revali run` again after the reset, or `revali run --reviewer-model "
-    "<model>` for this run only"
-)
-
-
 def planned_reviewer(ctx: Context) -> models.Resolved:
     """Which model the Reviewer would run on, and why (explicit or auto). `run
     --reviewer-model` (ctx.reviewer_model) takes the place of `[review] model` for this run,
@@ -586,10 +576,11 @@ def spawn_reviewer(
     attempt: int,
     log: Optional[RunLog],
     cancel=None,
-    limit_advice: str = "",
+    advice=run_advice,
 ) -> ReviewerRun:
-    """One Reviewer session. A usage limit stops it with `limit_advice` (by default what a
-    `revali run` can do next; tools/review_bench.py passes its own)."""
+    """One Reviewer session. A model that cannot serve (its usage limit, overloaded) stops it
+    with `advice(stop)`: by default what a `revali run` can do next; tools/review_bench.py
+    passes its own (PR #99 round 6 F1)."""
     cfg = ctx.cfg.review
     engine = engines.for_role(ctx.cfg, "review")
     chosen = planned_reviewer(ctx)
@@ -625,10 +616,8 @@ def spawn_reviewer(
     )
     try:
         result = engine.run(request, log)
-    except UsageLimit as limit:
-        raise limit.with_advice(limit_advice or RUN_LIMIT_ADVICE) from limit
-    except ModelBusy as busy:
-        raise busy.with_advice(limit_advice or RUN_BUSY_ADVICE) from busy
+    except ModelUnavailable as stop:
+        raise stop.with_advice(advice(stop)) from stop
     problems = validate_shape(result.data)
     if problems:
         raise Stop(

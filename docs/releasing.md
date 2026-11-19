@@ -63,8 +63,10 @@ high or medium finding; `1` otherwise (a document failed or was not run, or the 
 could not start, for instance with the engine's executable missing). A session that fails,
 or answers outside the schema, marks its document `error` and the audit goes on with the
 next one; a failed session that reported no cost (a timeout) is charged its cap. A session
-stopped by its model's usage limit ends its document as `error` and leaves the documents
-after it `not-run`; `--resume` after the reset runs them.
+stopped by its model's usage limit or by an overloaded model ends its document as `error`,
+charged what it reported, and leaves the documents after it `not-run`; `--resume` after the
+reset, or later, runs them. The auditor runs on its model only: like the Reviewer it has no
+auto fallback ([docs/configuration.md](configuration.md)).
 
 ## Making a release
 

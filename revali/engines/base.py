@@ -28,7 +28,9 @@ class ModelUnavailable(Stop):
     words. Its own message gives no advice: what the user can do next differs for the
     Reviewer and the diagnosis, so each caller passes it to `line` (PR #99 round 1)."""
 
-    what = "could not run"
+    what = "could not run"  # in the line: "<role> model <m> <what>: <text>"
+    past = "could not run"  # "... the model <past> on an earlier <item>"
+    when = "later"  # when the same model may serve again
 
     def __init__(self, role: str, model: str, text: str, raw_path: str, cost: float):
         self.role, self.model, self.text, self.raw_path = role, model, text, raw_path
@@ -58,29 +60,40 @@ class ModelUnavailable(Stop):
 class UsageLimit(ModelUnavailable):
     """The model's usage limit is reached; `text` carries the reset time."""
 
-    what = "hit its usage limit"
+    what = past = "hit its usage limit"
+    when = "after the reset"
 
 
 class ModelBusy(ModelUnavailable):
-    """The model is overloaded and no fallback was allowed to take its place (a Reviewer has
-    none unless the user names one, PR #99 round 5)."""
+    """The model is overloaded (`api_error_status` 529) and no fallback took its place: the
+    Reviewer and the auditor have none unless the user names one (PR #99 round 5), the
+    diagnosis may have used its own up. Not verified against a real busy result."""
 
     what = "is overloaded"
+    past = "was overloaded"
 
 
-def loop_advice(items: str) -> str:
-    """A UsageLimit's advice in a tool that runs one session per item (tools/doc_audit.py,
-    tools/review_bench.py); `--resume` keeps the recorded model, so another model is a new
-    run."""
+def run_advice(stop: ModelUnavailable) -> str:
+    """What a `revali run` whose Reviewer model could not serve can do next."""
     return (
-        "the %s left are not run; continue with `--resume <dir>` after the reset, or start a "
-        "new run with `--model <model>`" % items
+        "nothing is lost: run `revali run` again %s, or `revali run --reviewer-model <model>` "
+        "for this run only" % stop.when
     )
 
 
-def loop_stopped(item: str) -> str:
-    """Why an item after the one that hit the limit is not run."""
-    return "not run: the model's usage limit was reached on an earlier %s" % item
+def loop_advice(items: str, stop: ModelUnavailable) -> str:
+    """The advice in a tool that runs one session per item (tools/doc_audit.py,
+    tools/review_bench.py) and stops at a model that cannot serve; `--resume` keeps the
+    recorded model, so another model is a new run."""
+    return (
+        "the %s left are not run; continue with `--resume <dir>` %s, or start a new run with "
+        "`--model <model>`" % (items, stop.when)
+    )
+
+
+def loop_stopped(item: str, stop: ModelUnavailable) -> str:
+    """Why an item after the one whose model could not serve is not run."""
+    return "not run: the model %s on an earlier %s" % (stop.past, item)
 
 
 @dataclass
