@@ -1,8 +1,9 @@
 """Review tests for feature/release-labels, the configuration (AC-1) and the release notes
 file (AC-7): `[pr] release_labels` and `kind_labels` with their defaults, the configuration
-errors that name the offending `kind_labels` key, `release_labels = []` as the off switch, and
-`templates/release.yml` grouping GitHub's generated notes by the default labels, with
-revali's own `.github/release.yml` being that file.
+errors that name the offending `kind_labels` key, a list that only adds a label, a name listed
+twice, `release_labels = []` as the off switch, and `templates/release.yml` grouping GitHub's
+generated notes by the default labels, with revali's own `.github/release.yml` being that
+file.
 
 The configuration is observed through preflight: its `ok:` line names the label the PR gets,
 and a configuration error stops it with exit 1 before anything else.
@@ -119,6 +120,19 @@ class CustomTests(ConfigCase):
         for label in RELEASE_LABELS:
             self.assertNotIn(label, line)
 
+    def test_a_list_that_only_adds_a_label_keeps_the_default_map(self):
+        # every label the default `kind_labels` maps to is still listed
+        self.config(
+            "[pr]\n"
+            'release_labels = ["major", "minor", "patch", "docs", "skip-changelog", '
+            '"security"]\n'
+        )
+        self.assertIn("minor", self.ok_line())
+        self.change("kind: feature\n", "kind: feature\nrelease: security\n")
+        line = self.ok_line()
+        self.assertIn("security", line)
+        self.assertNotIn("minor", line)
+
 
 class ErrorTests(ConfigCase):
     """AC-1: a `kind_labels` key that is no change.md kind, or a value outside
@@ -145,6 +159,18 @@ class ErrorTests(ConfigCase):
     def test_an_unknown_pr_key(self):
         self.broken('[pr]\nrelease_label = ["minor"]\n')
         self.assertTrue(self.problem_lines("release_label"), self.stop())
+
+    def test_a_label_listed_twice(self):
+        # docs/configuration.md: a name listed twice is an error
+        self.broken('[pr]\nrelease_labels = ["minor", "patch", "docs", "patch"]\n')
+        self.assertTrue(self.problem_lines("release_labels", "patch"), self.stop())
+        self.assertFalse(self.problem_lines("kind_labels"), self.stop())
+
+    def test_a_label_listed_twice_in_another_case(self):
+        # GitHub compares label names without regard to case, so `Minor` is `minor` again
+        self.broken('[pr]\nrelease_labels = ["minor", "patch", "Minor", "docs"]\n')
+        self.assertTrue(self.problem_lines("release_labels", "Minor"), self.stop())
+        self.assertFalse(self.problem_lines("kind_labels"), self.stop())
 
 
 def _parse_release_yml(text):
