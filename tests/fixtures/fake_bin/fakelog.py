@@ -10,14 +10,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 if ROOT not in sys.path:
     sys.path.append(ROOT)
 
-from revali.state import append_line  # noqa: E402
-
-# the lock is held for one write; a writer still waiting after this long writes anyway
-WINDOW_S = 10.0
+from revali.state import FAKE_LOG_WINDOW_S, append_line  # noqa: E402
 
 
 def append(path, line):
-    append_line(path, line, retry_s=WINDOW_S)
+    append_line(path, line, retry_s=FAKE_LOG_WINDOW_S)
 
 
 def record(path, entry):

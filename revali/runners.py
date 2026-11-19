@@ -20,7 +20,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from revali.config import PlatformCfg
 from revali.procs import ExeNotFound, ProcError, ProcTimeout, one_line, resolve, run, run_shell
-from revali.state import append_line, write_text
+from revali.state import FAKE_LOG_WINDOW_S, append_line, write_text
 
 Logger = Optional[Callable[[str], None]]
 FAKE_ENV = "REVALI_FAKE_RUNNER"
@@ -339,11 +339,6 @@ class LocalRunner(Runner):
             remove_dir(tmp, label, log)
             _cleanup_git(git, ["prune"], repo_root, 60, pruned, label, log)
         return report
-
-
-# how long the fake runner waits for the call log's lock before it writes anyway; the same
-# as tests/fixtures/fake_bin/fakelog.py
-FAKE_LOG_WINDOW_S = 10.0
 
 
 class FakeRunner(Runner):

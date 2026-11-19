@@ -88,6 +88,8 @@ class ConcurrentWriters(Case):
             )
             for w, kind in enumerate(kinds)
         ]
+        for proc in procs:  # runs before the temporary directory goes (cleanups run LIFO)
+            self.addCleanup(self.stop, proc)
         runner_error = []
         thread = threading.Thread(target=self.run_fake_runner, args=(start, runner_error))
         old = os.environ.get("REVALI_FAKE_LOG")
@@ -97,6 +99,7 @@ class ConcurrentWriters(Case):
             for proc in procs:
                 self.assertEqual(proc.wait(timeout=300), 0)
             thread.join(timeout=300)
+            self.assertFalse(thread.is_alive(), "the fake runner thread never finished")
         finally:
             if old is None:
                 os.environ.pop("REVALI_FAKE_LOG", None)
@@ -132,6 +135,12 @@ class ConcurrentWriters(Case):
         expected = {"w%d" % w: LINES for w in range(STUB_WRITERS)}
         expected["runner"] = LINES
         self.assertEqual(seen, expected)
+
+    @staticmethod
+    def stop(proc):
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
 
     def run_fake_runner(self, start, errors):
         try:

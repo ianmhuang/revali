@@ -651,6 +651,11 @@ def append_history(path: str, record: dict, retry_s: Optional[float] = None) -> 
     return append_line(path, json.dumps(record, ensure_ascii=False), retry_s)
 
 
+# the window the test call logs' writers (the fake runner, tests/fixtures/fake_bin/fakelog.py)
+# give append_line: the lock is held for one write, so a writer still waiting this long writes
+FAKE_LOG_WINDOW_S = 10.0
+
+
 def append_line(path: str, line: str, retry_s: Optional[float] = None) -> str:
     """Append `line` and an LF to `path` under the OS lock on `<path>.lock`. Appends are not
     atomic on Windows (the C runtime seeks to the end, then writes), so concurrent writers
