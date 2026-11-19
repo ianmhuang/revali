@@ -4,6 +4,91 @@ One section per release, newest first, dated by its tag. A section is written wh
 release is made ([docs/releasing.md](docs/releasing.md)); changes merged since the newest
 section are not listed until then.
 
+## 0.4.0 - 2026-11-19
+
+Validation on Windows as well as Linux, a Reviewer that is shown the documents a change
+concerns and runs only on the model it is given, and a benchmark and a documentation audit
+to measure revali itself. It holds PR #44 to #99.
+
+Upgrading from 0.3.0:
+- The Reviewer no longer falls back to a lower model by itself: `[review] fallback_model =
+  "auto"` now means no fallback. A usage limit or an overloaded model stops the run with
+  exit 1 and a message saying how to go on; `revali run --reviewer-model <model>` picks
+  another model for one run (#99).
+- PROMPT_VERSION goes from 8 to 16. A project with its own `[review] prompt` should compare
+  it with prompts/review.md: the diff now holds the changes to test files that are on the
+  base, earlier reviewer tests among them (#95), and the line on modified reviewer tests
+  changed (#95, #98).
+- New interface: `revali archive` (#81); `[project] format` (#44); `[review] doc_roots` and
+  `doc_map_max` (#80); `[validate] parallel_baseline` (#55); the platform keys
+  `wsl_retries`, `wsl_retry_wait_s`, `wsl_transient_errors` (#50) and `max_procs` (#59);
+  `windows` as a platform (#76); the `[pr]` section and change.md's `release:` (#96).
+- A branch's `state.json` written by 0.3.0 is still read.
+
+Validation and the sandbox:
+- The baseline runs alongside the push, the draft PR and review round 1 (#55).
+- `windows` is a platform (#76); the baseline and validation run on every listed platform
+  (#77), and the diagnosis prompt and the issue name the platform (#78).
+- A transient WSL service failure is retried (#50); `wait` shows the retries, and a
+  failed diagnosis session's cost counts (#89).
+- A sandbox session that ends early is a sandbox error, never a pass (#57); a failed
+  cleanup no longer replaces a session's result (#65).
+- Every checkout and branch gets its own sandbox directory (#58), and every ssh session its
+  own remote directories (#63); the sandbox process limit is configurable (#59).
+- A passed validation stays mergeable when a later run stops before pushing (#87).
+- In `[review] tests = "archive"` mode the diagnosis prompt says where each archived test
+  file can be read (this release).
+
+Review:
+- change.md AC lines with a note or on several lines are parsed, malformed ones stop
+  preflight (#46), and a prose paragraph that opens with an AC id is not one (#47).
+- The reviewer's tests are formatted before lint, and every reviewer attempt's cost
+  counts (#44); a stopped round restores the reviewer's files it modified, and lint sees
+  its new files (#49); the log says when the files are formatted without lint, and which
+  (#90), and the format call skips deleted paths (#91).
+- The Reviewer is shown the documents related to the change (#80), without counting the
+  changed lines of test files (#83, #85), and the earlier reviewer tests a change modifies
+  (#95); the diff leaves out exactly what preflight lists (#82).
+- A CHANGES_REQUESTED round owes its fix as soon as it is saved (#86).
+- A usage limit or an overloaded model is named, and the Reviewer runs only on its model
+  (#99).
+
+Runs, state and merge:
+- `revali run` refuses a dirty working tree before it detaches (#51), and a run while git
+  tracks files in the state directory (#69); `[project] test_dir` is read once as a plain
+  path (#84).
+- A fix cycle is counted when the next run stops in preflight (#52).
+- State files: null fields are normalized and wrong types refused with a clear error
+  (#53); a BOM is read, a state error names the branch, and `reset` salvages the file
+  (#88).
+- The PR title follows change.md's title (#56), and each PR carries a release label (#96).
+- A fetch that lost a ref race is retried, and an open issue with the same title is reused
+  (#60); the history file is locked while a row is appended (#61); the log and the history
+  row say which revali build ran (#62), and the row stores stage and sandbox seconds to the
+  millisecond (#45).
+- After a merge, the primary tree's pull is retried and reported (#64); a PR merged or
+  closed outside `revali merge` is recorded with `revali archive` (#81).
+- On Windows a process counts as alive until its handle is signalled (#75).
+
+CI and the suite:
+- GitHub Actions runs lint and the suite on Linux (#48) and on a Windows leg that `revali
+  merge` waits for (#67), split into four shards (#74); the stray change.md left the
+  tree and CI prints the runner's CPU (#68).
+- The suite passes when the temp directory is an 8.3 short path (#66), and test stubs run
+  scripts with Git Bash on Windows (#54).
+
+Tools and documents:
+- tools/review_bench.py measures how often the Reviewer catches known bugs (#70), with
+  cases built from the review archive (#71) and resumable runs (#72).
+- The documentation graph and the names the documents use are checked mechanically (#73).
+- tools/doc_audit.py audits every document against the code (#92); the release steps and
+  this changelog (#93); the audit's findings fixed (#94, #97, #98, this release).
+
+Known issues:
+- No audit finding is open except one in the released 0.2.0 section below: "every command
+  names its repository and branch" is broader than the code (`version` and `stats` do
+  not). Released sections are not rewritten.
+
 ## 0.3.0 - 2026-09-07
 
 Validation work (PR #28 to #33):

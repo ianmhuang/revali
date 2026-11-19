@@ -1,8 +1,9 @@
 # Releasing
 
 Before a release, every document a reader can reach is checked against the code. Review
-covers the documents a change touches, links to or names (see `doc_roots` in
-[configuration.md](configuration.md)); a statement elsewhere that has gone stale is only
+covers the documents a change touches, those that link to a file it changes, and those
+whose code spans name a file it changes or a word on a line it adds or removes (see
+`doc_roots` in [configuration.md](configuration.md)); a statement elsewhere that has gone stale is only
 caught by reading each document against the code, which is what the audit does.
 
 ## The documentation audit
@@ -45,15 +46,15 @@ revali.toml), so give `--doc-usd` whenever the budget is small.
 | `--model M` | default `[review] model` (`auto` = the top tier, as there is no author); effort and timeout are `[review]`'s |
 | `--only DOC ...` | just these documents (paths as `--dry-run` lists them), audited once each in the list's order; an unknown name stops the command |
 | `--out DIR` | output directory; default a new temporary directory, printed at the start; a DIR that already holds a run is refused (continue it with `--resume`), one written by `--dry-run` is not |
-| `--resume DIR` | run again the documents in DIR that are not done, with DIR's selection, model and cap; DIR's earlier spending counts against `--budget-usd`; a `--doc-usd` given here replaces the recorded cap, a `--model` other than the recorded one is refused; refused for a dry run, another repository, or when the document list has changed |
+| `--resume DIR` | run again the documents in DIR that are not done, with DIR's selection, model and cap; DIR's earlier spending counts against `--budget-usd`; a `--doc-usd` given here replaces the recorded cap, a `--model` other than the recorded one is refused; refused for a DIR a dry run wrote, another repository, or when the document list has changed; cannot be combined with `--dry-run`, `--out` or `--only` |
 | `--dry-run` | write the prompts, start no session |
 
 The output directory holds `results.json` (per document: status `done`, `error`,
 `not-run` or `started`, or `ready` after a dry run; the model, cost, duration and
 findings), `<document>.md` (one report per document whose session ran, `/` in the path
 written as `__`), `<document>.prompt.txt` and `<document>.raw.json` (the session's raw
-output), and `summary.md`: the counts per severity per document, every high and medium
-finding with its evidence, and the documents not audited. `results.json` and `summary.md`
+output), and, except after a `--dry-run`, `summary.md`: the counts per severity per
+document, every high and medium finding with its evidence, and the documents not audited. `results.json` and `summary.md`
 are the latest run's; a run after a dry run in the same directory rewrites the prompt of
 each document it selects, and the dry run's other prompt files stay.
 
@@ -94,6 +95,9 @@ auto fallback ([docs/configuration.md](configuration.md)).
      section is not `VERSION`, and when a test that pins the version is not named here. It
      sees a pin written as a string literal inside an `assert...()` call or an `assert`
      statement; a version held in a variable and compared later is not seen.
+   - adds the new version and its date to `RELEASED` in tests/test_changelog.py, and the
+     PR numbers its section must name to that test's list; nothing forces this, as the
+     test checks only the tail of the list.
 5. After the merge, and only on the maintainer's word: an annotated tag on the merge commit,
    pushed to origin. The section's heading carries the tag's date; when the tag is made on
    another day than step 4 planned, a change that corrects the heading comes first, and the
