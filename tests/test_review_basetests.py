@@ -15,15 +15,29 @@ exclude` is ["*.lock"]. main (pushed) carries two files an earlier change's revi
 written, one of them in a subdirectory, and a README linking to the first; feature/mul is
 rebased onto it. Every assertion on a line of the prompt reads that line alone, and every
 "in the diff" reads a marker from the file's content.
+
+Round 2 (round 1 F1): the prompt tools/review_bench.py builds for a case follows the same rule,
+read from the prompt.md a `--dry-run` writes (no session is run).
 """
 
+import contextlib
+import importlib.util
+import io
+import json
+import os
 import re
 
 from revali import PROMPT_VERSION
 from revali.preflight import Stop, preflight
 from revali.review import build_prompt
 from revali.state import State
-from tests.helpers import RepoCase, git
+from tests.helpers import ROOT, RepoCase, git
+
+SPEC = importlib.util.spec_from_file_location(
+    "review_bench", os.path.join(ROOT, "tools", "review_bench.py")
+)
+bench = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(bench)
 
 EARLIER = "tests/test_review_earlier.py"
 NESTED = "tests/unit/test_review_deep.py"
@@ -206,6 +220,81 @@ class BaseCarriesReviewerTests(RepoCase):
         _, prompt = self.build()
         entries = [ln for ln in prompt.splitlines() if ln.startswith("- `README.md`")]
         self.assertTrue([ln for ln in entries if "tests/test_review_earlier.py" in ln], entries)
+
+
+class BenchPrompt(RepoCase):
+    """Round 1 F1: a benchmark case whose branch edits a reviewer test of its base gets the
+    prompt a real run would build: the file in the diff, listed, and not named as omitted."""
+
+    def setUp(self):
+        super().setUp()
+        git(["checkout", "-q", "main"], self.repo)
+        self.write(EARLIER, BODY)
+        self.commit_all("a test an earlier change's reviewer wrote")
+        git(["checkout", "-q", "feature/mul"], self.repo)
+        git(["rebase", "-q", "main"], self.repo)
+
+    def dry_run(self, name):
+        """The prompt.md of a one-case `--dry-run` over main...feature/mul of the fixture."""
+        cases = os.path.join(self.tmp, "bench-cases")
+        out = os.path.join(self.tmp, "bench-out")
+        path = os.path.join(cases, name)
+        os.makedirs(path)
+        toml = [
+            "[case]",
+            "repo = %s" % json.dumps(self.repo),
+            "fetch = []",
+            'base = "%s"' % git(["rev-parse", "main"], self.repo).strip(),
+            'head = "%s"' % git(["rev-parse", "feature/mul"], self.repo).strip(),
+            'branch = "bench/basetests"',
+            "[expected]",
+            'file = "src/calc.py"',
+            "lines = [13, 14]",
+            'description = "mul is wrong"',
+            "[source]",
+            "pr = 1",
+            "round = 1",
+            'finding = "F1"',
+        ]
+        with open(os.path.join(path, "case.toml"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("\n".join(toml) + "\n")
+        with open(self.change_md(), encoding="utf-8", newline="") as fh:
+            change = fh.read()
+        with open(os.path.join(path, "change.md"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(change)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = bench.main(["--dry-run", "--cases", cases, "--out", out])
+        self.assertEqual(code, 0, stdout.getvalue())
+        self.assertEqual(self.fake_calls("claude"), [])
+        with open(os.path.join(out, name, "prompt.md"), encoding="utf-8", newline="") as fh:
+            return fh.read().replace("\r\n", "\n")
+
+    def test_an_edited_base_reviewer_test_is_in_the_bench_prompt_and_not_omitted(self):
+        """AC-1, AC-2, AC-3 for the bench: the branch edits the earlier reviewer test and adds
+        one of its own; only the added one is left out and named as omitted"""
+        fresh = "tests/test_review_fresh.py"
+        self.write(EARLIER, BODY.replace("row_4 = 4\n", "bench_row = 4\n"))
+        self.write(fresh, "fresh_bench_row = 1\n")
+        self.commit_all("loosen the earlier reviewer test, add a new one")
+        prompt = self.dry_run("a-base-test")
+        diff = diff_of(prompt)
+        self.assertIn("+bench_row = 4", diff)
+        self.assertIn("-row_4 = 4", diff)
+        self.assertNotIn("fresh_bench_row", diff)
+        self.assertEqual(names(omitted(prompt)), [fresh])
+        self.assertEqual(names(modified(prompt)), [EARLIER])
+
+    def test_a_deleted_base_reviewer_test_is_not_named_as_omitted(self):
+        """AC-2, AC-3 for the bench: the deletion is in the diff, and nothing is omitted"""
+        git(["rm", "-q", EARLIER], self.repo)
+        self.commit_all("delete the earlier reviewer test")
+        prompt = self.dry_run("b-deleted")
+        diff = diff_of(prompt)
+        self.assertIn("deleted file mode", diff)
+        self.assertIn("-row_11 = 11", diff)
+        self.assertEqual(omitted(prompt), "(none)")
+        self.assertEqual(names(modified(prompt)), [EARLIER])
 
 
 class PromptRule(RepoCase):
