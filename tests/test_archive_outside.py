@@ -76,7 +76,8 @@ class Archive(RepoCase):
         self.assertIn("archive", help_text)
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(here, "README.md"), encoding="utf-8") as fh:
-            self.assertIn("| archive [--branch <b>] |", fh.read())
+            # docs/readme-refresh AC-4 gives each subcommand its own Usage line
+            self.assertIn("revali.py archive [--branch <b>]", fh.read())
 
     # AC-3, AC-5 -----------------------------------------------------------------------------
 

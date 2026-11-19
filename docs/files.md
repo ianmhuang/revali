@@ -52,6 +52,7 @@ history row, is one of:
 | `closed` | `revali archive` found the PR closed without merging (one merged elsewhere becomes `merged`) |
 
 The first four are a run in progress, the other seven a result.
+[docs/workflow.md](workflow.md) draws how a run moves between them.
 
 `state.json` is revali's own file, but a hand edit is read as follows. A
 field set to `null` takes its default, mostly an empty list, `0`, `""` or

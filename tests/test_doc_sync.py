@@ -348,8 +348,10 @@ class Repository(unittest.TestCase):
         self.assertEqual(docgraph.broken_links(self.graph), [])  # AC-2
 
     def test_the_graph_reaches_past_the_first_level(self):
-        self.assertIn("bench/README.md", self.graph.nodes)
-        self.assertGreaterEqual(self.graph.nodes["bench/README.md"].depth, 2)
+        # docs/readme-refresh AC-5 links bench/README.md from README itself, so the file
+        # reached only through a docs page is now templates/release.yml
+        self.assertIn("templates/release.yml", self.graph.nodes)
+        self.assertGreaterEqual(self.graph.nodes["templates/release.yml"].depth, 2)
 
     def test_no_markdown_file_is_outside_the_graph(self):
         # AC-3; the candidates are what git tracks or would add, not an ignored venv/

@@ -17,6 +17,24 @@ the existing suite, and the merge waits for the result. Three roles take part.
   test, or the environment is at fault, and whether the branch or the base
   introduced it; a bug the base already had gets a GitHub issue.
 
+**What it does.**
+
+| Capability | Described in |
+|---|---|
+| Acceptance criteria before the code: change.md's `AC-n` lines are approved first, and preflight refuses a draft | [docs/workflow.md](docs/workflow.md#workflow-1) |
+| Checks before anything is pushed: a clean tree, your own repository, an up-to-date base, the diff size, secrets, the project's lint line | [docs/workflow.md](docs/workflow.md#running) |
+| An independent review of the diff, the documents related to it and the earlier reviewer tests it changes, with acceptance tests written from the criteria | [docs/workflow.md](docs/workflow.md#why-separate-sessions) |
+| Sandbox validation of the new tests and the existing suite through WSL, ssh or a local worktree, on each listed platform (`linux`, `windows`) | [docs/sandbox.md](docs/sandbox.md) |
+| A diagnosis of each failure (code, test or environment, from the branch or the base) and a GitHub issue for a bug the base already had | [docs/configuration.md](docs/configuration.md) |
+| A draft PR whose title and release label follow change.md, with each round's review as a comment | [docs/side-effects.md](docs/side-effects.md) |
+| A merge only after READY TO MERGE: it waits for CI, merges by `[merge] method`, comments on the issues the branch fixes and archives the review files | [docs/side-effects.md](docs/side-effects.md) |
+| Release notes grouped by the PRs' release labels | [docs/releasing.md](docs/releasing.md#release-notes-for-a-project-that-uses-revali) |
+| Several agent sessions on one repository, one worktree each | [docs/workflow.md](docs/workflow.md#several-agents-on-one-repository) |
+| Every round, validation and cost on record: `review-<n>.md`, `tests.md`, logs, a history row, `revali stats` | [docs/files.md](docs/files.md) |
+| Configuration in three layers: revali's defaults, your user file, the project's `revali.toml` | [docs/configuration.md](docs/configuration.md) |
+| A benchmark of how often the reviewer finds known bugs, replaying archived rounds | [bench/README.md](bench/README.md) |
+| An audit of every document against the code before a release | [docs/releasing.md](docs/releasing.md#the-documentation-audit) |
+
 **Why separate sessions.** Each role runs in its own session with its own
 inputs, so nobody grades their own work: the Reviewer gets the acceptance
 criteria, the diff and the documents the diff concerns, not the Developer's reasoning, the Validator is a
@@ -46,10 +64,10 @@ sequenceDiagram
     loop until APPROVE + PASS (max 2 fix cycles)
         D->>R: revali run
         R->>R: preflight: clean tree, own repo, base, diff size, secrets, lint, baseline start
-        R->>G: push, draft PR
-        R->>B: diff, change.md, checklist, previous round
+        R->>G: push, draft PR, title and release label from change.md
+        R->>B: diff, change.md, related docs, changed earlier reviewer tests, checklist, previous round
         B-->>R: verdict, findings, acceptance tests
-        R->>R: AC coverage, the project's lint line, smoke run of the tests
+        R->>R: AC coverage, the project's format and lint lines, smoke run of the tests
         R->>G: commit tests, PR comment
         alt APPROVE
             R->>V: sandbox: new tests, plus the existing suite unless the baseline still covers it
@@ -74,7 +92,7 @@ sequenceDiagram
     end
     U->>D: merge
     D->>R: revali merge
-    R->>G: wait for CI, squash merge, delete branch
+    R->>G: release label check, wait for CI, squash merge (or another [merge] method), delete branch
     R->>G: comment on the issues a branch commit says it fixes
 ```
 
@@ -86,7 +104,7 @@ not a FAIL verdict.
 | Role | Started by | Reads | Writes | Model |
 |---|---|---|---|---|
 | Developer | the user | the request, the repo | `change.md`, code, its own tests | whatever the user's session runs; recorded as `author_model` |
-| Reviewer | revali, on `/revali` | diff, `change.md`, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir` (committed once they pass the project's `lint` line and a smoke run; with `[review] tests = "archive"` kept under `.revali/<branch>/tests/` instead and never committed), and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment; does not run the tests | `auto`: one tier above the Developer |
+| Reviewer | revali, on `/revali` | diff, `change.md`, the documents related to the diff, the earlier reviewer tests the change modifies, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir` (formatted by the project's `format` line, committed once they pass the project's `lint` line and a smoke run; with `[review] tests = "archive"` kept under `.revali/<branch>/tests/` instead and never committed), and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment; does not run the tests | `auto`: one tier above the Developer |
 | Validator | revali, after APPROVE | a sandbox clone of the branch; when the Reviewer's tests fail, one of the base tip with them copied in | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers (with `introduced_by`: branch or base) and revali writes `diagnose-n.json` (one per failing platform when several are listed), and opens a GitHub issue for a bug the base already had | the runner needs none; diagnosis `auto`: one tier below the Developer |
 
 Three user actions (approve the AC, `/revali`, `revali merge`) are the gates;
@@ -103,27 +121,38 @@ revali reviews its own changes on this public one.
 
 - Python 3.11+ (stdlib only), git, GitHub CLI (`gh auth login` done)
 - Claude Code CLI on PATH (`claude`), for the reviewer / diagnoser sessions
-- A place to run the sandbox: on Windows, WSL with an Ubuntu distro; on any
-  host, a Linux machine reachable by key-based ssh (`runner = "ssh"`) with
-  git, bash and coreutils installed. `runner = "local"` runs the steps in a
-  git worktree on the host itself, with no isolation: a host that is its
-  own sandbox, or a first look before setting one up
+- A place to run the sandbox, one of three runners (`[validate.<platform>] runner`); a
+  project validates on `linux`, `windows` or both (`[project] platforms`):
+
+| Runner | Where the sandbox runs | Isolation | Platforms | Verified end to end |
+|---|---|---|---|---|
+| `runner = "wsl"` (default) | a clone inside a WSL distro (Ubuntu) on a Windows host | its own Linux system | `linux` | yes, 2026-08-30 and 2026-09-04 |
+| `runner = "ssh"` | a clone on a machine reached by key-based ssh, with git, bash and coreutils installed | another machine | `linux`; `windows` when bash is its ssh shell | `linux` yes, 2026-08-30; `windows` not yet |
+| `runner = "local"` | a git worktree on the host itself: a host that is its own sandbox, or a first look before setting one up | no isolation | `linux`; `windows` on a Windows host | no record |
 
 ## Usage
 
 ```
-python <path-to>/revali.py preflight        # checks only (no lint, no baseline); fetches the base, commits and pushes nothing
-python <path-to>/revali.py run              # detached; then:
-python <path-to>/revali.py wait --timeout 9m
-python <path-to>/revali.py merge            # after READY TO MERGE (docs/files.md, stages); waits for CI
-python <path-to>/revali.py status | stop | reset | clean <branch> | archive [--branch <b>] | stats | version
-python <path-to>/revali.py --version        # same line as `version`
+python <path-to>/revali.py preflight [--base <b>]   # checks only (no lint, no baseline); fetches the base, commits and pushes nothing
+python <path-to>/revali.py run [--base <b>]         # detached; then:
+python <path-to>/revali.py wait --timeout 9m        # repeat until it returns other than 4; --branch <b> for another branch's run
+python <path-to>/revali.py merge                    # after READY TO MERGE (docs/files.md, stages); waits for CI
+python <path-to>/revali.py run --dry-run | --foreground   # what a run would do, sending nothing | run in this process
+python <path-to>/revali.py status [--branch <b>]    # stage, last message, rounds, fix cycles, cost, PR
+python <path-to>/revali.py stop                     # kill this working tree's run, or record a run that died as stopped
+python <path-to>/revali.py reset                    # drop the branch's state.json, keep its files
+python <path-to>/revali.py clean <branch>           # delete a branch's state directory
+python <path-to>/revali.py archive [--branch <b>]   # record a PR merged or closed without revali merge, archive its files
+python <path-to>/revali.py stats                    # the run history per repository: first-try pass rate, rounds, cost
+python <path-to>/revali.py version                  # the version; --version prints the same line
+python <path-to>/revali.py --verbose <command>      # echo every command revali runs to the terminal
 ```
 
 What a run does, in order: preflight (ending with the existing suite in the sandbox
-as a baseline, by default running on alongside the next two steps), push + draft PR,
-reviewer round (`claude -p` with the diff, change.md, the checklist and the documents related to the diff; writes tests into `test_dir`; the script
-checks AC coverage, runs `lint` over them, smoke-runs them, commits or archives them), validation
+as a baseline, by default running on alongside the next two steps), push + draft PR
+(its title and release label from change.md),
+reviewer round (`claude -p` with the diff, change.md, the checklist, the documents related to the diff and the earlier reviewer tests it changes; writes tests into `test_dir`; the script
+checks AC coverage, runs the project's `format` and `lint` lines over them, smoke-runs them, commits or archives them), validation
 (the new tests in the sandbox, plus the existing suite unless nothing but
 the reviewer's test commits changed since the baseline ran it; when the new
 tests fail they run once more on the base tip; on any failure a diagnoser session says whether
@@ -135,13 +164,15 @@ and the history row. Every result lands in `.revali/<branch>/`
 
 ## Documentation
 
-- [docs/workflow.md](docs/workflow.md): why the sessions are separate, the acceptance criteria before the code,
-  project setup, what `run` prints and checks, what happens after exit 2 or a dead run, several agents on one repository
-- [docs/configuration.md](docs/configuration.md): the three layers, models, `REVALI_DISABLE`
+- [docs/workflow.md](docs/workflow.md): why the sessions are separate, the acceptance criteria before the code and
+  how an AC line is written, project setup, what `run` prints and checks, the stages of a run, what
+  happens after exit 2 or a dead run, several agents on one repository
+- [docs/configuration.md](docs/configuration.md): the three layers, models, `REVALI_DISABLE`, platforms, related documents, `format` and `lint`, issues, the archive, release labels
 - [docs/files.md](docs/files.md): every file revali reads or writes and the key that moves it
-- [docs/sandbox.md](docs/sandbox.md): the `wsl`, `ssh` and `local` runners, and the verification record
+- [docs/sandbox.md](docs/sandbox.md): the `wsl`, `ssh` and `local` runners, several platforms, retries and limits, the verification record
 - [docs/side-effects.md](docs/side-effects.md): every git and GitHub action revali takes, read before the first run
-- [docs/releasing.md](docs/releasing.md): the release steps, and checking every document against the code before a release
+- [docs/releasing.md](docs/releasing.md): the release steps, the documentation audit, release notes for a project that uses revali
+- [bench/README.md](bench/README.md): the reviewer benchmark, and building a case from an archived round
 - [skill/SKILL.md](skill/SKILL.md): the Claude Code skill behind `/revali`, the
   Developer's side of the workflow; [templates/CLAUDE-snippet.md](templates/CLAUDE-snippet.md)
   is the paragraph that goes into a project's `CLAUDE.md` so an authoring
@@ -155,6 +186,9 @@ python tests/run_parallel.py tests.test_pipeline    # a module, a class or a tes
 python -m unittest discover -s tests -t .           # the same tests, serially
 python tests/fixtures/make_sample_repo.py "<dir>"   # throwaway sample project
 python tools/backfill_archive.py owner/name         # rebuild the archive of PRs merged before archive_dir existed
+python tools/review_bench.py --dry-run              # the reviewer benchmark over bench/cases/; without --dry-run it spends
+python tools/bench_case.py --list <repo archive>    # the rounds a benchmark case can be built from (bench/README.md)
+python tools/doc_audit.py --dry-run                 # the documentation audit; without --dry-run it spends (docs/releasing.md)
 ```
 
 Tests use a fake `gh` (via `REVALI_GH_CMD`) and real `git` in temp repos; every

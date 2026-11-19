@@ -118,3 +118,7 @@ and `gh release create v<version> --verify-tag --generate-notes --notes "<lead l
 each tag gives the same grouped notes: Major, Minor, Patch and Docs changes, the rest under
 Other, a PR labelled `skip-changelog` left out. A project that labels PRs another way sets
 `[pr] release_labels = []`, and revali leaves its labels alone.
+
+GitHub reads `.github/release.yml` from the tagged commit, so commit the file before the
+tag: a release whose tag predates the file lists its PRs ungrouped under "What's Changed",
+and `--generate-notes` cannot be pointed at a newer copy.

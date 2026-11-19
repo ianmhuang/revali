@@ -238,7 +238,17 @@ ends with `; label <name>`. If change.md is edited after the run to such a
 value, `revali merge` warns and leaves the PR's labels as they are.
 `release_labels = []` turns it off: no label is
 added or removed. [templates/release.yml](../templates/release.yml) groups the release
-notes GitHub generates by these labels ([docs/releasing.md](releasing.md)).
+notes GitHub generates by these labels ([docs/releasing.md](releasing.md)). With the
+defaults:
+
+| change.md says | The PR's label | Its heading in the release notes |
+|---|---|---|
+| `kind: feature` | `minor` | Minor Changes |
+| `kind: fix` | `patch` | Patch Changes |
+| `kind: docs` | `docs` | Docs |
+| `release: major` (any kind) | `major` | Major Changes |
+| `release: skip-changelog` | `skip-changelog` | left out of the notes |
+| (a PR revali did not open) | none of these | Other Changes |
 
 Reserved keys: defaults.toml carries a few keys this version accepts but
 does not act on. `[project] change_source` only accepts `manual` and

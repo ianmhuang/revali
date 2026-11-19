@@ -99,7 +99,8 @@ class ReadmeSections(unittest.TestCase):
             self.assertIn("[docs/%s](docs/%s)" % (name, name), index, name)
 
     def test_readme_is_still_a_front_page(self):
-        self.assertLessEqual(len(self.text.splitlines()), 170)
+        # docs/readme-refresh AC-8: 170 became 200
+        self.assertLessEqual(len(self.text.splitlines()), 200)
 
 
 class LinksToRepositoryFiles(unittest.TestCase):
@@ -122,7 +123,10 @@ class LinksToRepositoryFiles(unittest.TestCase):
             here = os.path.dirname(os.path.join(ROOT, page))
             for no, line in prose_lines(read(page)):
                 for m in LINK.finditer(line):
-                    href = m.group(1)
+                    # docs/readme-refresh AC-1: a link may name a heading (`docs/x.md#part`);
+                    # the file must still exist, and tests/test_readme_refresh.py checks the
+                    # heading
+                    href = m.group(1).split("#", 1)[0]
                     if "://" in href or href.startswith("/"):
                         broken.append("%s:%d not relative: %s" % (page, no, href))
                     elif not os.path.isfile(os.path.join(here, href)):

@@ -42,7 +42,9 @@ class ReadmeFrontPage(unittest.TestCase):
         self.text = read("README.md")
 
     def test_length(self):
-        self.assertLessEqual(len(self.text.splitlines()), 170)
+        # docs/readme-refresh AC-8: 170 became 200 when README gained the capability and runner
+        # tables and the full command list
+        self.assertLessEqual(len(self.text.splitlines()), 200)
 
     def test_parts_in_order(self):
         markers = [

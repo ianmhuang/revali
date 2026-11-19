@@ -37,6 +37,16 @@ Then the author implements, writes its own tests, runs the existing suite,
 fills in `What`, commits, and the user types `/revali`. The reviewer's
 acceptance tests come on top of the author's tests, not instead of them.
 
+Each acceptance criterion is one bullet, `- AC-n: text`, with at least one
+such line and at least eight characters of text in each. A note may stand in
+parentheses before the colon (`- AC-2 (PR #30 F1): text`), and the text may go
+on over indented continuation lines. Any other line that starts like an AC
+(`- **AC-3**: ...`, `- AC-3 text`, `1. AC-4: ...`) stops preflight with exit 1,
+listed with the line's number among the other change.md problems; a paragraph
+that merely begins with an AC id, without a bullet or a colon, is prose.
+Preflight's `ok:` line lists the ids it parsed, so a criterion that was not
+read is visible before anything is pushed.
+
 To make an authoring session do this without being asked each time, paste
 [templates/CLAUDE-snippet.md](../templates/CLAUDE-snippet.md) into the project's `CLAUDE.md`.
 
@@ -109,6 +119,43 @@ the round / fix-cycle / cost counters, the PR, and, once the branch has a
 review round, `tests: commit` or `tests: archive`: the mode its rounds run
 in, fixed for the branch (`[review] tests` in
 [docs/configuration.md](configuration.md)).
+
+The stage in `state.json` moves like this; `wait` returns the exit code of the
+stage a run ended in, `status` prints the stage, and [docs/files.md](files.md) says
+what each one means:
+
+```mermaid
+stateDiagram-v2
+    [*] --> preflight: revali run, preflight passes
+    [*] --> needs_action: preflight refuses, exit 2
+    [*] --> needs_human: fix cycles used up, exit 3
+    preflight --> pr
+    pr --> review
+    pr --> validate: an APPROVE round not yet validated
+    review --> validate: APPROVE
+    validate --> ready_to_merge: PASS, exit 0
+    review --> needs_action: CHANGES_REQUESTED or NEEDS_INFO, exit 2
+    validate --> needs_action: FAIL, exit 2
+    needs_action --> preflight: a fix or an answer, revali run
+    ready_to_merge --> merged: revali merge, exit 0
+    ready_to_merge --> closed: PR closed elsewhere, revali archive, exit 0
+    error : error, exit 1, from any stage of a run
+    stopped : stopped, exit 1, after revali stop
+```
+
+A pipeline error at any stage of a run (a red baseline, a change.md problem, the
+tree moved, an unexpected exception) ends in `error`, and `revali stop` ends a run
+in `stopped`. `preflight` is recorded once preflight has passed, so a run it
+refuses goes from the previous run's stage straight to `needs_action`,
+`needs_human` or `error`. It refuses with exit 2 when the branch needs a
+rebase, `[project] format` does not name `{files}`, the lint line fails, the
+diff is too large, git tracks files in the state directory, nothing changed
+since a review or validation that asked for a fix, or `[review] tests`
+differs from the mode the branch's rounds ran in. `run --dry-run` ends at
+`preflight` with exit 0. A run that dies
+without recording a result keeps its last stage, and `wait` and `status` report
+it as died (below). `revali archive` records `merged` or `closed` from any stage
+once the branch has a PR.
 
 A run goes preflight, PR, review, validate. Preflight runs `git fetch
 origin <base>` and compares the branch against `origin/<base>`; a fetch
