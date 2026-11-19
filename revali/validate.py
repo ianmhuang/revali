@@ -681,10 +681,10 @@ def _other_platforms(others: List[ValidationOutcome]) -> str:
 
 def _test_files_for_prompt(ctx: Context, state: State, rdir: str) -> str:
     """The reviewer's test files as the diagnosis prompt lists them. In archive mode they are
-    not in the working tree the session reads, so each line adds where the archived copy is:
-    relative to the repository root when the state directory is inside it, else absolute.
-    Links are not resolved (PR #100 F2): a state directory that links elsewhere is still read
-    through its path under the repository root, the session's working directory."""
+    not in the working tree the session reads, so each line adds where the archived copy is,
+    relative to the repository root (the session's working directory). `rdir` is always
+    under it: `[paths] state_dir` is a single directory name. Links are not resolved, so a
+    state directory that links elsewhere is still read through its path in the repository."""
     if not state.test_files:
         return "(none)"
     if not archive_mode(ctx, state):
@@ -693,17 +693,9 @@ def _test_files_for_prompt(ctx: Context, state: State, rdir: str) -> str:
     lines = []
     for rel in state.test_files:
         full = os.path.abspath(os.path.join(archive_dir(rdir), *rel.split("/")))
-        inside = _same_drive(root, full) and os.path.normcase(
-            os.path.commonpath([root, full])
-        ) == os.path.normcase(root)
-        where = os.path.relpath(full, root).replace("\\", "/") if inside else full
+        where = os.path.relpath(full, root).replace("\\", "/")
         lines.append("- %s (not in the working tree; read it at `%s`)" % (rel, where))
     return "\n".join(lines)
-
-
-def _same_drive(a: str, b: str) -> bool:
-    # os.path.commonpath raises on Windows for paths on two drives
-    return os.path.splitdrive(a)[0].lower() == os.path.splitdrive(b)[0].lower()
 
 
 def _diagnose(

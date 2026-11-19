@@ -232,12 +232,20 @@ class ArchivedPaths(unittest.TestCase):
         out = _test_files_for_prompt(self.ctx("/repo", "archive"), State(), "/repo/.revali/b")
         self.assertEqual(out, "(none)")
 
-    def test_a_state_dir_outside_the_repository_gives_absolute_paths(self):
-        with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as away:
-            rdir = os.path.join(away, "feature__mul")
-            out = _test_files_for_prompt(self.ctx(repo, "archive"), State(test_files=[FILE]), rdir)
-            where = os.path.abspath(os.path.join(rdir, "tests", *FILE.split("/")))
-            self.assertEqual(out, "- %s (not in the working tree; read it at `%s`)" % (FILE, where))
+    def test_another_state_dir_name_is_followed(self):
+        # PR #100 F3: the state directory is always one name under the repository root
+        with tempfile.TemporaryDirectory() as repo:
+            rdir = os.path.join(repo, "review-state", "feature__mul")
+            state = State(test_files=[FILE, HELPER])
+            out = _test_files_for_prompt(self.ctx(repo, "archive"), state, rdir)
+            self.assertEqual(
+                out.split("\n"),
+                [
+                    "- %s (not in the working tree; read it at `%s`)"
+                    % (rel, "review-state/feature__mul/tests/" + rel)
+                    for rel in (FILE, HELPER)
+                ],
+            )
 
     def test_a_linked_state_dir_keeps_its_path_under_the_repository(self):
         # PR #100 F2: the path goes through the link, which the session can read from its
