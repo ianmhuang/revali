@@ -33,6 +33,17 @@ def slug(heading):
     return text.replace(" ", "-")
 
 
+def prose_lines(text):
+    """The lines of `text` outside fenced code blocks."""
+    lines, fence = [], False
+    for line in text.split("\n"):
+        if line.strip().startswith("```"):
+            fence = not fence
+        elif not fence:
+            lines.append(line)
+    return lines
+
+
 def headings(path):
     """(anchor, heading line) for the headings of `path` outside fenced code, with the
     anchors GitHub gives them: a repeated heading gets `-1`, `-2`, ... after the first
@@ -166,10 +177,14 @@ class WhatItDoes(unittest.TestCase):
         )
         broken = []
         for page in pages:
-            lines = [ln for ln in read(page).split("\n") if "#" in ln and "](" in ln]
+            lines = [ln for ln in prose_lines(read(page)) if "#" in ln and "](" in ln]
             here = os.path.dirname(os.path.join(ROOT, page))
             broken += ["%s: %s" % (page, b) for b in broken_links(lines, here) if "#" in b]
         self.assertEqual(broken, [])
+
+    def test_a_link_shape_in_fenced_code_is_not_a_link(self):  # round 3 follow-up
+        text = "[a](docs/x.md#y)\n```\n[b](docs/nope.md#z)\n```\nend\n"
+        self.assertEqual(prose_lines(text), ["[a](docs/x.md#y)", "end", ""])
 
     def test_the_rows_name_the_newer_capabilities(self):
         table = " ".join(capability_rows(read("README.md")))
@@ -317,6 +332,19 @@ class StageDiagram(unittest.TestCase):
     def test_a_stage_missing_or_extra_shows(self):
         md = "```mermaid\nstateDiagram-v2\n    [*] --> preflight\n    preflight --> zap: x\n```\n"
         self.assertEqual(diagram_states(md), {"preflight", "zap"})
+
+    def test_every_preflight_refusal_with_exit_2_is_named(self):  # round 3 follow-up
+        flat = " ".join(read("docs", "workflow.md").split())
+        para = flat.split("It refuses with exit 2 when", 1)[1].split(".", 1)[0]
+        for reason in (
+            "rebase",
+            "lint",
+            "diff is too large",
+            "state directory",
+            "nothing changed",
+            "`[review] tests`",
+        ):
+            self.assertIn(reason, para, reason)
 
 
 class OtherDocs(unittest.TestCase):
