@@ -1135,7 +1135,7 @@ def smoke_run(
     label = "smoke-r%d-%d" % (round_no, attempt)
     if log:
         log.stage("review", "smoke run of %d test file(s) on %s" % (len(extra), runner.name))
-    # new_test names this round's files when it asks for {files}
+    # new_test names the reviewer's files that differ from HEAD when it asks for {files}
     steps = steps_with_files(
         plat, ["setup", "build", "new_test"], sorted(extra), log.stage if log else None, "review"
     )

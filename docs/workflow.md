@@ -41,7 +41,7 @@ Each acceptance criterion is one bullet, `- AC-n: text`, with at least one
 such line and at least eight characters of text in each. A note may stand in
 parentheses before the colon (`- AC-2 (PR #30 F1): text`), and the text goes
 on over the lines after it, indented continuation lines or unindented ones, up
-to a blank line, a heading or a list item indented no deeper than the AC. Only
+to a blank line, a `## ` section heading or a list item indented no deeper than the AC. Only
 the Acceptance criteria section is checked: any other line in it that starts like an AC
 (`- **AC-3**: ...`, `- AC-3 text`, `1. AC-4: ...`) stops preflight with exit 1,
 listed with the line's number among the other change.md problems; a paragraph
@@ -234,7 +234,8 @@ down, an unexpected error) is reported as such: an unexpected error is
 recorded as stage `error` with exit 1 and the traceback in `logs/run.log`;
 when nothing could record anything, `wait` prints `died at stage '<stage>'
 without a result` and returns 1, and `status` prints `running: no; the last
-run stopped at stage '<stage>' without a result` after its `stage:` line.
+run stopped at stage '<stage>' without a result (see <path to logs/run.log>)`
+after its `stage:` line.
 `revali stop` acknowledges such a run: with no live process
 and no result recorded it sets stage `stopped` (exit 1) and removes the
 stale lock, after which `wait` and `status` report a stopped run; a state

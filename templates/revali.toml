@@ -4,8 +4,8 @@
 #   <revali>/defaults.toml  <  ~/.revali/config.toml  <  this file
 # Every key below is optional except the one marked "required", which each
 # listed platform needs in its [validate.<name>] table (here or in
-# ~/.revali/config.toml); leave any other key out (or delete it) to inherit the
-# user or tool default.
+# ~/.revali/config.toml), and host for the ssh runner; leave any other key out
+# (or delete it) to inherit the user or tool default.
 # defaults.toml lists every key with its default, except config_version; the
 # [validate.<name>] keys are under its [validate.platform].
 # Commands run through the platform shell from the repo root. The [validate.*]
@@ -67,7 +67,8 @@ distro = "Ubuntu"                 # wsl only
 # wsl_retries = 2                 # wsl only: retries of a call that failed with a transient error
 # wsl_retry_wait_s = 30           # wsl only: pause before each retry
 # wsl_transient_errors = ["Wsl/Service/WSAETIMEDOUT"]   # wsl only: what counts as transient
-# host = "user@box"               # ssh only; port and key come from ~/.ssh/config
+# host = "user@box"               # ssh only, and required there; port and key come
+#                                 # from ~/.ssh/config
 # connect_timeout_s = 15          # ssh only; default from defaults.toml
 # transfer_timeout_min = 10       # ssh only; one scp transfer
 command_timeout_min = 15

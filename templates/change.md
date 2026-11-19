@@ -11,9 +11,10 @@ status: draft
      refuses a draft. After implementation: fill in What and Why.
      Each AC is "- AC-n: text", optionally with a note before the colon
      ("- AC-2 (PR #30 F1): text"); its continuation lines, indented or
-     not, join its text up to a blank line, a heading or a list item
-     indented no deeper than the AC. Under "Acceptance criteria", any other line that
-     starts like an AC stops preflight; other sections are not checked. A
+     not, join its text up to a blank line, a "## " section heading or a
+     list item indented no deeper than the AC. Under "Acceptance criteria",
+     any other line that starts like an AC stops preflight; other sections
+     are not checked. A
      paragraph that merely begins with an AC id, without a bullet or a
      colon, is prose.
      Optional front matter: "release: <label>" gives the PR that release

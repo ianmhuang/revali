@@ -37,8 +37,8 @@ project's CLAUDE.md says so; see `templates/CLAUDE-snippet.md`).
      know of the code; list edge and failure cases, not only the happy path.
      Write each as `- AC-n: text`; a note in parentheses before the colon
      (`- AC-2 (PR #30 F1): text`) is fine, and continuation lines, indented
-     or not, join the AC's text up to a blank line, a heading or a list
-     item indented no deeper than it. In that section, any other line that starts like an
+     or not, join the AC's text up to a blank line, a `## ` section heading or a
+     list item indented no deeper than it. In that section, any other line that starts like an
      AC stops preflight; other sections are not checked. A paragraph
      that merely begins with an AC id, without a bullet or a colon, is prose.
    - `Out of scope`, `Dependencies`.

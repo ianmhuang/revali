@@ -68,7 +68,7 @@ sequenceDiagram
         R->>B: diff, change.md, related docs, changed earlier reviewer tests, checklist, previous round
         B-->>R: verdict, findings, acceptance tests
         R->>R: AC coverage, the project's format and lint lines, smoke run of the tests
-        R->>G: commit tests, PR comment
+        R->>G: commit tests, PR comment (a summary unless the repo is private)
         alt APPROVE
             R->>V: sandbox: new tests, plus the existing suite unless the baseline still covers it
             alt PASS

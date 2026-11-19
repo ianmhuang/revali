@@ -62,7 +62,8 @@ Things a linter cannot check; formatting is not listed.
 - Files revali writes are read with `newline=""` and written with `newline="\n"` (LF);
   the exceptions are `logs/run.log`, the detached run's standard output, which takes the
   platform's line ending (CRLF on Windows), the fake runner's test log, and the
-  line-oriented reads of the wsl retries record and of what the sandbox writes to `logs/`
-  (step logs, `<label>.results`, `<label>-script.log`), which strip line endings anyway.
+  reads of the wsl retries record and of what the sandbox writes to `logs/` (step logs,
+  `<label>.results`, `<label>-script.log`), which run in text mode, so a CRLF the sandbox
+  wrote reads as LF, and strip line endings where they split lines.
   Subprocesses use UTF-8 with `errors="replace"`.
 - Prompts, schemas, comments, commit messages, and docs are in English.

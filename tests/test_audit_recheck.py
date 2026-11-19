@@ -4,9 +4,12 @@ places that repeated the claim. Every check reads the file with its whitespace f
 rewrap does not matter but dropping a corrected statement does."""
 
 import os
+import tomllib
 import unittest
 
 from revali import PROMPT_VERSION
+from revali.changedoc import parse
+from revali.config import EngineCfg, PrCfg
 from tests.helpers import ROOT
 
 
@@ -32,6 +35,12 @@ class Readme(unittest.TestCase):
         self.assertIn("and a PR comment (a summary when the repository is not private)", text)
         self.assertIn("as PR comments (summaries when the repository is not private)", text)
 
+    def test_the_sequence_line_too(self):  # round 1 F1
+        self.assertIn(
+            "R->>G: commit tests, PR comment (a summary unless the repo is private)",
+            raw("README.md"),
+        )
+
     def test_several_platforms_name_their_diagnosis_file(self):
         text = flat("README.md")
         self.assertIn("`diagnose-n-<platform>.json` for each failing platform", text)
@@ -55,7 +64,9 @@ class Conventions(unittest.TestCase):
 
     def test_newline_exceptions_name_the_line_reads(self):
         text = flat("CONVENTIONS.md")
-        self.assertIn("line-oriented reads of the wsl retries record", text)
+        self.assertIn("reads of the wsl retries record", text)
+        # round 1 F3: the step log is read whole, so the reason is text mode, not stripping
+        self.assertIn("which run in text mode, so a CRLF the sandbox wrote reads as LF", text)
         self.assertIn("`<label>.results`, `<label>-script.log`", text)
 
 
@@ -78,7 +89,8 @@ class Workflow(unittest.TestCase):
 
     def test_status_line_as_printed(self):
         self.assertIn(
-            "`running: no; the last run stopped at stage '<stage>' without a result`",
+            "`running: no; the last run stopped at stage '<stage>' without a result (see <path to "
+            "logs/run.log>)`",  # round 1 F6: the line as pipeline.py prints it
             flat("docs", "workflow.md"),
         )
 
@@ -166,6 +178,11 @@ class Files(unittest.TestCase):
         self.assertIn(
             "its own name, result, failed step, cause, `introduced_by`", flat("docs", "files.md")
         )
+        # round 1 F7: every value validate.INTRODUCED_BY allows, and the empty one
+        self.assertIn(
+            "`introduced_by` (branch, base or unknown, from the diagnosis; empty without one)",
+            flat("docs", "files.md"),
+        )
 
     def test_history_row_fields(self):
         self.assertIn(
@@ -183,6 +200,16 @@ class SkillAndTemplate(unittest.TestCase):
                 self.assertIn("indented or not", text)
                 self.assertIn("other sections are not checked", text)
                 self.assertIn("any other line that starts like an AC stops preflight", text)
+
+    def test_only_a_section_heading_ends_an_ac(self):  # round 1 F2
+        for rel in (("skill", "SKILL.md"), ("templates", "change.md"), ("docs", "workflow.md")):
+            with self.subTest(path="/".join(rel)):
+                self.assertIn("section heading", flat(*rel))
+        head = "---\ntitle: t\nkind: fix\n---\n\n## Acceptance criteria\n- AC-1: first text\n"
+        joined = dict(parse(head + "### not a section\n").acs)
+        self.assertIn("not a section", joined["AC-1"])  # a deeper heading joins the AC
+        ended = dict(parse(head + "## Out of scope\nnothing\n").acs)
+        self.assertEqual(ended["AC-1"], "first text")
 
     def test_worktree_detach_condition(self):
         text = flat("skill", "SKILL.md")
@@ -220,6 +247,32 @@ class TomlTemplate(unittest.TestCase):
                 self.assertIn("plus the earlier rounds'", text)
                 self.assertNotIn("this round's files in the smoke run", text)
         self.assertIn("no file to name skips the step", flat("templates", "revali.toml"))
+
+    def test_host_is_required_for_ssh(self):  # round 1 F5
+        text = flat("templates", "revali.toml").replace("# ", "")
+        self.assertIn("and host for the ssh runner", text)
+        self.assertIn("ssh only, and required there", text)
+
+    def test_no_other_place_says_this_rounds_files(self):  # round 1 F4
+        self.assertNotIn("this round's files", raw("revali", "review.py"))
+
+    def test_defaults_toml_has_every_key_but_config_version(self):  # round 1 follow-up
+        # test_config_layers covers project, review, validate, merge, paths and the platform
+        # table; these are the two sections it leaves out
+        with open(os.path.join(ROOT, "defaults.toml"), "rb") as fh:
+            defaults = tomllib.load(fh)
+        for name in PrCfg.__dataclass_fields__:
+            self.assertIn(name, defaults["pr"], "pr.%s has no default" % name)
+        for engine, table in defaults["engines"].items():
+            for name in EngineCfg.__dataclass_fields__:
+                if name != "name":  # the table's own key
+                    self.assertIn(name, table, "engines.%s.%s has no default" % (engine, name))
+
+    def test_write_retry_comment_names_every_reader(self):  # round 1 follow-up
+        line = next(
+            ln for ln in raw("defaults.toml").splitlines() if ln.startswith("write_retry_s")
+        )
+        self.assertIn("any command that loads it", line)
 
     def test_config_docstring(self):
         self.assertIn("except `config_version`", flat("revali", "config.py"))
