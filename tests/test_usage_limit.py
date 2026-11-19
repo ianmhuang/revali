@@ -12,6 +12,8 @@ from unittest import mock
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, models
 from revali.state import State, read_history
+from tests import test_bench_tool as bench_tests  # base classes only: no tests of theirs
+from tests import test_doc_audit as doc_audit_tests
 from tests.helpers import ROOT, RepoCase, approve_response, claude_entry, run_cli
 from tests.test_fix_owed_on_stop import failing_second_push
 
@@ -225,6 +227,10 @@ class Docs(unittest.TestCase):
         self.assertIn("the stop itself uses no fix cycle", flow)
         self.assertIn("names the limit and `[validate] model`", flow)
 
+    def test_the_tools_say_how_they_stop(self):  # PR #99 round 2 follow-ups
+        self.assertIn("stopped by its model's usage limit", self.flat("bench", "README.md"))
+        self.assertIn("stopped by its model's usage limit", self.flat("docs", "releasing.md"))
+
     def test_skill_tells_the_session_to_ask(self):
         text = self.flat("skill", "SKILL.md")
         self.assertIn('"hit its usage limit"', text)
@@ -245,6 +251,50 @@ class ResumeAtValidation(Case):
         self.assertIn("continuing there without a new review", out)
         self.assertIn("--reviewer-model opus is not used: this run has no review round", out)
         self.assertEqual(len(self.fake_calls("claude")), calls_before)
+
+
+def limited():
+    return {"exit": 1, "raw_stdout": limit_payload(cost=0.4), "write_tests": False}
+
+
+class DocAuditStopsAtTheLimit(doc_audit_tests.AuditCase):
+    """PR #99 round 2 follow-up: doc_audit gives its own advice, and the documents after the
+    one that hit the limit are not run (--resume runs them)."""
+
+    def test_the_rest_is_not_run(self):
+        self.claude(limited(), claude_entry(doc_audit_tests.answer(), write_tests=False))
+        code, out = self.run_audit("--budget-usd", "10", "--only", "README.md", "CONVENTIONS.md")
+        self.assertEqual(code, 1, out)
+        _, by_doc = self.results()
+        first = by_doc["README.md"]
+        self.assertEqual(first["status"], "error")  # --resume runs every document not done
+        self.assertAlmostEqual(first["cost"], 0.4)
+        self.assertIn("auditor model fable hit its usage limit", first["message"])
+        self.assertIn("continue with `--resume <dir>` after the reset", first["message"])
+        self.assertNotIn("revali run", first["message"])
+        self.assertEqual(by_doc["CONVENTIONS.md"]["status"], "not-run")
+        self.assertIn("usage limit was reached", by_doc["CONVENTIONS.md"]["message"])
+        self.assertEqual(len(self.calls()), 1)  # the second document was not sent
+
+
+class BenchStopsAtTheLimit(bench_tests.BenchCase):
+    """PR #99 round 2 follow-up: review_bench gives its own advice, the case that hit the
+    limit is not-run (so --resume runs it again), and so are the cases after it."""
+
+    def test_the_rest_is_not_run(self):
+        self.make_case("a-one")
+        self.make_case("b-two")
+        self.claude(limited(), claude_entry(bench_tests.answer(bench_tests.finding())))
+        _, out, cases, _ = self.run_bench()
+        a, b = cases["a-one"], cases["b-two"]
+        self.assertEqual(a["outcome"], "not-run")
+        self.assertAlmostEqual(a["cost"], 0.4)
+        self.assertIn("hit its usage limit", a["message"])
+        self.assertIn("the cases left are not run", a["message"])
+        self.assertNotIn("revali run --reviewer-model", a["message"])
+        self.assertEqual(b["outcome"], "not-run")
+        self.assertIn("usage limit was reached", b["message"])
+        self.assertEqual(len(self.fake_calls("claude")), 1)
 
 
 class AgainstAuthor(unittest.TestCase):

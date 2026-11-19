@@ -546,6 +546,12 @@ def validate_shape(data) -> List[str]:
     return problems
 
 
+RUN_LIMIT_ADVICE = (
+    "nothing is lost: run `revali run` again after the reset, or `revali run --reviewer-model "
+    "<model>` for this run only"
+)
+
+
 def planned_reviewer(ctx: Context) -> models.Resolved:
     """Which model the Reviewer would run on, and why (explicit or auto). `run
     --reviewer-model` (ctx.reviewer_model) takes the place of `[review] model` for this run,
@@ -576,7 +582,10 @@ def spawn_reviewer(
     attempt: int,
     log: Optional[RunLog],
     cancel=None,
+    limit_advice: str = "",
 ) -> ReviewerRun:
+    """One Reviewer session. A usage limit stops it with `limit_advice` (by default what a
+    `revali run` can do next; tools/review_bench.py passes its own)."""
     cfg = ctx.cfg.review
     engine = engines.for_role(ctx.cfg, "review")
     chosen = planned_reviewer(ctx)
@@ -613,14 +622,7 @@ def spawn_reviewer(
     try:
         result = engine.run(request, log)
     except UsageLimit as limit:
-        raise Stop(
-            EXIT_ERROR,
-            limit.line(
-                "nothing is lost: run `revali run` again after the reset, or `revali run "
-                "--reviewer-model <model>` for this run only"
-            ),
-            cost=limit.cost,
-        ) from limit
+        raise limit.with_advice(limit_advice or RUN_LIMIT_ADVICE) from limit
     problems = validate_shape(result.data)
     if problems:
         raise Stop(

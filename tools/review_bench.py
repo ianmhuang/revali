@@ -41,6 +41,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
 from revali import PROMPT_VERSION, VERSION, gitops  # noqa: E402
+from revali.engines.base import UsageLimit  # noqa: E402
 from revali.preflight import Stop, locate, review_left_out  # noqa: E402
 from revali.review import CHANGES_REQUESTED, build_prompt, spawn_reviewer  # noqa: E402
 from revali.state import State, safe_branch, write_json_atomic  # noqa: E402
@@ -54,6 +55,11 @@ STRONG = ("medium", "high")
 DEFAULT_MARGIN = 15
 READY = "ready"  # --dry-run: the case would run
 RERUN = ("started", "interrupted", "not-run")  # --resume runs these again
+LIMIT_ADVICE = (
+    "the cases left are not run; continue with `--resume <dir>` after the reset, or start a "
+    "new run with `--model <model>`"
+)
+LIMIT_STOP = "not run: the reviewer model's usage limit was reached on an earlier case"
 STARTED = "session started; if the run ends here, its cap counts and --resume runs it again"
 
 
@@ -337,7 +343,7 @@ def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str, on_session=N
             on_session(cap)
         session = True
         try:
-            rr = spawn_reviewer(ctx, prompt, ctx.rdir, 1, 1, None)
+            rr = spawn_reviewer(ctx, prompt, ctx.rdir, 1, 1, None, limit_advice=LIMIT_ADVICE)
         finally:
             _keep_raw(ctx, case_out)
         session = False
@@ -345,6 +351,11 @@ def _run_in(case: Case, args, spent: float, out_dir: str, tmp: str, on_session=N
         result = score(case, rr.data, args.line_margin)
         result.model = rr.model_actual or rr.model_requested
         result.cost = result.charged = rr.cost
+        return result
+    except UsageLimit as exc:  # every case after it would hit the same limit
+        result = _error(case, exc.message, exc.cost, cap if session else 0.0)
+        result.outcome = "not-run"  # it was not reviewed: --resume runs it again
+        result.stop_run = LIMIT_STOP  # not a field: results.json does not keep it
         return result
     except Stop as exc:
         return _error(case, exc.message, exc.cost, cap if session else 0.0)
@@ -711,6 +722,8 @@ def main(argv=None) -> int:
                 if m
             )
         spent += result.charged - carried
+        if getattr(result, "stop_run", "") and not stopped:
+            stopped = result.stop_run
         if result.outcome == "not-run" and not stopped:
             stopped = result.message
         results.append(result)

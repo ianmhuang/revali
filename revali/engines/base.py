@@ -33,6 +33,14 @@ class UsageLimit(Stop):
         self.role, self.model, self.text, self.raw_path = role, model, text, raw_path
         super().__init__(EXIT_ERROR, self.line(""), cost=cost)
 
+    def with_advice(self, way_on: str) -> "UsageLimit":
+        """The same stop, its message carrying the caller's advice; still a UsageLimit, so a
+        caller further up can tell it from other failures."""
+        out = UsageLimit(self.role, self.model, self.text, self.raw_path, self.cost)
+        out.message = out.line(way_on)
+        out.args = (out.message,)
+        return out
+
     def line(self, way_on: str) -> str:
         """The one line: what happened, `way_on` (the caller's advice, may be empty), where
         the raw output is."""

@@ -757,7 +757,7 @@ def _diagnose(
     except Stop as stop:
         outcome.diagnosis_error = (
             stop.line(
-                "the validation FAIL stands without a diagnosis; the next validation after a "
+                "the validation FAIL stands without a diagnosis; a failing validation after a "
                 "fix is diagnosed again, on another model if `[validate] model` is changed, or "
                 "on this one after the reset"
             )

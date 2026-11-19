@@ -37,7 +37,9 @@ what it spent (a timeout, output that is not JSON) counts as its whole cap again
 budget, and its line says the cost is unknown. `--model` sets the reviewer model for every
 case; without it the case repository's own configuration chooses, as `revali run` would.
 
-A case that fails in any way is reported as `error` and the next case runs. Each case's line
+A case that fails in any way is reported as `error` and the next case runs, except a session
+stopped by its model's usage limit: that case and every later one are `not-run`, what the
+session spent is charged, and `--resume` after the reset runs them. Each case's line
 is printed and `results.json` rewritten as soon as the case ends, and once more just before
 its session starts, with the case marked `started` and its session cap charged. A run stopped
 with Ctrl-C marks the case `interrupted` (its cap charged if the session had started, since

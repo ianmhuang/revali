@@ -62,7 +62,9 @@ that wrote its prompts; `2` at least one
 high or medium finding; `1` otherwise (a document failed or was not run, or the command
 could not start, for instance with the engine's executable missing). A session that fails,
 or answers outside the schema, marks its document `error` and the audit goes on with the
-next one; a failed session that reported no cost (a timeout) is charged its cap.
+next one; a failed session that reported no cost (a timeout) is charged its cap. A session
+stopped by its model's usage limit ends its document as `error` and leaves the documents
+after it `not-run`; `--resume` after the reset runs them.
 
 ## Making a release
 
