@@ -243,10 +243,16 @@ class Docs(unittest.TestCase):
         # AC-8
         self.assertIn("For the Reviewer `auto` means no fallback", conf)
         self.assertIn("is overloaded", self.flat("docs", "workflow.md"))
+        # PR #99 round 7 F1: both stops in the bench's resume note and the diagnosis sentence
+        self.assertIn(
+            "stopped by the usage limit or an overloaded model keeps",
+            self.flat("bench", "README.md"),
+        )
+        self.assertIn("or whose model is overloaded, leaves the", self.flat("docs", "workflow.md"))
         flow = self.flat("docs", "workflow.md")
         self.assertIn("hit its usage limit", flow)
         self.assertIn("the stop itself uses no fix cycle", flow)
-        self.assertIn("names the limit and `[validate] model`", flow)
+        self.assertIn("names the limit or the overload and `[validate] model`", flow)
 
     def test_the_tools_say_how_they_stop(self):  # PR #99 round 2 follow-ups
         self.assertIn("stopped by its model's usage limit", self.flat("bench", "README.md"))
@@ -515,6 +521,23 @@ class ReviewerRunNoFallbackAndBusy(Case):
         self.assertIn("nothing is lost: run `revali run` again later", line)
         self.assertIn("`revali run --reviewer-model <model>` for this run only", line)
         self.assertNotIn("usage limit", out)
+
+    def test_the_status_may_come_as_text(self):  # PR #99 round 7 follow-up
+        payload = json.loads(busy_payload())
+        payload["api_error_status"] = "529"
+        self.claude({"exit": 1, "raw_stdout": json.dumps(payload), "write_tests": False})
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("reviewer model fable is overloaded", out)
+
+    def test_another_status_is_not_busy(self):
+        payload = json.loads(busy_payload())
+        payload["api_error_status"] = 500
+        self.claude({"exit": 1, "raw_stdout": json.dumps(payload), "write_tests": False})
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertIn("reviewer session failed (exit 1)", out)
+        self.assertNotIn("is overloaded", out)
 
 
 class AgainstAuthor(unittest.TestCase):

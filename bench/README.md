@@ -59,8 +59,8 @@ directory. Cases that ended with a result (`caught-strict`, `caught-loose`, `mis
 `error`, `malformed`) are kept and reported as kept; cases that are `started`,
 `interrupted` or `not-run`, and cases in the case directories that the file does not list,
 run. A `started` or `interrupted` case keeps the cap already charged for it, and a
-`not-run` case that hit the usage limit keeps what its session spent in both `cost` and
-`charged`; either is said in its message, and the case runs again. To run an `error` case again, run it by name into a new output
+`not-run` case stopped by the usage limit or an overloaded model keeps what its session
+spent in both `cost` and `charged`; either is said in its message, and the case runs again. To run an `error` case again, run it by name into a new output
 directory.
 
 `--budget-usd` is the total of every invocation: what `results.json` already charges counts

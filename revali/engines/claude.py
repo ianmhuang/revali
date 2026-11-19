@@ -19,7 +19,7 @@ from revali.state import RunLog, write_text
 READ_ONLY_TOOLS = "Read,Grep,Glob"
 BUDGET_SUBTYPE = "error_max_budget_usd"
 USAGE_LIMIT = "usage_limit_reached"  # the result's `api_error` when the model's limit is reached
-OVERLOADED_STATUS = 529  # the API's "overloaded" status, in the result's `api_error_status`
+OVERLOADED_STATUS = "529"  # the API's "overloaded" status in `api_error_status`, number or text
 
 
 def failure_message(
@@ -140,7 +140,9 @@ class ClaudeEngine(Engine):
             unavailable = (
                 UsageLimit
                 if payload.get("api_error") == USAGE_LIMIT
-                else ModelBusy if payload.get("api_error_status") == OVERLOADED_STATUS else None
+                else (
+                    ModelBusy if str(payload.get("api_error_status")) == OVERLOADED_STATUS else None
+                )
             )
             if unavailable is not None:
                 text = " ".join(str(payload.get("result") or "").split())[:300]

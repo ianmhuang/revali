@@ -240,8 +240,9 @@ the same way: `reviewer model <m> is overloaded: ...; nothing is lost: run
 Reviewer has no fallback, so it never runs on another model unasked. revali does not switch to a lower tier by itself, since that would put
 the Reviewer at or below the author's tier; `--reviewer-model` is that choice,
 made by the user for one run ([docs/configuration.md](configuration.md)). A
-diagnosis session that hits the limit leaves the validation result as it is,
-and its "diagnosis unavailable" line names the limit and `[validate] model`.
+diagnosis session that hits the limit, or whose model is overloaded, leaves the
+validation result as it is, and its "diagnosis unavailable" line names the limit
+or the overload and `[validate] model`.
 
 A run that stops without a result (the process was killed, the machine went
 down, an unexpected error) is reported as such: an unexpected error is
