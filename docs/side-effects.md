@@ -136,7 +136,9 @@ stated.
   is fixed once a branch has review rounds: a run with the other value
   stops with exit 2 before it pushes anything
 - posts review and validation results as PR comments; on a repository that
-  is not private the comments are summaries (verdict, model, cost, finding
+  is not private the comments are summaries (verdict, model, with
+  `run --reviewer-model` also the reason, which names the author's model,
+  cost, finding
   ids with severity and location, test files, AC coverage, validation exit
   codes, diagnosis cause); the full text stays in the state directory. The
   PR body is change.md without its `Request` section on every repository,

@@ -642,6 +642,12 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
             "round %d was approved at %s but the previous run stopped before validation; "
             "continuing there without a new review" % (resume_round, ctx.head_sha[:10]),
         )
+        if ctx.reviewer_model:  # PR #99 round 1 follow-up: say the option did nothing
+            log.stage(
+                "run",
+                "--reviewer-model %s is not used: this run has no review round"
+                % ctx.reviewer_model,
+            )
         record = state.rounds[-1]
         return _validate_and_finish(
             ctx,

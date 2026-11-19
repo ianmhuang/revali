@@ -25,17 +25,23 @@ class SessionCancelled(Stop):
 
 class UsageLimit(Stop):
     """A session stopped because its model's usage limit is reached. `text` is the engine's
-    own words, which carry the reset time; the caller adds what the user can do next
-    (`way_on`), since that differs for the Reviewer and the diagnosis."""
+    own words, which carry the reset time. Its own message gives no advice: what the user
+    can do next differs for the Reviewer and the diagnosis, so each caller passes it to
+    `line` (PR #99 round 1)."""
 
     def __init__(self, role: str, model: str, text: str, raw_path: str, cost: float):
         self.role, self.model, self.text, self.raw_path = role, model, text, raw_path
-        super().__init__(EXIT_ERROR, self.line("run again after the reset"), cost=cost)
+        super().__init__(EXIT_ERROR, self.line(""), cost=cost)
 
     def line(self, way_on: str) -> str:
-        return (
-            "%s model %s hit its usage limit: %s; nothing is lost: %s; raw output saved to %s"
-            % (self.role, self.model, self.text, way_on, self.raw_path)
+        """The one line: what happened, `way_on` (the caller's advice, may be empty), where
+        the raw output is."""
+        return "%s model %s hit its usage limit: %s; %sraw output saved to %s" % (
+            self.role,
+            self.model,
+            self.text,
+            way_on + "; " if way_on else "",
+            self.raw_path,
         )
 
 

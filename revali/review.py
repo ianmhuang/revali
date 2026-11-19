@@ -616,8 +616,8 @@ def spawn_reviewer(
         raise Stop(
             EXIT_ERROR,
             limit.line(
-                "run `revali run` again after the reset, or `revali run --reviewer-model "
-                "<model>` for this run only"
+                "nothing is lost: run `revali run` again after the reset, or `revali run "
+                "--reviewer-model <model>` for this run only"
             ),
             cost=limit.cost,
         ) from limit

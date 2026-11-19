@@ -757,8 +757,9 @@ def _diagnose(
     except Stop as stop:
         outcome.diagnosis_error = (
             stop.line(
-                "the validation result stands without a diagnosis; set `[validate] model` to "
-                "another model, or run again after the reset"
+                "the validation FAIL stands without a diagnosis; the next validation after a "
+                "fix is diagnosed again, on another model if `[validate] model` is changed, or "
+                "on this one after the reset"
             )
             if isinstance(stop, UsageLimit)
             else stop.message
@@ -766,7 +767,8 @@ def _diagnose(
         outcome.cost = stop.cost  # what the session spent before it failed; 0.0 when unknown
         if log:
             log.stage(
-                "validate", "diagnosis%s unavailable: %s" % (_on(outcome.platform), stop.message)
+                "validate",
+                "diagnosis%s unavailable: %s" % (_on(outcome.platform), outcome.diagnosis_error),
             )
         return
     data = result.data

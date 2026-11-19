@@ -1,7 +1,8 @@
 """feature/usage-limit (M3.23): a session that hits its model's usage limit is named as such,
 with the engine's reset text and the ways on, and `revali run --reviewer-model` picks the
 reviewer for one run. Black box through `revali run --foreground` with the fake gh, claude
-and runner; the usage-limit result object is the one claude printed on 2026-11-19."""
+and runner; the usage-limit result object has the shape claude printed on 2026-11-19, with a
+made-up reset date and zone (PR #99 round 1 follow-up)."""
 
 import json
 import os
@@ -11,11 +12,12 @@ from unittest import mock
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, models
 from revali.state import State, read_history
-from tests.helpers import ROOT, RepoCase, claude_entry, run_cli
+from tests.helpers import ROOT, RepoCase, approve_response, claude_entry, run_cli
+from tests.test_fix_owed_on_stop import failing_second_push
 
 CHANGE = os.path.join(".revali", "feature__mul", "change.md")
 LIMIT_TEXT = (
-    "You've hit your Fable limit · resets Nov 23, 2pm (Asia/Taipei). Switch to another "
+    "You've hit your Fable limit · resets Jan 5, 9am (UTC). Switch to another "
     "model, or manage usage credits at https://claude.ai/settings/usage, to continue."
 )
 DEAD_PID = 999999999
@@ -69,7 +71,7 @@ class ReviewerHitsTheLimit(Case):
         out = self.run_into_the_limit()
         line = next(ln for ln in out.splitlines() if "hit its usage limit" in ln)
         self.assertIn("reviewer model fable hit its usage limit: You've hit your Fable limit", line)
-        self.assertIn("resets Nov 23, 2pm (Asia/Taipei)", line)
+        self.assertIn("resets Jan 5, 9am (UTC)", line)
         self.assertIn("nothing is lost", line)
         self.assertIn("run `revali run` again after the reset", line)
         self.assertIn("`revali run --reviewer-model <model>` for this run only", line)
@@ -124,8 +126,12 @@ class DiagnosisHitsTheLimit(Case):
         self.assertEqual(code, EXIT_ACTION, out)
         self.assertIn("diagnosis unavailable: diagnoser model", out)
         self.assertIn("hit its usage limit: You've hit your Fable limit", out)
-        self.assertIn("the validation result stands without a diagnosis", out)
-        self.assertIn("set `[validate] model` to another model", out)
+        self.assertIn("the validation FAIL stands without a diagnosis", out)
+        self.assertIn("on another model if `[validate] model` is changed", out)
+        # PR #99 F1: the stage line itself, not only tests.md and the summary
+        line = next(ln for ln in out.splitlines() if "diagnosis unavailable:" in ln)
+        self.assertIn("`[validate] model`", line)
+        self.assertNotIn("nothing is lost", line)  # PR #99 F2
         self.assertNotIn("--reviewer-model", out)
         state = State.load(self.rdir())
         self.assertAlmostEqual(state.validations[0]["cost_usd"], 0.2)
@@ -223,6 +229,22 @@ class Docs(unittest.TestCase):
         text = self.flat("skill", "SKILL.md")
         self.assertIn('"hit its usage limit"', text)
         self.assertIn("`--reviewer-model` only when the user names the model", text)
+
+
+class ResumeAtValidation(Case):
+    """PR #99 round 1 follow-up: a run that only validates says the option did nothing."""
+
+    def test_the_option_is_reported_unused(self):
+        self.claude(claude_entry(approve_response()))
+        with failing_second_push():
+            code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        calls_before = len(self.fake_calls("claude"))
+        code, out = run_cli(["run", "--foreground", "--reviewer-model", "opus"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("continuing there without a new review", out)
+        self.assertIn("--reviewer-model opus is not used: this run has no review round", out)
+        self.assertEqual(len(self.fake_calls("claude")), calls_before)
 
 
 class AgainstAuthor(unittest.TestCase):
