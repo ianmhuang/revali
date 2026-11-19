@@ -682,15 +682,17 @@ def _other_platforms(others: List[ValidationOutcome]) -> str:
 def _test_files_for_prompt(ctx: Context, state: State, rdir: str) -> str:
     """The reviewer's test files as the diagnosis prompt lists them. In archive mode they are
     not in the working tree the session reads, so each line adds where the archived copy is:
-    relative to the repository root when the state directory is inside it, else absolute."""
+    relative to the repository root when the state directory is inside it, else absolute.
+    Links are not resolved (PR #100 F2): a state directory that links elsewhere is still read
+    through its path under the repository root, the session's working directory."""
     if not state.test_files:
         return "(none)"
     if not archive_mode(ctx, state):
         return "\n".join("- " + p for p in state.test_files)
-    root = os.path.realpath(ctx.repo_root)
+    root = os.path.abspath(ctx.repo_root)
     lines = []
     for rel in state.test_files:
-        full = os.path.realpath(os.path.join(archive_dir(rdir), *rel.split("/")))
+        full = os.path.abspath(os.path.join(archive_dir(rdir), *rel.split("/")))
         inside = _same_drive(root, full) and os.path.normcase(
             os.path.commonpath([root, full])
         ) == os.path.normcase(root)

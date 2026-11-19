@@ -56,6 +56,14 @@ class Changelog(unittest.TestCase):
         self.assertEqual(sorted(set(RELEASE_PRS) - named), [], "PRs left out")
         self.assertEqual(sorted(named - set(RELEASE_PRS)), [], "PRs not of this release")
 
+    def test_the_history_row_change_is_not_a_ci_change(self):
+        # PR #100 F1: #45 changed what revali writes to the history file
+        body = section_040()
+        ci = body.split("CI and the suite:", 1)[1].split("Tools and documents:", 1)[0]
+        runs = body.split("Runs, state and merge:", 1)[1].split("CI and the suite:", 1)[0]
+        self.assertNotIn("#45", ci)
+        self.assertIn("#45", runs)
+
     def test_it_opens_with_the_lead_sentence(self):
         body = section_040().strip()
         first = body.split("\n\n", 1)[0]
@@ -228,8 +236,25 @@ class ArchivedPaths(unittest.TestCase):
         with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as away:
             rdir = os.path.join(away, "feature__mul")
             out = _test_files_for_prompt(self.ctx(repo, "archive"), State(test_files=[FILE]), rdir)
-            where = os.path.realpath(os.path.join(rdir, "tests", *FILE.split("/")))
+            where = os.path.abspath(os.path.join(rdir, "tests", *FILE.split("/")))
             self.assertEqual(out, "- %s (not in the working tree; read it at `%s`)" % (FILE, where))
+
+    def test_a_linked_state_dir_keeps_its_path_under_the_repository(self):
+        # PR #100 F2: the path goes through the link, which the session can read from its
+        # working directory; the resolved target outside the repository it may not
+        with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as away:
+            try:
+                os.symlink(away, os.path.join(repo, ".revali"), target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest("cannot create a directory symlink here: %s" % exc)
+            rdir = os.path.join(repo, ".revali", "feature__mul")
+            out = _test_files_for_prompt(self.ctx(repo, "archive"), State(test_files=[FILE]), rdir)
+            self.assertEqual(
+                out,
+                "- %s (not in the working tree; read it at `.revali/feature__mul/tests/%s`)"
+                % (FILE, FILE),
+            )
+            self.assertNotIn(os.path.realpath(away), out)
 
 
 class DiagnosisPrompt(ArchiveCase):
@@ -255,7 +280,13 @@ class DiagnosisPrompt(ArchiveCase):
                 self.assertFalse(self.exists(rel))
 
     def test_files_md_says_so(self):
-        self.assertIn("given to the diagnosis session at that path", flat("docs", "files.md"))
+        self.assertIn("named to the diagnosis session by that path", flat("docs", "files.md"))
+
+    def test_releasing_names_the_released_list(self):
+        # PR #100 follow-up: the release updates test_changelog's RELEASED too
+        self.assertIn(
+            "adds the new version and its date to `RELEASED` in", flat("docs", "releasing.md")
+        )
 
     def test_commit_mode_lists_the_paths_as_before(self):
         self.switch_mode("commit")

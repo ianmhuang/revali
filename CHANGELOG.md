@@ -64,7 +64,8 @@ Runs, state and merge:
 - The PR title follows change.md's title (#56), and each PR carries a release label (#96).
 - A fetch that lost a ref race is retried, and an open issue with the same title is reused
   (#60); the history file is locked while a row is appended (#61); the log and the history
-  row say which revali build ran (#62).
+  row say which revali build ran (#62), and the row stores stage and sandbox seconds to the
+  millisecond (#45).
 - After a merge, the primary tree's pull is retried and reported (#64); a PR merged or
   closed outside `revali merge` is recorded with `revali archive` (#81).
 - On Windows a process counts as alive until its handle is signalled (#75).
@@ -75,7 +76,6 @@ CI and the suite:
   tree and CI prints the runner's CPU (#68).
 - The suite passes when the temp directory is an 8.3 short path (#66), and test stubs run
   scripts with Git Bash on Windows (#54).
-- The history row stores stage and sandbox seconds to the millisecond (#45).
 
 Tools and documents:
 - tools/review_bench.py measures how often the Reviewer catches known bugs (#70), with

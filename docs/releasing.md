@@ -95,6 +95,9 @@ auto fallback ([docs/configuration.md](configuration.md)).
      section is not `VERSION`, and when a test that pins the version is not named here. It
      sees a pin written as a string literal inside an `assert...()` call or an `assert`
      statement; a version held in a variable and compared later is not seen.
+   - adds the new version and its date to `RELEASED` in tests/test_changelog.py, and the
+     PR numbers its section must name to that test's list; nothing forces this, as the
+     test checks only the tail of the list.
 5. After the merge, and only on the maintainer's word: an annotated tag on the merge commit,
    pushed to origin. The section's heading carries the tag's date; when the tag is made on
    another day than step 4 planned, a change that corrects the heading comes first, and the
