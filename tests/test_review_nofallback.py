@@ -113,8 +113,8 @@ class AFallbackTheUserNamedIsUsedAsWritten(Case):
 
 
 class TheReviewerModelIsBusy(Case):
-    def busy_run(self, argv=("run", "--foreground")):
-        self.claude({"exit": 1, "raw_stdout": failed_result(529, BUSY_TEXT)})
+    def busy_run(self, argv=("run", "--foreground"), status=529):
+        self.claude({"exit": 1, "raw_stdout": failed_result(status, BUSY_TEXT)})
         code, out = run_cli(list(argv))
         self.assertEqual(code, EXIT_ERROR, out)
         self.assertNotIn("Traceback", out)
@@ -137,6 +137,12 @@ class TheReviewerModelIsBusy(Case):
         self.assert_busy_line(line, "fable")
         self.assertNotIn("session failed", out)
         self.assertNotIn("usage limit", out)
+
+    def test_a_status_written_as_text_is_the_same_stop(self):
+        # round 7 follow-up: the result may carry the status as "529"
+        line, out = self.busy_run(status="529")
+        self.assert_busy_line(line, "fable")
+        self.assertNotIn("session failed", out)
 
     def test_no_other_model_is_tried(self):
         self.busy_run()
