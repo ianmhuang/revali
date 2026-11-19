@@ -84,6 +84,14 @@ class Installing(unittest.TestCase):
             ["mkdir -p ~/.claude/skills", 'ln -s "<revali dir>/skill" ~/.claude/skills/revali'],
         )
 
+    def test_an_absolute_revali_dir_for_the_link(self):  # round 2 follow-up
+        self.assertIn("Write `<revali dir>` as an absolute path here", self.section)
+
+    def test_prose_is_wrapped(self):  # round 2 follow-up
+        prose = re.sub(r"```\n.*?```", "", h2(self.text, "Installing revali"), flags=re.S)
+        long_lines = [line for line in prose.splitlines() if len(line) > 92]
+        self.assertEqual(long_lines, [])
+
     def test_no_shell_label_inside_a_block(self):  # PR round 1 F1
         for _, body in self.blocks():
             self.assertNotIn("#", body)

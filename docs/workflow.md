@@ -300,9 +300,10 @@ merge. `revali clean <branch>` deletes the review files instead
 ## Installing revali
 
 Clone the repository and check out the newest release tag (the repository's GitHub
-Releases page lists them, or `git tag --sort=-v:refname` after the clone), not main: main changes with every merged PR, and `PROMPT_VERSION`
-with some of them, so a checkout that follows it changes the review of every project that
-runs from it. The checkout is then a detached HEAD at the tag, which is expected.
+Releases page lists them, or `git tag --sort=-v:refname` after the clone), not main:
+main changes with every merged PR, and `PROMPT_VERSION` with some of them, so a
+checkout that follows it changes the review of every project that runs from it. The
+checkout is then a detached HEAD at the tag, which is expected.
 
 ```
 git clone https://github.com/ianmhuang/revali <revali dir>
@@ -313,6 +314,9 @@ Link its `skill/` directory as `~/.claude/skills/revali`, so Claude Code finds t
 `/revali` skill: a junction on Windows, a symbolic link elsewhere. The first line of
 each pair below creates `~/.claude/skills` if it is not there yet; `~/.claude/skills/revali`
 itself must not exist yet (`ln -s` would put the link inside an existing directory).
+Write `<revali dir>` as an absolute path here: `ln -s` keeps a relative target as
+written and resolves it from the link's own directory, so `revali/skill` would point
+nowhere.
 
 In PowerShell:
 
