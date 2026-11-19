@@ -21,7 +21,7 @@ the existing suite, and the merge waits for the result. Three roles take part.
 
 | Capability | Described in |
 |---|---|
-| Acceptance criteria before the code: change.md's `AC-n` lines are approved first, and preflight refuses a draft | [docs/workflow.md](docs/workflow.md#workflow) |
+| Acceptance criteria before the code: change.md's `AC-n` lines are approved first, and preflight refuses a draft | [docs/workflow.md](docs/workflow.md#workflow-1) |
 | Checks before anything is pushed: a clean tree, your own repository, an up-to-date base, the diff size, secrets, the project's lint line | [docs/workflow.md](docs/workflow.md#running) |
 | An independent review of the diff, the documents related to it and the earlier reviewer tests it changes, with acceptance tests written from the criteria | [docs/workflow.md](docs/workflow.md#why-separate-sessions) |
 | Sandbox validation of the new tests and the existing suite through WSL, ssh or a local worktree, on each listed platform (`linux`, `windows`) | [docs/sandbox.md](docs/sandbox.md) |
@@ -92,7 +92,7 @@ sequenceDiagram
     end
     U->>D: merge
     D->>R: revali merge
-    R->>G: wait for CI, release label check, squash merge (or another [merge] method), delete branch
+    R->>G: release label check, wait for CI, squash merge (or another [merge] method), delete branch
     R->>G: comment on the issues a branch commit says it fixes
 ```
 

@@ -121,7 +121,8 @@ in, fixed for the branch (`[review] tests` in
 [docs/configuration.md](configuration.md)).
 
 The stage in `state.json` moves like this; `wait` returns the exit code of the
-stage a run ended in, and `status` prints the stage:
+stage a run ended in, `status` prints the stage, and [docs/files.md](files.md) says
+what each one means:
 
 ```mermaid
 stateDiagram-v2
@@ -135,16 +136,18 @@ stateDiagram-v2
     validate --> needs_action: FAIL, exit 2
     preflight --> needs_action: rebase, lint, diff size, exit 2
     preflight --> needs_human: fix cycles used up, exit 3
-    needs_action --> preflight: a new commit, revali run
+    needs_action --> preflight: a fix or an answer, revali run
     ready_to_merge --> merged: revali merge, exit 0
-    ready_to_merge --> closed: PR closed elsewhere, revali archive
+    ready_to_merge --> closed: PR closed elsewhere, revali archive, exit 0
     error : error, exit 1, from any stage of a run
     stopped : stopped, exit 1, after revali stop
 ```
 
 A pipeline error at any stage of a run (a red baseline, a change.md problem, the
 tree moved, an unexpected exception) ends in `error`, and `revali stop` ends a run
-in `stopped`. `run --dry-run` ends at `preflight` with exit 0. A run that dies
+in `stopped`. `preflight` is recorded once preflight has passed, so a run it
+refuses goes from the previous run's stage straight to `needs_action`,
+`needs_human` or `error`. `run --dry-run` ends at `preflight` with exit 0. A run that dies
 without recording a result keeps its last stage, and `wait` and `status` report
 it as died (below). `revali archive` records `merged` or `closed` from any stage
 once the branch has a PR.

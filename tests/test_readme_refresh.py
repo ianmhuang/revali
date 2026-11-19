@@ -8,7 +8,7 @@ import re
 import unittest
 
 from revali.cli import build_parser
-from revali.state import STAGES
+from revali.state import STAGES, TERMINAL_STAGES
 from tests.helpers import ROOT
 
 LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -33,8 +33,26 @@ def slug(heading):
     return text.replace(" ", "-")
 
 
+def headings(path):
+    """(anchor, heading line) for the headings of `path` outside fenced code, with the
+    anchors GitHub gives them: a repeated heading gets `-1`, `-2`, ... after the first
+    (round 1 F2: `# Workflow` and `## Workflow` are `#workflow` and `#workflow-1`)."""
+    seen, found, fence = {}, [], False
+    for line in read(path).split("\n"):
+        if line.strip().startswith("```"):
+            fence = not fence
+            continue
+        m = None if fence else re.match(r"#{1,6} (.+)$", line)
+        if m:
+            base = slug(m.group(1))
+            n = seen.get(base, 0)
+            seen[base] = n + 1
+            found.append((base if n == 0 else "%s-%d" % (base, n), line))
+    return found
+
+
 def anchors(path):
-    return {slug(m.group(1)) for m in re.finditer(r"^#{1,6} (.+)$", read(path), re.M)}
+    return [a for a, _ in headings(path)]
 
 
 def capability_rows(readme):
@@ -43,13 +61,16 @@ def capability_rows(readme):
     return rows[2:]  # header and separator
 
 
-def broken_links(rows, root=ROOT):
-    """Links in `rows` whose file is missing or whose `#anchor` names no heading there."""
+def broken_links(rows, here=ROOT):
+    """Links in `rows` (relative to the directory `here`) whose file is missing or whose
+    `#anchor` names no heading there."""
     broken = []
     for row in rows:
         for href in LINK.findall(row):
+            if "://" in href:
+                continue
             path, _, anchor = href.partition("#")
-            full = os.path.join(root, path)
+            full = os.path.normpath(os.path.join(here, path))
             if not os.path.isfile(full):
                 broken.append(href)
             elif anchor and anchor not in anchors(os.path.relpath(full, ROOT)):
@@ -127,6 +148,26 @@ class WhatItDoes(unittest.TestCase):
             "| z | [docs/workflow.md](docs/workflow.md#running) |",
         ]
         self.assertEqual(broken_links(rows), ["docs/workflow.md#no-such-heading", "docs/nope.md"])
+
+    def test_a_repeated_heading_is_numbered_as_github_does(self):  # round 1 F2
+        found = dict(headings("docs/workflow.md"))
+        self.assertEqual(found["workflow"], "# Workflow")
+        self.assertEqual(found["workflow-1"], "## Workflow")
+        # the acceptance-criteria row lands on the section, not on the page title
+        self.assertIn("(docs/workflow.md#workflow-1)", capability_rows(read("README.md"))[0])
+
+    def test_every_heading_link_on_the_linked_pages_resolves(self):  # round 1 follow-up
+        # test_doc_links accepts `#heading` on these pages; the heading is checked here
+        pages = ["README.md", "CONVENTIONS.md", "CLAUDE.md"] + sorted(
+            os.path.relpath(p, ROOT).replace(os.sep, "/")
+            for p in glob.glob(os.path.join(ROOT, "docs", "*.md"))
+        )
+        broken = []
+        for page in pages:
+            lines = [ln for ln in read(page).split("\n") if "#" in ln and "](" in ln]
+            here = os.path.dirname(os.path.join(ROOT, page))
+            broken += ["%s: %s" % (page, b) for b in broken_links(lines, here) if "#" in b]
+        self.assertEqual(broken, [])
 
     def test_the_rows_name_the_newer_capabilities(self):
         table = " ".join(capability_rows(read("README.md")))
@@ -250,16 +291,26 @@ class StageDiagram(unittest.TestCase):
     def test_each_end_state_names_its_exit_code(self):
         text = read("docs", "workflow.md")
         block = text.split("```mermaid\nstateDiagram-v2\n", 1)[1].split("```", 1)[0]
-        for stage, code in (
-            ("ready_to_merge", 0),
-            ("needs_action", 2),
-            ("needs_human", 3),
-            ("error", 1),
-            ("stopped", 1),
-            ("merged", 0),
-        ):
-            line = [ln for ln in block.splitlines() if re.search(r"\b%s\b" % stage, ln)]
-            self.assertTrue(any("exit %d" % code in ln for ln in line), stage)
+        codes = {
+            "ready_to_merge": 0,
+            "needs_action": 2,
+            "needs_human": 3,
+            "error": 1,
+            "stopped": 1,
+            "merged": 0,
+            "closed": 0,  # round 1 F1
+        }
+        # every end state the code defines has its code here, so a new one is not missed
+        self.assertEqual(set(codes), set(TERMINAL_STAGES))
+        for stage, code in codes.items():
+            # the line that leads into the end state, or declares it, carries its code
+            line = [
+                ln
+                for ln in block.splitlines()
+                if re.search(r"-->\s*%s\b" % stage, ln) or re.match(r"\s*%s\s+:" % stage, ln)
+            ]
+            self.assertTrue(line, stage)
+            self.assertTrue(all("exit %d" % code in ln for ln in line), stage)
 
     def test_a_stage_missing_or_extra_shows(self):
         md = "```mermaid\nstateDiagram-v2\n    [*] --> preflight\n    preflight --> zap: x\n```\n"
