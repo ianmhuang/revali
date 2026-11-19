@@ -105,7 +105,8 @@ run's own records: preflight's first line, `repo <root>, branch <branch>,
 revali <build>` (in `logs/revali.log`, and in `logs/run.log` for a detached
 run), the `started revali run` line, and the history row's `revali_build`.
 The build is the version plus `git describe --tags --always --dirty` of the
-checkout revali was loaded from, e.g. `0.3.0 (v0.3.0-27-g4fbdb4e)`, or the
+checkout revali was loaded from, e.g. `0.3.0 (v0.3.0-27-g4fbdb4e)`; a
+checkout at a release tag shows the tag alone, e.g. `0.4.0 (v0.4.0)`. It is the
 version alone when that directory is not the root of a git checkout or git
 cannot describe it (git missing, timed out or failed). On Windows the detached
 run starts every subprocess (git, gh, claude, wsl, the `lint` line and the
@@ -294,6 +295,43 @@ history row says so and the review files move to the archive as at
 `revali merge`, so `revali stats` stops counting the branch as ready to
 merge. `revali clean <branch>` deletes the review files instead
 ([docs/side-effects.md](side-effects.md)).
+
+## Installing revali
+
+Clone the repository and check out the newest release tag (the repository's GitHub
+Releases page lists them, or `git tag --sort=-v:refname` after the clone), not main: main changes with every merged PR, `PROMPT_VERSION`
+included, so a checkout that follows it changes the review of every project that
+runs from it. The checkout is then a detached HEAD at the tag, which is expected.
+
+```
+git clone https://github.com/ianmhuang/revali <revali dir>
+git -C <revali dir> checkout v<version>
+```
+
+Link its `skill/` directory as `~/.claude/skills/revali`, so Claude Code finds the
+`/revali` skill: a junction on Windows, a symbolic link elsewhere.
+
+```
+New-Item -ItemType Junction -Path "$HOME\.claude\skills\revali" -Target "<revali dir>\skill"   # PowerShell
+mklink /J "%USERPROFILE%\.claude\skills\revali" "<revali dir>\skill"                         # cmd
+ln -s "<revali dir>/skill" ~/.claude/skills/revali                                           # Linux, macOS
+```
+
+The project's `CLAUDE.md` names that checkout as `<revali dir>` (see Project setup
+below): write the path in, or name it once in your own global Claude instructions.
+
+To update, fetch the tags and check out the newer one in the same checkout; the link
+and every project follow it:
+
+```
+git -C <revali dir> fetch --tags
+git -C <revali dir> checkout v<newer version>
+```
+
+A checkout used to develop revali is not the one other projects run from: give
+development its own clone or worktree. A run in progress still reads files from its
+checkout after it starts (prompts, schemas, templates), so move a checkout only while
+no run from it is in progress.
 
 ## Project setup
 

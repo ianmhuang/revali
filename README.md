@@ -164,7 +164,7 @@ failing platform when several are listed, `logs/`) and as PR comments (summaries
 
 ## Documentation
 
-- [docs/workflow.md](docs/workflow.md): why the sessions are separate, the acceptance criteria before the code and
+- [docs/workflow.md](docs/workflow.md): installing revali at a release tag, why the sessions are separate, the acceptance criteria before the code and
   how an AC line is written, project setup, what `run` prints and checks, the stages of a run, what
   happens after exit 2 or a dead run, several agents on one repository
 - [docs/configuration.md](docs/configuration.md): the three layers, models, `REVALI_DISABLE`, platforms, related documents, `format` and `lint`, issues, the archive, release labels
