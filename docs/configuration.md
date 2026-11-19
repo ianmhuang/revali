@@ -211,6 +211,13 @@ one below the top for diagnosis. `fallback_model = "auto"` is the tiers
 below the chosen one, strongest first. Any explicit model name passes
 through unchanged. The chosen model and the reason are printed at spawn
 time and recorded in the review and diagnosis headers.
+`revali run --reviewer-model <model>` puts `<model>` in place of `[review] model`
+for that run only (the fallback list follows from it as for an explicit name);
+the reason then reads `--reviewer-model, ` and where the model stands against
+the author's tier (above, the same tier as, below), and a non-private
+repository's PR comment carries it too. revali never lowers the Reviewer's tier
+on its own: a session that hits its model's usage limit stops the run instead
+([docs/workflow.md](workflow.md)).
 `[review] effort` and `[validate] effort` (default `high` for both) are the
 effort level the Reviewer and the diagnosis session run at.
 `[engines.claude] helper_prefix` (default `claude-haiku`) tells which rows

@@ -46,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--base", default="", help="base branch for this run (overrides revali.toml)"
     )
+    p_run.add_argument(
+        "--reviewer-model",
+        default=None,
+        metavar="MODEL",
+        help="reviewer model for this run only (overrides [review] model)",
+    )
 
     p_pre = _command(sub, "preflight", "run the preflight checks only", pipeline.cmd_preflight)
     p_pre.add_argument(

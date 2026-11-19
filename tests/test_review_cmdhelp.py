@@ -89,7 +89,7 @@ class EverySubcommandHelpCarriesItsListingSentence(unittest.TestCase):
 
 class EveryArgumentHasAHelpText(unittest.TestCase):
     EXPECTED = {
-        "run": {"foreground", "dry_run", "base"},
+        "run": {"foreground", "dry_run", "base", "reviewer_model"},  # feature/usage-limit AC-5
         "preflight": {"base"},
         "wait": {"timeout", "branch"},  # --branch since feature/tree-guard (AC-3)
         "status": {"branch"},

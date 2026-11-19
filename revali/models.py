@@ -33,6 +33,24 @@ def on_foreign_ladder(model: str, ladders: Iterable[List[str]]) -> bool:
     return any(tier_index(model, tiers) is not None for tiers in ladders)
 
 
+def against_author(model: str, author_model: str, tiers: List[str]) -> str:
+    """Where `model` stands against the author's tier, for a reviewer the user picked."""
+    mine, theirs = tier_index(model, tiers), tier_index(author_model, tiers)
+    if mine is None:
+        return "%s is not on the ladder" % model
+    if theirs is None:
+        return (
+            "author model not given"
+            if not author_model
+            else "author %s is not on the ladder" % author_model
+        )
+    if mine > theirs:
+        return "above author %s" % author_model
+    if mine == theirs:
+        return "the same tier as author %s" % author_model
+    return "below author %s" % author_model
+
+
 def resolve(
     role: str,
     requested: str,

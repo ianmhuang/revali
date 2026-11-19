@@ -10,6 +10,7 @@ from typing import List, Optional
 from revali import EXIT_ERROR, engines, gitops, models
 from revali.config import PlatformCfg, listed_platform
 from revali.engines import EngineRequest
+from revali.engines.base import UsageLimit
 from revali.issues import IssueRef, maybe_open
 from revali.preflight import Context, Stop
 from revali.review import TRAILER, under_test_dir
@@ -754,7 +755,14 @@ def _diagnose(
             log,
         )
     except Stop as stop:
-        outcome.diagnosis_error = stop.message
+        outcome.diagnosis_error = (
+            stop.line(
+                "the validation result stands without a diagnosis; set `[validate] model` to "
+                "another model, or run again after the reset"
+            )
+            if isinstance(stop, UsageLimit)
+            else stop.message
+        )
         outcome.cost = stop.cost  # what the session spent before it failed; 0.0 when unknown
         if log:
             log.stage(
