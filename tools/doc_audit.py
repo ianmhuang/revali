@@ -37,7 +37,7 @@ sys.path.insert(0, ROOT)
 from revali import VERSION, docgraph, engines, gitops, models, procs  # noqa: E402
 from revali.config import ConfigError, load_project_config, load_user_config  # noqa: E402
 from revali.engines import EngineRequest  # noqa: E402
-from revali.engines.base import UsageLimit  # noqa: E402
+from revali.engines.base import UsageLimit, loop_advice, loop_stopped  # noqa: E402
 from revali.preflight import Stop  # noqa: E402
 from revali.state import write_json_atomic  # noqa: E402
 
@@ -63,11 +63,6 @@ ANSWER_KEYS, FINDING_ALLOWED, FINDING_KEYS, SEVERITIES = _schema_parts()
 BLOCKING = ("high", "medium")
 FINDING_TEXT = tuple(k for k in FINDING_KEYS if k not in ("severity", "line"))
 READY, DONE, ERROR, NOT_RUN, STARTED = "ready", "done", "error", "not-run", "started"
-LIMIT_ADVICE = (
-    "the documents left are not audited; continue with `--resume <dir>` after the reset, or "
-    "start a new run with `--model <model>`"
-)
-LIMIT_STOP = "not run: the model's usage limit was reached on an earlier document"
 RESULTS = "results.json"
 SUMMARY = "summary.md"
 
@@ -182,7 +177,12 @@ def settings(cfg, args, engine: engines.Engine) -> Settings:
     )
 
 
-def audit_one(engine, s: Settings, repo: str, doc: str, prompt: str, out: str) -> Result:
+def audit_one(
+    engine, s: Settings, repo: str, doc: str, prompt: str, out: str
+) -> Tuple[Result, str]:
+    """One document's session: its result, and why the documents after it are not run
+    ("" when they are)."""
+    stop_reason = ""
     started = time.monotonic()
     try:
         rr = engine.run(
@@ -200,15 +200,15 @@ def audit_one(engine, s: Settings, repo: str, doc: str, prompt: str, out: str) -
                 read_only=True,
             )
         )
-    except UsageLimit as limit:  # every document after it would hit the same limit
+    except UsageLimit as limit:
         result = Result(
             doc,
             ERROR,
             cost=limit.cost,
             charged=limit.cost,
-            message=limit.with_advice(LIMIT_ADVICE).message,
+            message=limit.with_advice(loop_advice("documents")).message,
         )
-        result.stop_run = LIMIT_STOP  # not a field: results.json does not keep it
+        stop_reason = loop_stopped("document")  # every document after it would hit it too
     except Stop as stop:
         result = Result(doc, ERROR, cost=stop.cost, charged=stop.cost, message=stop.message)
         if not stop.cost:  # a timeout or unreadable output: it may have spent up to its cap
@@ -228,7 +228,7 @@ def audit_one(engine, s: Settings, repo: str, doc: str, prompt: str, out: str) -
                 rr.data["findings"], key=lambda f: (order[f["severity"]], f["line"])
             )
     result.duration_s = round(time.monotonic() - started, 1)
-    return result
+    return result, stop_reason
 
 
 def counts(result: Result) -> dict:
@@ -527,7 +527,7 @@ def _main(args) -> int:
         # recorded first: if the run ends inside the session, its cap counts on --resume
         record[doc] = Result(doc, STARTED, charged=s.cap)
         run.save(results(), spent + s.cap)
-        result = audit_one(engine, s, repo, doc, prompt, out)
+        result, stop_reason = audit_one(engine, s, repo, doc, prompt, out)
         spent += result.charged
         record[doc] = result
         _write(os.path.join(out, slug(doc) + ".md"), report(result))
@@ -545,7 +545,7 @@ def _main(args) -> int:
             )
         )
         run.save(results(), spent)
-        stopped = stopped or getattr(result, "stop_run", "")
+        stopped = stopped or stop_reason
     final = results()
     run.save(final, spent)
     if args.dry_run:

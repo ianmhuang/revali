@@ -53,6 +53,21 @@ class UsageLimit(Stop):
         )
 
 
+def loop_advice(items: str) -> str:
+    """A UsageLimit's advice in a tool that runs one session per item (tools/doc_audit.py,
+    tools/review_bench.py); `--resume` keeps the recorded model, so another model is a new
+    run."""
+    return (
+        "the %s left are not run; continue with `--resume <dir>` after the reset, or start a "
+        "new run with `--model <model>`" % items
+    )
+
+
+def loop_stopped(item: str) -> str:
+    """Why an item after the one that hit the limit is not run."""
+    return "not run: the model's usage limit was reached on an earlier %s" % item
+
+
 @dataclass
 class EngineRequest:
     role: str  # "reviewer" | "diagnoser", for messages

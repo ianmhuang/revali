@@ -4,6 +4,8 @@ reviewer for one run. Black box through `revali run --foreground` with the fake 
 and runner; the usage-limit result object has the shape claude printed on 2026-11-19, with a
 made-up reset date and zone (PR #99 round 1 follow-up)."""
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -253,8 +255,8 @@ class ResumeAtValidation(Case):
         self.assertEqual(len(self.fake_calls("claude")), calls_before)
 
 
-def limited():
-    return {"exit": 1, "raw_stdout": limit_payload(cost=0.4), "write_tests": False}
+def limited(cost=0.4):
+    return {"exit": 1, "raw_stdout": limit_payload(cost=cost), "write_tests": False}
 
 
 class DocAuditStopsAtTheLimit(doc_audit_tests.AuditCase):
@@ -295,6 +297,29 @@ class BenchStopsAtTheLimit(bench_tests.BenchCase):
         self.assertEqual(b["outcome"], "not-run")
         self.assertIn("usage limit was reached", b["message"])
         self.assertEqual(len(self.fake_calls("claude")), 1)
+
+    def test_a_limit_that_reported_no_cost_charges_nothing(self):  # PR #99 round 3 F2
+        self.make_case("a-one")
+        self.claude(limited(cost=0))
+        _, _, cases, _ = self.run_bench()
+        a = cases["a-one"]
+        self.assertEqual((a["outcome"], a["cost"], a["charged"]), ("not-run", 0, 0))
+        self.assertNotIn("cost unknown", a["message"])
+
+    def test_a_resume_keeps_what_the_limited_session_spent(self):  # PR #99 round 3 F1
+        self.make_case("a-one")
+        self.claude(limited(cost=0.4), claude_entry(bench_tests.answer(bench_tests.finding())))
+        self.run_bench()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            bench_tests.bench.main(["--resume", self.out, "--budget-usd", "10"])
+        with open(os.path.join(self.out, "results.json"), encoding="utf-8") as fh:
+            a = {c["case"]: c for c in json.load(fh)["cases"]}["a-one"]
+        self.assertTrue(a["outcome"].startswith("caught"), a)
+        self.assertAlmostEqual(a["cost"], a["charged"])  # both include the earlier $0.40
+        self.assertGreater(a["cost"], 0.4)
+        self.assertIn("includes $0.40 spent by an earlier session of this case", a["message"])
+        self.assertNotIn("cost unknown", a["message"])
 
 
 class AgainstAuthor(unittest.TestCase):
