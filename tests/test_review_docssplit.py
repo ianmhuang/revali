@@ -44,7 +44,9 @@ class ReadmeIsAFrontPage(unittest.TestCase):
         self.text = read("README.md")
 
     def test_at_most_170_lines(self):
-        self.assertLessEqual(len(self.text.splitlines()), 170)
+        # docs/readme-refresh AC-8: the cap is 200 since README gained the capability and
+        # runner tables and the full command list (the name keeps the test's history)
+        self.assertLessEqual(len(self.text.splitlines()), 200)
 
     def test_the_parts_come_in_the_stated_order(self):
         markers = [

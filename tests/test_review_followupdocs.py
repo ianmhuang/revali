@@ -187,7 +187,8 @@ class ReadmeParagraphs(unittest.TestCase):
 
     def test_readme_stays_a_front_page(self):
         lines = self.text.splitlines()
-        self.assertLessEqual(len(lines), 170, len(lines))  # AC-6
+        # AC-6; docs/readme-refresh AC-8 raised the cap from 170 to 200
+        self.assertLessEqual(len(lines), 200, len(lines))
         for sentence in (
             "until the first review round is recorded",
             "not a FAIL verdict",

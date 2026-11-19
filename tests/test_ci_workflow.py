@@ -156,8 +156,8 @@ class Docs(unittest.TestCase):
                 self.assertNotIn("Windows and macOS on every push", text)
 
     def test_readme_within_its_cap(self):
-        # AC-7
-        self.assertLessEqual(len(read("README.md").splitlines()), 170)
+        # AC-7; docs/readme-refresh AC-8 raised the cap from 170 to 200
+        self.assertLessEqual(len(read("README.md").splitlines()), 200)
 
 
 if __name__ == "__main__":
