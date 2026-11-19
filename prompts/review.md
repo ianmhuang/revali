@@ -19,7 +19,7 @@ $diff
 ```
 
 Files changed but omitted from the diff above: $excluded_files
-Existing test files this diff modifies or deletes: $modified_tests
+Existing test files this diff modifies, deletes or renames (a rename under its old name): $modified_tests
 Dependency manifests this diff touches: $manifests
 
 $related_docs_section
@@ -36,7 +36,7 @@ $bounce_section
 3. Check every AC against the diff. An AC not met is `correctness` / `high`.
 4. Report `scope_mismatch`: things the diff does that the description does
    not mention, and things the description claims that the diff does not do.
-5. For every existing test file the diff modifies or deletes, add a
+5. For every existing test file the diff modifies, deletes or renames, add a
    `test_changes` entry saying whether the change is justified and why.
    A weakened or removed assertion without a reason in the description is
    not justified.

@@ -4,7 +4,7 @@
 
 Unknown keys are errors in every layer: a typo in a command name must not
 silently disable a step. No default value lives in this module; they are all
-in defaults.toml.
+in defaults.toml, except `config_version`, whose default is CONFIG_VERSION.
 """
 
 import os

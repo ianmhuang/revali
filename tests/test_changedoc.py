@@ -99,9 +99,13 @@ class ChangeDocTests(unittest.TestCase):
         self.assertTrue(any("draft" in p for p in problems), problems)
         # Approval = the status line goes; placeholders replaced by real AC text
         approved = "".join(line for line in text.splitlines(True) if not line.startswith("status:"))
-        approved = approved.replace(
-            "<another one; every AC maps to at least one test>", "second observable behaviour"
+        # fix/audit-lows-0.4.0 AC-8: the placeholder must be there, so a rewording fails here
+        placeholder = (
+            "<another one; the reviewer maps every AC to a test, "
+            "or records why it cannot be tested>"
         )
+        self.assertIn(placeholder, approved)
+        approved = approved.replace(placeholder, "second observable behaviour")
         doc = parse(approved)
         self.assertEqual(doc.ac_ids, ["AC-1", "AC-2"])
         self.assertEqual(validate(doc), [])

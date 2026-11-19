@@ -36,8 +36,10 @@ project's CLAUDE.md says so; see `templates/CLAUDE-snippet.md`).
      one test can check. Derive them from the request and from what you
      know of the code; list edge and failure cases, not only the happy path.
      Write each as `- AC-n: text`; a note in parentheses before the colon
-     (`- AC-2 (PR #30 F1): text`) and indented continuation lines are fine,
-     and any other line that starts like an AC stops preflight. A paragraph
+     (`- AC-2 (PR #30 F1): text`) is fine, and continuation lines, indented
+     or not, join the AC's text up to a blank line, a `## ` section heading or a
+     list item indented no deeper than it. In that section, any other line that starts like an
+     AC stops preflight; other sections are not checked. A paragraph
      that merely begins with an AC id, without a bullet or a colon, is prose.
    - `Out of scope`, `Dependencies`.
    Leave `What` and `Why` for phase 2.
@@ -102,9 +104,11 @@ Acting on the result:
   Do not merge. The user runs `python "<revali dir>/revali.py" merge` when they
   decide to; if they ask you to run it, run it in the foreground and relay the
   result (it waits for CI checks, so allow up to the configured timeout).
-  After a merge from a worktree, revali leaves the worktree detached at the
-  merged base; when the user asks, run `git worktree remove <path>` from the
-  primary tree and `git pull` there.
+  After a merge from a worktree while another tree (normally the primary one)
+  has the base branch checked out, revali leaves the worktree detached at the
+  merged base; when the user asks, run `git worktree remove <path>` and
+  `git pull` in the tree the merge output's `worktree:` line names. When no
+  other tree has the base, the worktree ends on the updated base branch.
 
 Do not edit files under `test_dir` that the reviewer wrote unless a finding
 asks for it, and say so in `response-<n>.md`.

@@ -33,7 +33,10 @@ def omitted_line(prompt):
 
 
 def modified_line(prompt):
-    return prompt_line(prompt, "Existing test files this diff modifies or deletes")
+    return prompt_line(
+        prompt,
+        "Existing test files this diff modifies, deletes or renames (a rename under its old name)",
+    )
 
 
 class EarlierReviewerTest(RepoCase):

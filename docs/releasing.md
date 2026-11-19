@@ -57,7 +57,8 @@ finding with its evidence, and the documents not audited. `results.json` and `su
 are the latest run's; a run after a dry run in the same directory rewrites the prompt of
 each document it selects, and the dry run's other prompt files stay.
 
-Exit codes: `0` no high or medium finding and every document audited; `2` at least one
+Exit codes: `0` no high or medium finding and every document audited, or a `--dry-run`
+that wrote its prompts; `2` at least one
 high or medium finding; `1` otherwise (a document failed or was not run, or the command
 could not start, for instance with the engine's executable missing). A session that fails,
 or answers outside the schema, marks its document `error` and the audit goes on with the
@@ -110,13 +111,14 @@ next one; a failed session that reported no cost (a timeout) is charged its cap.
 
 ## Release notes for a project that uses revali
 
-Every PR revali opens carries one release label (`major`, `minor`, `patch` or `docs` by
-default) taken from its change.md: the `release:` field when it has one, else the label
-`[pr] kind_labels` gives its kind ([docs/configuration.md](configuration.md)). Copy
+Every PR revali opens carries one release label (`major`, `minor`, `patch`, `docs` or
+`skip-changelog` by default) taken from its change.md: the `release:` field when it has one,
+else the label `[pr] kind_labels` gives its kind (`minor`, `patch` or `docs`); `major` and
+`skip-changelog` come from `release:` only ([docs/configuration.md](configuration.md)). Copy
 [templates/release.yml](../templates/release.yml) to `.github/release.yml` in the project,
 and `gh release create v<version> --verify-tag --generate-notes --notes "<lead line>"` after
 each tag gives the same grouped notes: Major, Minor, Patch and Docs changes, the rest under
-Other, a PR labelled `skip-changelog` left out. A project that labels PRs another way sets
+Other, a PR labelled `skip-changelog` (`release: skip-changelog` in change.md) left out. A project that labels PRs another way sets
 `[pr] release_labels = []`, and revali leaves its labels alone.
 
 GitHub reads `.github/release.yml` from the tagged commit, so commit the file before the

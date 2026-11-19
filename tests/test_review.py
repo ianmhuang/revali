@@ -185,7 +185,7 @@ class PromptTests(RepoCase):
         self.commit_all("weaken")
         ctx = preflight(self.repo)
         prompt = build_prompt(ctx, State(), self.rdir(), 1)
-        self.assertIn("modifies or deletes: tests/test_calc.py", prompt)
+        self.assertIn("renames (a rename under its old name): tests/test_calc.py", prompt)
 
     def test_bounce_section(self):
         ctx = preflight(self.repo)

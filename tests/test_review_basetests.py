@@ -1,8 +1,8 @@
 """Reviewer acceptance tests for fix/review-modified-tests.
 
 AC-1: every file under test_dir that is on the base and that the branch modifies, deletes or
-      renames is on the prompt's "Existing test files this diff modifies or deletes" line (a
-      rename under its old name), whether or not its name matches test_file_pattern.
+      renames is on the prompt's "Existing test files this diff modifies, deletes or renames" line
+      (a rename under its old name), whether or not its name matches test_file_pattern.
 AC-2: the prompt's diff shows the change to such a file and preflight counts its lines; a
       pattern file the branch adds stays out, and `[review] exclude` still wins.
 AC-3: such a file is not named on the "omitted from the diff" line.
@@ -58,7 +58,10 @@ def omitted(prompt):
 
 
 def modified(prompt):
-    return line_after(prompt, "Existing test files this diff modifies or deletes")
+    return line_after(
+        prompt,
+        "Existing test files this diff modifies, deletes or renames (a rename under its old name)",
+    )
 
 
 def names(line):
