@@ -158,7 +158,9 @@ class WhatItDoes(unittest.TestCase):
 
     def test_every_heading_link_on_the_linked_pages_resolves(self):  # round 1 follow-up
         # test_doc_links accepts `#heading` on these pages; the heading is checked here
-        pages = ["README.md", "CONVENTIONS.md", "CLAUDE.md"] + sorted(
+        # round 2 follow-up: bench/README.md is in the documentation graph too (skill/SKILL.md
+        # carries no links, test_doc_links.CopiedAndSessionFilesHaveNoLinks)
+        pages = ["README.md", "CONVENTIONS.md", "CLAUDE.md", "bench/README.md"] + sorted(
             os.path.relpath(p, ROOT).replace(os.sep, "/")
             for p in glob.glob(os.path.join(ROOT, "docs", "*.md"))
         )

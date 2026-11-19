@@ -126,7 +126,9 @@ what each one means:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> preflight: revali run
+    [*] --> preflight: revali run, preflight passes
+    [*] --> needs_action: preflight refuses (rebase, lint, diff size), exit 2
+    [*] --> needs_human: fix cycles used up, exit 3
     preflight --> pr
     pr --> review
     pr --> validate: an APPROVE round not yet validated
@@ -134,8 +136,6 @@ stateDiagram-v2
     validate --> ready_to_merge: PASS, exit 0
     review --> needs_action: CHANGES_REQUESTED or NEEDS_INFO, exit 2
     validate --> needs_action: FAIL, exit 2
-    preflight --> needs_action: rebase, lint, diff size, exit 2
-    preflight --> needs_human: fix cycles used up, exit 3
     needs_action --> preflight: a fix or an answer, revali run
     ready_to_merge --> merged: revali merge, exit 0
     ready_to_merge --> closed: PR closed elsewhere, revali archive, exit 0
