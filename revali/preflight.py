@@ -18,6 +18,7 @@ from revali.config import (
     load_project_config,
     load_user_config,
     paths_for,
+    release_label,
     tool_file,
 )
 from revali.procs import ProcTimeout, run_shell
@@ -150,6 +151,11 @@ def locate(cwd: str, base_override: str = "", log: Optional[RunLog] = None) -> C
     else:
         ctx.doc = changedoc.load(doc_path)
         problems.extend(changedoc.validate(ctx.doc, V1_KINDS))
+        if ctx.cfg and ctx.doc.release and ctx.doc.release not in ctx.cfg.pr.release_labels:
+            problems.append(
+                "change.md: release '%s' is not one of [pr] release_labels (%s)"
+                % (ctx.doc.release, ", ".join(ctx.cfg.pr.release_labels) or "empty: labels off")
+            )
 
     if problems:
         raise Stop(EXIT_ERROR, "before revali can run:\n  - " + "\n  - ".join(problems))
@@ -431,7 +437,17 @@ def preflight(
     for note in ctx.notes:
         ctx.say("note: " + note)
     ids = ctx.doc.ac_ids
-    ctx.say("ok: %s (%s, %d AC: %s)" % (ctx.doc.title, ctx.doc.kind, len(ids), ", ".join(ids)))
+    label = release_label(ctx.cfg, ctx.doc)
+    ctx.say(
+        "ok: %s (%s, %d AC: %s%s)"
+        % (
+            ctx.doc.title,
+            ctx.doc.kind,
+            len(ids),
+            ", ".join(ids),
+            "; label %s" % label if label else "",
+        )
+    )
     return ctx
 
 

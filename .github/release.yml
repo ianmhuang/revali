@@ -1,0 +1,23 @@
+# Groups for `gh release create --generate-notes`. Copy to .github/release.yml.
+# revali gives each PR one of these labels from change.md ([pr] release_labels,
+# kind_labels, or the `release:` field); see docs/releasing.md.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: Major Changes
+      labels:
+        - major
+    - title: Minor Changes
+      labels:
+        - minor
+    - title: Patch Changes
+      labels:
+        - patch
+    - title: Docs
+      labels:
+        - docs
+    - title: Other Changes
+      labels:
+        - "*"

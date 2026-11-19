@@ -26,6 +26,10 @@ project's CLAUDE.md says so; see `templates/CLAUDE-snippet.md`).
    - `title`: one line, becomes the PR title.
    - `kind`: feature | fix | docs.
    - `author_model`: your model id.
+   - `release` (optional): the PR's release label when the kind's label
+     (`[pr] kind_labels`: feature minor, fix patch, docs docs) is wrong for
+     it, e.g. `release: minor` for a fix that adds a flag, `release: major`
+     for a change users must prepare for.
    - `Request`: the user's instruction to you, verbatim, original language.
    - `Goal`: what must be true when this is merged.
    - `Acceptance criteria` as `- AC-n: ...`, each an observable behaviour

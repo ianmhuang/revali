@@ -14,13 +14,13 @@ import tomllib
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from revali import CONFIG_VERSION, V1_PLATFORMS
+from revali import ALL_KINDS, CONFIG_VERSION, V1_PLATFORMS
 
 TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULTS_FILE = os.path.join(TOOL_ROOT, "defaults.toml")
 PROJECT_FILE = "revali.toml"
 USER_DIR_ENV = "REVALI_HOME"
-SECTIONS = ("project", "review", "validate", "merge", "paths", "engines")
+SECTIONS = ("project", "review", "validate", "merge", "paths", "pr", "engines")
 PLATFORM_DEFAULTS_KEY = "platform"  # [validate.platform] in defaults.toml
 RUNNERS = ("wsl", "local", "ssh")
 USER_TOP_KEYS = ("checklist", "history_path")
@@ -146,6 +146,14 @@ class MergeCfg:
 
 
 @dataclass
+class PrCfg:
+    # the labels revali manages on its PRs (adds the wanted one, removes the others);
+    # empty = revali leaves labels alone
+    release_labels: List[str] = field(default_factory=list)
+    kind_labels: dict = field(default_factory=dict)  # change.md kind -> one of release_labels
+
+
+@dataclass
 class Config:
     project: ProjectCfg
     review: ReviewCfg
@@ -153,6 +161,7 @@ class Config:
     merge: MergeCfg
     paths: PathsCfg
     engines: Dict[str, EngineCfg]
+    pr: PrCfg = field(default_factory=PrCfg)
     path: str = ""
     warnings: List[str] = field(default_factory=list)
 
@@ -164,6 +173,15 @@ class Config:
     def foreign_ladders(self, engine_name: str) -> List[List[str]]:
         """The tiers of every engine except the named one."""
         return [list(e.tiers) for n, e in self.engines.items() if n != engine_name]
+
+
+def release_label(cfg: Config, doc) -> str:
+    """The release label a PR for change.md `doc` carries: its `release` field, else
+    `[pr] kind_labels` for its kind; "" when neither gives one or `release_labels` is empty
+    (the feature is off). Preflight has already refused a `release` outside the list."""
+    if not cfg.pr.release_labels:
+        return ""
+    return (getattr(doc, "release", "") or "").strip() or cfg.pr.kind_labels.get(doc.kind, "")
 
 
 def listed_platform(cfg: Config, name: str = "") -> PlatformCfg:
@@ -223,6 +241,8 @@ def _type_problem(current, value) -> str:
         return "" if isinstance(value, str) else "must be a string"
     if isinstance(current, list):
         return "" if isinstance(value, list) else "must be a list"
+    if isinstance(current, dict):
+        return "" if isinstance(value, dict) else "must be a table"
     return ""
 
 
@@ -265,6 +285,7 @@ def _check_layer(sections: dict, label: str, problems: list) -> List[str]:
     _fill(ReviewCfg, sections.get("review", {}), "%s: review" % label, problems, bad)
     _fill(MergeCfg, sections.get("merge", {}), "%s: merge" % label, problems, bad)
     _fill(PathsCfg, sections.get("paths", {}), "%s: paths" % label, problems, bad)
+    _fill(PrCfg, sections.get("pr", {}), "%s: pr" % label, problems, bad)
     scalars, tables = _split_validate(sections.get("validate", {}))
     _fill(ValidateCfg, scalars, "%s: validate" % label, problems, bad)
     for pname, table in tables.items():
@@ -290,6 +311,7 @@ def merge_layers(*layers: dict) -> dict:
         "validate": {},
         "merge": {},
         "paths": {},
+        "pr": {},
         "engines": {},
         "_platforms": {},
     }
@@ -298,7 +320,7 @@ def merge_layers(*layers: dict) -> dict:
     for layer in layers:
         if not layer:
             continue
-        for name in ("project", "review", "merge", "paths"):
+        for name in ("project", "review", "merge", "paths", "pr"):
             merged[name].update(layer.get(name, {}))
         scalars, tables = _split_validate(layer.get("validate", {}))
         merged["validate"].update(scalars)
@@ -335,6 +357,33 @@ def _plain_dir(value: str) -> str:
 
 def _single_component(value: str) -> bool:
     return bool(value) and value not in (".", "..") and "/" not in value and "\\" not in value
+
+
+def _pr_problems(pr: PrCfg) -> List[str]:
+    """`[pr]`: each release label a name gh can take in a comma-separated `--remove-label`;
+    each `kind_labels` entry a change.md kind mapped to one of them. With `release_labels`
+    empty the feature is off and `kind_labels` is not checked."""
+    problems = []
+    for name in pr.release_labels:
+        if not isinstance(name, str) or not name.strip() or "," in name or name != name.strip():
+            problems.append(
+                "pr.release_labels must list label names without commas or surrounding "
+                "spaces (got %r)" % (name,)
+            )
+    if not pr.release_labels:
+        return problems
+    for kind, label in pr.kind_labels.items():
+        if kind not in ALL_KINDS:
+            problems.append(
+                "pr.kind_labels.%s: '%s' is not a change.md kind (%s)"
+                % (kind, kind, ", ".join(ALL_KINDS))
+            )
+        elif label not in pr.release_labels:
+            problems.append(
+                "pr.kind_labels.%s: %r is not one of pr.release_labels (%s)"
+                % (kind, label, ", ".join(str(n) for n in pr.release_labels))
+            )
+    return problems
 
 
 # ---- loading ----------------------------------------------------------------
@@ -392,6 +441,7 @@ def parse_project_config(
     review = _fill(ReviewCfg, merged["review"], "review", quiet)
     merge = _fill(MergeCfg, merged["merge"], "merge", quiet)
     paths = _fill(PathsCfg, merged["paths"], "paths", quiet)
+    pr = _fill(PrCfg, merged["pr"], "pr", quiet)
     validate = _fill(ValidateCfg, merged["validate"], "validate", quiet)
     for pname, table in merged["_platforms"].items():
         validate.platforms[pname] = _fill(
@@ -538,6 +588,7 @@ def parse_project_config(
         problems.append(
             "paths.history_file must be a single file name (got %r)" % paths.history_file
         )
+    problems.extend(_pr_problems(pr))
     if "history_file" in data.get("paths", {}):
         problems.append(
             "paths.history_file is a user-level key (~/.revali/config.toml), not a project one"
@@ -563,6 +614,7 @@ def parse_project_config(
         merge=merge,
         paths=paths,
         engines=engines,
+        pr=pr,
         path=path,
         warnings=warnings,
     )

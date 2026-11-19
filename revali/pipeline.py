@@ -13,7 +13,14 @@ from typing import Optional, Tuple
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_HUMAN, EXIT_OK, NAME, VERSION, gitops
 from revali.build import build
-from revali.config import ConfigError, archive_root, history_path, load_user_config, paths_for
+from revali.config import (
+    ConfigError,
+    archive_root,
+    history_path,
+    load_user_config,
+    paths_for,
+    release_label,
+)
 from revali.issues import opened_count
 from revali.preflight import Stop, check_tree_unmoved, dirty_tree_problem, locate, preflight
 from revali.procs import ProcError, kill_tree, pid_alive, python_exe, spawn_detached
@@ -609,6 +616,9 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
             )
         )
         log.stage("run", msg)
+        label = release_label(ctx.cfg, ctx.doc)
+        if label:
+            log.stage("run", "dry run: would give the PR the release label '%s'" % label)
         _stage(state, rdir, log, "preflight", msg, EXIT_OK)
         log.timing.close()
         log.stage("run", "timing " + log.timing.summary())

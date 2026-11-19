@@ -9,6 +9,7 @@ Use via REVALI_GH_CMD="<python> <this file>".
 import json
 import os
 import sys
+import urllib.parse
 
 DEFAULT = {
     "auth_exit": 0,
@@ -29,6 +30,10 @@ DEFAULT = {
     "comment_exit": 0,
     "labels": ["bug"],
     "label_list_exit": 0,
+    "label_create_exit": 0,
+    "label_view_exit": 0,  # `api repos/{owner}/{repo}/labels/<name>`: a failure other than 404
+    "label_edit_exit": 0,  # `pr edit` with --add-label / --remove-label
+    "pr_labels": [],  # the labels `pr view` reports on the PR
     "issue_create": {"number": 41, "url": "https://github.example/me/sample/issues/41"},
     "issue_exit": 0,
     # `issue list`: the repository's issues ({"number", "title", "url", "state"}; state
@@ -76,6 +81,17 @@ def main(argv):
     if argv[:2] == ["api", "user"]:
         print(sc["login"])
         return 0
+    if argv[:1] == ["api"] and len(argv) > 1 and "/labels/" in argv[1]:
+        # one label looked up by name, in any case, as GitHub does
+        if int(sc["label_view_exit"]):
+            print("gh_stub: label lookup failed (HTTP 502)", file=sys.stderr)
+            return int(sc["label_view_exit"])
+        name = urllib.parse.unquote(argv[1].rsplit("/", 1)[1])
+        if name.lower() not in {n.lower() for n in sc["labels"]}:
+            print("gh: Not Found (HTTP 404)", file=sys.stderr)
+            return 1
+        print(json.dumps({"name": name}))
+        return 0
     if argv[:2] == ["repo", "view"]:
         print(
             json.dumps(
@@ -100,7 +116,8 @@ def main(argv):
         if int(sc["pr_view_exit"]):
             print("gh_stub: pr view failed", file=sys.stderr)
             return int(sc["pr_view_exit"])
-        print(json.dumps(dict(sc["pr_create"], title=sc["pr_title"])))
+        labels = [{"name": n} for n in sc["pr_labels"]]
+        print(json.dumps(dict(sc["pr_create"], title=sc["pr_title"], labels=labels)))
         return 0
     if argv[:2] == ["pr", "comment"]:
         return int(sc["comment_exit"])
@@ -126,6 +143,10 @@ def main(argv):
         if "--title" in argv and int(sc["title_edit_exit"]):
             print("gh_stub: pr edit --title failed", file=sys.stderr)
             return int(sc["title_edit_exit"])
+        labelled = "--add-label" in argv or "--remove-label" in argv
+        if labelled and int(sc["label_edit_exit"]):
+            print("gh_stub: pr edit label failed", file=sys.stderr)
+            return int(sc["label_edit_exit"])
         return 0
     if argv[:2] == ["pr", "ready"]:
         return 0
@@ -136,6 +157,11 @@ def main(argv):
             print("gh_stub: label list failed", file=sys.stderr)
             return int(sc["label_list_exit"])
         print(json.dumps([{"name": n} for n in sc["labels"]]))
+        return 0
+    if argv[:2] == ["label", "create"]:
+        if int(sc["label_create_exit"]):
+            print("gh_stub: label create failed", file=sys.stderr)
+            return int(sc["label_create_exit"])
         return 0
     if argv[:2] == ["issue", "create"]:
         if int(sc["issue_exit"]):

@@ -218,6 +218,22 @@ of a session's model usage are the CLI's own helper calls: the model that
 did the work, recorded as `model_actual` and checked for a fallback, is
 picked among the other rows.
 
+Release labels: `[pr] release_labels`, by default
+`["major", "minor", "patch", "docs", "skip-changelog"]`, are the PR labels
+revali keeps in step, and `[pr] kind_labels`, by default
+`{ feature = "minor", fix = "patch", docs = "docs" }`, maps a change.md
+kind (`feature`, `fix`, `docs`) to one of them. A PR carries the label
+change.md's optional `release:` field names, else the one its kind maps to,
+else none of them; each run that opens or reuses the PR and `revali merge`
+add that label and remove the list's others ([docs/side-effects.md](side-effects.md)). A
+layer that sets `kind_labels` replaces the whole table. A `kind_labels` key
+that is not a change.md kind or a value outside `release_labels`, or a
+label with a comma or surrounding spaces, is a configuration error, and a
+`release:` value outside the list stops preflight; preflight's `ok:` line
+ends with `; label <name>`. `release_labels = []` turns it off: no label is
+added or removed. [templates/release.yml](../templates/release.yml) groups the release
+notes GitHub generates by these labels ([docs/releasing.md](releasing.md)).
+
 Reserved keys: defaults.toml carries a few keys this version accepts but
 does not act on. `[project] change_source` only accepts `manual` and
 `[review] strategy` only `prompt` (any other value is a configuration

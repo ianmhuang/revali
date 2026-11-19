@@ -578,7 +578,16 @@ def gh_repo_info(cwd: str, log: Logger = None) -> RepoInfo:
 
 def gh_pr_open(branch: str, cwd: str, log: Logger = None) -> Optional[dict]:
     res = _gh(
-        ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,title"],
+        [
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            "number,url,isDraft,title,labels",
+        ],
         cwd,
         log,
     )

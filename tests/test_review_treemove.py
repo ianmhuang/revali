@@ -37,6 +37,11 @@ class TreeMoveCase(RepoCase):
     def gh_calls(self, *verb):
         return [c for c in self.fake_calls("gh") if c["argv"][: len(verb)] == list(verb)]
 
+    def body_edits(self):
+        """`gh pr edit --body-file` calls. Since feature/release-labels the PR stage also
+        edits the new PR's labels (before any move), which these assertions are not about."""
+        return [c for c in self.gh_calls("pr", "edit") if "--body-file" in c["argv"]]
+
     def switch_to_other(self):
         git(["checkout", "-q", "-b", "feature/other"], self.repo)
 
@@ -86,7 +91,7 @@ class TheTreeMovesWhileTheReviewerWorks(TreeMoveCase):
         self.assertFalse(self.exists("tests/test_review_mul.py"))  # discarded like an interruption
         self.assertFalse(state.reviewer_running)  # this run cleaned up itself
         self.assertEqual(self.gh_calls("pr", "comment"), [])  # no PR comment
-        self.assertEqual(self.gh_calls("pr", "edit"), [])  # no body update
+        self.assertEqual(self.body_edits(), [])  # no body update
         self.assertEqual(
             gitops.current_branch(self.repo), "feature/other"
         )  # the other session's move stays
@@ -145,7 +150,7 @@ class TheTreeMovesAfterTheRunsOwnCommit(TreeMoveCase):
         self.assertEqual(self.run_commits("feature/mul"), 1)  # made before the move, stays
         self.assertEqual(self.run_commits("origin/feature/mul"), 0)  # but was never pushed
         self.assertEqual(self.gh_calls("pr", "comment"), [])  # no review comment either
-        self.assertEqual(self.gh_calls("pr", "edit"), [])
+        self.assertEqual(self.body_edits(), [])
         self.assert_locks_released()
 
     def test_moved_before_validation(self):  # AC-2
@@ -178,7 +183,7 @@ class TheTreeMovesAfterTheRunsOwnCommit(TreeMoveCase):
             len(self.gh_calls("pr", "comment")), 1
         )  # the review comment, before the move
         self.assertNotIn("validate", " ".join(self.gh_calls("pr", "comment")[0]["argv"]))
-        self.assertEqual(self.gh_calls("pr", "edit"), [])  # no body update after the move
+        self.assertEqual(self.body_edits(), [])  # no body update after the move
         self.assertEqual(self.gh_calls("pr", "ready"), [])  # never marked ready
         self.assert_locks_released()
 
