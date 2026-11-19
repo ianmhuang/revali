@@ -13,6 +13,7 @@ from tests.helpers import RepoCase, claude_entry, run_cli
 RESET = "resets Dec 1, 9am (UTC)"
 LIMIT_TEXT = "You've hit your Fable limit - %s. Switch to another model to continue." % RESET
 TESTS_MD = ".revali/feature__mul/tests.md"
+RUN_LOG = ".revali/feature__mul/logs/revali.log"
 
 
 def result_object(cost=0.37, text=LIMIT_TEXT, **kw):
@@ -173,6 +174,21 @@ class DiagnosisLimit(Case):
         self.assertEqual(len(told), 1, out)
         self.assert_diagnosis_limit_line(told[0])
         self.assertNotIn("--reviewer-model", out)
+
+    def test_the_stage_line_says_the_same_as_tests_md(self):
+        # round 1 F1: the line in the log (and on a foreground run's output), not only
+        # tests.md and the ACTION NEEDED text
+        code, out = self.failed_validation()
+        self.assertEqual(code, EXIT_ACTION, out)
+        logged = [
+            ln for ln in self.read(RUN_LOG).splitlines() if "validate: diagnosis unavailable:" in ln
+        ]
+        self.assertEqual(len(logged), 1, self.read(RUN_LOG))
+        self.assert_diagnosis_limit_line(logged[0])
+        printed = [ln for ln in out.splitlines() if "diagnosis unavailable:" in ln]
+        self.assertGreaterEqual(len(printed), 2, out)  # the stage line and the ACTION NEEDED one
+        for line in printed:
+            self.assert_diagnosis_limit_line(line)
 
     def test_the_diagnosis_cost_is_counted(self):
         code, out = self.failed_validation()
