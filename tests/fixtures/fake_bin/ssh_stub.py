@@ -11,7 +11,6 @@ Each knob acts on every host; to act on some hosts only, give DOWN and BASH_FAIL
 names instead of 1 (`winbox` or `a,b`) and SCRIPT_DROP `<n>@<hosts>` (`0@winbox`).
 """
 
-import json
 import os
 import shlex
 import shutil
@@ -20,6 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import fakelog  # noqa: E402
 import hostbash  # noqa: E402
 
 
@@ -59,8 +59,7 @@ def knob(name, host):
 def record(argv):
     log = os.environ.get("REVALI_FAKE_LOG")
     if log:
-        with open(log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"exe": "ssh", "argv": argv}) + "\n")
+        fakelog.record(log, {"exe": "ssh", "argv": argv})
 
 
 def one(words, host=""):

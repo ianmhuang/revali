@@ -21,6 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import fakelog  # noqa: E402
 import wsl_stub  # noqa: E402
 
 DEFAULT_MESSAGE = (
@@ -58,8 +59,7 @@ def main(argv):
     kind = kind_of(cmd)
     calls = os.environ.get("REVALI_FAKE_WSL_CALLS")
     if calls:
-        with open(calls, "a", encoding="utf-8", newline="") as fh:
-            fh.write(kind + "\n")
+        fakelog.append(calls, kind)
     plan_path = os.environ.get("REVALI_FAKE_WSL_PLAN")
     plan = {}
     if plan_path and os.path.isfile(plan_path):
