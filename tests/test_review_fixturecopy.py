@@ -6,7 +6,8 @@ the remote and the upstream) and returns the dict a build at that target returns
 AC-2: a copy stands alone: it works after the build directory is gone, no file in it names
 that directory, and a change in one copy reaches no other copy and no other copy's remote.
 AC-3: the build directory is removed when the process exits; a failed build raises, keeps
-nothing, and the next call builds again.
+nothing, and the next call builds again. Round 2: a temporary directory a test points
+`tempfile` at and removes after the first call takes no build along.
 AC-4: the command line makes the same repository as before.
 
 The fresh build every copy is compared with is the one the command line makes in its own
@@ -61,6 +62,22 @@ FAILED_THEN_BUILT = (
     "later = m.create(%r, True, True, 'local')\n"
     "print(json.dumps({'raised': raised, 'left': left, 'built': m.build_dir(),\n"
     "                  'again': again, 'later': later}))\n"
+)
+REDIRECTED_TEMP = (
+    "import tempfile\n"
+    "from tests.helpers import rmtree_force\n"
+    "own = %r\n"
+    "os.makedirs(own)\n"
+    "saved = tempfile.tempdir\n"
+    "tempfile.tempdir = own\n"  # as a test that wants its repository under another temp does
+    "first = m.create(%r, True, True, 'local')\n"
+    "tempfile.tempdir = saved\n"
+    "rmtree_force(own)\n"
+    "os.environ['GIT_AUTHOR_DATE'] = os.environ['GIT_COMMITTER_DATE'] = %r\n"
+    "later = m.create(%r, True, True, 'local')\n"
+    "other = m.create(%r, False, True, 'local')\n"
+    "print(json.dumps({'gone': not os.path.exists(own), 'first': first, 'later': later,\n"
+    "                  'other': other, 'built': m.build_dir()}))\n"
 )
 
 
@@ -396,6 +413,33 @@ class OwnProcess(Case):
         self.assert_fixture(snapshot(out["again"]), DEFAULT)
         self.assertEqual(tips(out["later"]["repo"]), tips(out["again"]["repo"]))
         self.assertEqual(sorted(files(out["later"]["repo"])), sorted(files(out["again"]["repo"])))
+        git(["fsck", "--no-progress"], out["later"]["repo"])
+        self.assertTrue(out["built"], out)
+        self.assertFalse(os.path.exists(out["built"]), out["built"])
+        self.assertEqual(os.listdir(private), [])
+
+    def test_a_temp_dir_removed_after_the_first_call_takes_no_build_along(self):
+        # AC-1 and AC-3 (round 1 F2): the first call of the process runs while
+        # tempfile.tempdir names a directory that is removed afterwards. The calls after it
+        # still copy the first build, a kind not built yet still builds, and the build
+        # directory still goes when the process exits.
+        own = self.path("own temp")
+        body = REDIRECTED_TEMP % (
+            own,
+            self.path("first"),
+            OTHER_DATE,
+            self.path("later"),
+            self.path("other"),
+        )
+        out, private = self.child(body)
+        self.assertTrue(out["gone"], out)  # the premise: that directory was removed
+        self.assertEqual(
+            tips(out["later"]["repo"]),
+            tips(out["first"]["repo"]),
+            "the later call built the fixture again instead of copying the first build",
+        )
+        self.assert_fixture(snapshot(out["later"]), DEFAULT)
+        self.assert_fixture(snapshot(out["other"]), (False, True, "local"))
         git(["fsck", "--no-progress"], out["later"]["repo"])
         self.assertTrue(out["built"], out)
         self.assertFalse(os.path.exists(out["built"]), out["built"])
