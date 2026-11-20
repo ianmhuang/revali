@@ -52,8 +52,14 @@ method = "squash"
 # (EPYC 7763), and the slowest job took 10.3 minutes (run 44681575353), so merge waits
 # about 11. Since macos-ci macOS runs beside them as two jobs: 314 s (Apple M2 Pro, 5
 # processors) and 611 s (Apple M1, 3 processors); its slowest job took 10.5 minutes and the
-# slowest Windows job 10.7 (run 44694774736), so merge still waits about 11. The docs and
-# the workflow point here instead of repeating the figures.
+# slowest Windows job 10.7 (run 44694774736), so merge still waits about 11. Its merge run
+# put both on an Apple M1: 736 s and 682 s, a 12.5-minute job against 10.8 for Windows (run
+# 44699291834). Since macos-three-shards macOS runs as three jobs: 639 s, 380 s and 585 s,
+# all on an M1 (the shards are balanced by the host's class seconds, not the Mac's); the
+# slowest macOS job took 11.1 minutes, the slowest Windows job 10.4 and the Ubuntu lint job,
+# unsharded on an EPYC 7763, 13.4 (run 44703309818). Which leg is slowest depends on the
+# runners, so merge waits about 11 to 14 minutes. The docs and the workflow point here
+# instead of repeating the figures.
 # Keep this above the job's timeout-minutes in .github/workflows/test.yml, so a hung leg is
 # cancelled and reported as failed before merge stops waiting.
 checks_timeout_min = 75
