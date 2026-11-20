@@ -116,17 +116,19 @@ class Legs(WorkflowCase):
         m = re.fullmatch(r"py(\d)(\d+)", target[0])
         pinned = "%s.%s" % (m.group(1), m.group(2))
         self.assertEqual(pinned, "3.11")
-        # ci-windows-shards (author's change): the Windows leg is four jobs, one per shard
+        # ci-windows-shards (author's change): the Windows leg is four jobs, one per shard;
+        # ci-shard-time AC-6 (author's change): six
         self.assertCountEqual(
             [(leg.get("os"), leg.get("python")) for leg in self.legs],
-            [("ubuntu-latest", pinned), ("ubuntu-latest", "3.x")] + [("windows-latest", "3.x")] * 4,
+            [("ubuntu-latest", pinned), ("ubuntu-latest", "3.x")] + [("windows-latest", "3.x")] * 6,
         )
 
     def test_lint_stays_on_the_one_ubuntu_leg(self):
         # AC-1: the Windows leg carries no lint marker; the steps that install or run the
         # linters are guarded by a marker only ubuntu / 3.x has. ci-windows-shards (author's
-        # change): four Windows jobs, each carrying only its shard keys besides os / python
-        self.assertEqual(len(self.windows), 4, "four Windows shards")
+        # change): four Windows jobs, each carrying only its shard keys besides os / python;
+        # ci-shard-time AC-6 (author's change): six
+        self.assertEqual(len(self.windows), 6, "six Windows shards")
         for leg in self.windows:
             self.assertEqual(sorted(leg), ["os", "python", "shard", "shards"])
         markers = {k for leg in self.legs for k in leg if k not in ("os", "python") + SHARD_KEYS}
@@ -143,8 +145,8 @@ class Legs(WorkflowCase):
     def test_the_windows_leg_runs_the_suite_and_can_fail_the_run(self):
         # AC-1: one unconditional suite step shared by every leg, nothing that skips a leg
         # or lets it fail quietly, and fail-fast stays false (ci-windows-shards, author's
-        # change: the leg is four shard jobs)
-        self.assertEqual(len(self.windows), 4, "four Windows shards")
+        # change: the leg is four shard jobs; ci-shard-time AC-6, author's change: six)
+        self.assertEqual(len(self.windows), 6, "six Windows shards")
         suite = self.suite_steps()
         self.assertEqual(len(suite), 1, "one suite step")
         self.assertNotIn("if", suite[0])

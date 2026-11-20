@@ -358,17 +358,18 @@ class Wiring(unittest.TestCase):
         return [render(template, leg).strip() for leg in legs]
 
     def test_the_windows_leg_is_four_jobs_one_shard_each(self):
-        self.assertEqual(len(self.windows), 4)
-        self.assertEqual(sorted(self.shard_values(self.windows)), ["1/4", "2/4", "3/4", "4/4"])
+        # ci-shard-time AC-6 (author's change): six jobs, eight legs in all
+        self.assertEqual(len(self.windows), 6)
+        self.assertEqual(sorted(self.shard_values(self.windows)), ["%d/6" % k for k in range(1, 7)])
         self.assertEqual(
             {(leg["os"], leg["python"]) for leg in self.windows}, {("windows-latest", "3.x")}
         )
-        # what stays: the two Ubuntu legs on the whole suite, six legs in all
+        # what stays: the two Ubuntu legs on the whole suite, eight legs in all
         self.assertEqual(
             sorted((leg["os"], leg["python"]) for leg in self.ubuntu),
             [("ubuntu-latest", "3.11"), ("ubuntu-latest", "3.x")],
         )
-        self.assertEqual(len(self.wf.legs), 6)
+        self.assertEqual(len(self.wf.legs), 8)
         self.assertEqual(self.shard_values(self.ubuntu), ["", ""])
         # the suite step is README's command, on every leg; a failing shard fails the run
         suite = self.wf.suite_steps()
@@ -383,7 +384,7 @@ class Wiring(unittest.TestCase):
         self.assertEqual(strategy.get("fail-fast"), "false")
 
     def test_lint_stays_on_the_one_ubuntu_leg_among_six(self):
-        self.assertEqual(len(self.wf.legs), 6)
+        self.assertEqual(len(self.wf.legs), 8)  # ci-shard-time AC-6 (author's change)
         lint_steps = [
             step for step in self.wf.steps if re.search(r"\b(ruff|black)\b", step.get("run", ""))
         ]
@@ -400,16 +401,16 @@ class Wiring(unittest.TestCase):
         template = unquote(self.wf.scalars.get("name", ""))
         names = [render(template, leg) for leg in self.windows]
         self.assertEqual(
-            sorted(names), ["windows-latest / python 3.x / shard %d of 4" % k for k in (1, 2, 3, 4)]
+            sorted(names), ["windows-latest / python 3.x / shard %d of 6" % k for k in range(1, 7)]
         )
         others = [render(template, leg) for leg in self.ubuntu]
         self.assertEqual([name for name in others if "shard" in name], [])
-        self.assertEqual(len(set(names + others)), 6, "six jobs, six names")
+        self.assertEqual(len(set(names + others)), 8, "eight jobs, eight names")
 
     def test_the_rendered_values_run_every_test_once_on_windows_and_all_on_ubuntu(self):
         windows = sorted(self.shard_values(self.windows))
         ubuntu = self.shard_values(self.ubuntu)
-        self.assertEqual((len(windows), len(ubuntu)), (4, 2))
+        self.assertEqual((len(windows), len(ubuntu)), (6, 2))
         tree = Tree()
         self.addCleanup(rmtree_force, tree.root)
         seen = []
@@ -420,7 +421,7 @@ class Wiring(unittest.TestCase):
                 self.assertTrue(ran, "a Windows job with nothing to run")
                 self.assertIn("(shard %s of %s)" % tuple(value.split("/")), out)
             seen.extend(ran)
-        self.assertEqual(sorted(seen), EVERYTHING)  # the four jobs: all, none twice
+        self.assertEqual(sorted(seen), EVERYTHING)  # the six jobs: all, none twice
         for value in sorted(set(ubuntu)):
             code, out, ran = tree.run(value)
             with self.subTest(ubuntu=value):

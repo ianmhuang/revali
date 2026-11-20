@@ -25,15 +25,26 @@ change the discovery start and top-level directories (the defaults are this repo
 `--shard K/N`, else the environment variable RUN_PARALLEL_SHARD, runs only shard K of N:
 the collected classes are split into N shards the way they are split over workers, so N
 runs with K = 1..N on the same tree run every test exactly once (CI runs the Windows leg
-as four jobs this way). A module that does not import is reported by shard 1 only. The
+as six jobs this way). A module that does not import is reported by shard 1 only. The
 variable is not passed on to the workers, so a test that starts this runner itself is not
 sharded by it.
+
+Classes are placed by weight, heaviest first onto the least loaded worker or shard. The
+weight is a class's seconds in `durations.json` in the start directory. A class the file
+does not list weighs its test count times the median seconds per test of the listed classes.
+Without a usable file, every class weighs its test count. `--durations-out FILE` writes the
+seconds of each class this run ran. To refresh the committed file after the suite has
+changed, run the whole suite on the Windows host (the CI leg the file balances):
+
+    python tests/run_parallel.py --durations-out tests/durations.json
 """
 
 import argparse
 import io
 import json
+import math
 import os
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -46,6 +57,7 @@ ROOT = os.path.dirname(HERE)
 
 JOBS_ENV = "RUN_PARALLEL_JOBS"
 SHARD_ENV = "RUN_PARALLEL_SHARD"
+DURATIONS_FILE = "durations.json"
 COUNT_KEYS = ("failures", "errors", "skipped", "expected failures", "unexpected successes")
 FAILING_KEYS = ("failures", "errors", "unexpected successes")
 
@@ -81,22 +93,71 @@ def class_of(test_id: str) -> str:
     return test_id.rsplit(".", 1)[0]
 
 
-def shard(ids: Sequence[str], workers: int) -> List[List[str]]:
-    """Whole classes per worker, largest classes first onto the least loaded worker."""
+def load_durations(path: str) -> Dict[str, float]:
+    """`{class id: seconds}` from a durations file; {} when the file is missing or is not a
+    JSON object, and entries whose value is not a finite number of 0 or more are dropped. A
+    bad file only costs the balance, so it is never an error."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):  # UnicodeDecodeError is a ValueError
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for name, value in data.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if math.isfinite(value) and value >= 0:
+            out[str(name)] = float(value)
+    return out
+
+
+def class_weights(ids: Sequence[str], durations: Dict[str, float]) -> Optional[Dict[str, float]]:
+    """The weight of each collected class: its recorded seconds, or for a class the file does
+    not list, its test count times the median seconds per test of the listed ones. None when
+    the file lists none of the collected classes (the split then goes by test count)."""
+    counts: Dict[str, int] = {}
+    for tid in ids:
+        name = class_of(tid)
+        counts[name] = counts.get(name, 0) + 1
+    known = {name: durations[name] for name in counts if name in durations}
+    if not known:
+        return None
+    per_test = statistics.median(known[name] / counts[name] for name in known)
+    return {name: known.get(name, counts[name] * per_test) for name in counts}
+
+
+def shard(
+    ids: Sequence[str], workers: int, weights: Optional[Dict[str, float]] = None
+) -> List[List[str]]:
+    """Whole classes per worker, heaviest first onto the least loaded worker. A class weighs
+    its entry in `weights` (seconds), else its test count. Ties go to the bucket with fewer
+    tests, then to the first one."""
     groups: Dict[str, List[str]] = {}
     for tid in ids:
         groups.setdefault(class_of(tid), []).append(tid)
     workers = max(1, min(workers, len(groups)))
+
+    def weight(name: str) -> float:
+        return weights[name] if weights is not None else float(len(groups[name]))
+
     buckets: List[List[str]] = [[] for _ in range(workers)]
-    for members in sorted(groups.values(), key=len, reverse=True):
-        min(buckets, key=len).extend(members)
+    loads = [0.0] * workers
+    for name in sorted(groups, key=weight, reverse=True):
+        i = min(range(workers), key=lambda j: (loads[j], len(buckets[j])))
+        buckets[i].extend(groups[name])
+        loads[i] += weight(name)
     return [b for b in buckets if b]
 
 
-def select_shard(ids: Sequence[str], k: int, n: int) -> List[str]:
+def select_shard(
+    ids: Sequence[str], k: int, n: int, weights: Optional[Dict[str, float]] = None
+) -> List[str]:
     """Shard k (1-based) of n: the k-th bucket `shard` makes for n workers, or nothing when
-    there are fewer classes than shards. Deterministic for the same ids in the same order."""
-    buckets = shard(ids, n)
+    there are fewer classes than shards. Deterministic for the same ids, in the same order,
+    and the same weights."""
+    buckets = shard(ids, n, weights)
     return buckets[k - 1] if k <= len(buckets) else []
 
 
@@ -129,18 +190,41 @@ def counts_of(result: unittest.TestResult) -> Dict[str, int]:
     }
 
 
+class TimedResult(unittest.TextTestResult):
+    """A text result that also keeps each class's seconds: from the start of its first test
+    to the end of its last one, in this worker."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.spans: Dict[str, List[float]] = {}
+
+    def startTest(self, test):
+        self.spans.setdefault(class_of(test.id()), [time.monotonic(), 0.0])
+        super().startTest(test)
+
+    def stopTest(self, test):
+        super().stopTest(test)
+        span = self.spans.get(class_of(test.id()))
+        if span is not None:
+            span[1] = time.monotonic()
+
+    def class_seconds(self) -> Dict[str, float]:
+        return {name: round(max(0.0, end - start), 2) for name, (start, end) in self.spans.items()}
+
+
 def run_worker_mode(ids_file: str, top: str) -> int:
     """`--worker`: run the ids listed in the file the way `python -m unittest <ids>` would,
-    then write the counts to `<ids_file>.json` for the parent."""
+    then write the counts and each class's seconds to `<ids_file>.json` for the parent."""
     if top not in sys.path:
         sys.path.insert(0, top)
     with open(ids_file, "r", encoding="utf-8") as fh:
         ids = [line.strip() for line in fh if line.strip()]
     suite = unittest.TestLoader().loadTestsFromNames(ids)
-    result = unittest.TextTestRunner(verbosity=1).run(suite)
+    result = unittest.TextTestRunner(verbosity=1, resultclass=TimedResult).run(suite)
     record = counts_of(result)
     record["ran"] = result.testsRun
     record["successful"] = result.wasSuccessful()
+    record["classes"] = result.class_seconds()
     with open(ids_file + ".json", "w", encoding="utf-8") as fh:
         json.dump(record, fh)
     return 0 if result.wasSuccessful() else 1
@@ -217,6 +301,11 @@ def main(argv=None) -> int:
         metavar="K/N",
         help="run only shard K of N (default: %s, else the whole suite)" % SHARD_ENV,
     )
+    parser.add_argument(
+        "--durations-out",
+        metavar="FILE",
+        help="write the seconds of each test class this run ran to FILE, as JSON",
+    )
     parser.add_argument("--worker", metavar="IDS_FILE", help=argparse.SUPPRESS)
     parser.add_argument("names", nargs="*", help="test names, as for `python -m unittest`")
     args = parser.parse_args(argv)
@@ -228,12 +317,14 @@ def main(argv=None) -> int:
     part = parse_shard(args.shard, "--shard ") if args.shard is not None else default_shard()
 
     started = time.monotonic()
-    tests = collect(os.path.abspath(args.start_dir), top, args.names)
+    start_dir = os.path.abspath(args.start_dir)
+    tests = collect(start_dir, top, args.names)
     broken = [t for t in tests if is_failed_import(t)]
     ids = [t.id() for t in tests if not is_failed_import(t)]
     collected = len(ids)
+    weights = class_weights(ids, load_durations(os.path.join(start_dir, DURATIONS_FILE)))
     if part:
-        ids = select_shard(ids, *part)
+        ids = select_shard(ids, *part, weights)
         if part[0] != 1:
             broken = []
     if args.list:
@@ -252,7 +343,8 @@ def main(argv=None) -> int:
     env["PYTHONIOENCODING"] = "utf-8"  # the logs are read back as UTF-8
     env["PYTHONUTF8"] = "1"
     env.pop(SHARD_ENV, None)  # this run's shard, not the shard of a runner a test starts
-    buckets = shard(ids, args.jobs)
+    buckets = shard(ids, args.jobs, weights)
+    seconds: Dict[str, float] = {}
     procs: List[Tuple[int, subprocess.Popen, str, str, int]] = []
     tmp = tempfile.mkdtemp(prefix="run_parallel-")
     try:
@@ -302,6 +394,8 @@ def main(argv=None) -> int:
                 out.flush()
                 continue
             total_ran += int(record["ran"])
+            if isinstance(record.get("classes"), dict):
+                seconds.update(record["classes"])
             for key in COUNT_KEYS:
                 counts[key] += int(record.get(key, 0))
             passed = (
@@ -334,6 +428,10 @@ def main(argv=None) -> int:
         except OSError:
             pass
 
+    if args.durations_out:
+        with open(args.durations_out, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(dict(sorted(seconds.items())), fh, indent=0)
+            fh.write("\n")
     tail = " (shard %d of %d)" % part if part else ""
     out.write("\nRan %d tests in %.1fs%s\n\n" % (total_ran, time.monotonic() - started, tail))
     verdict = format_verdict(counts)

@@ -55,7 +55,7 @@ class Workflow(unittest.TestCase):
 
     def test_matrix_legs(self):
         # AC-2; ci/windows-job AC-1 added the Windows leg; ci-windows-shards AC-3 runs it as
-        # four shards
+        # four shards, ci-shard-time AC-6 as six
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(target, ["py311"])
         self.assertEqual(
@@ -64,7 +64,7 @@ class Workflow(unittest.TestCase):
                 ("ubuntu-latest", "3.11"),
                 ("ubuntu-latest", "3.x"),
             ]
-            + [("windows-latest", "3.x")] * 4,
+            + [("windows-latest", "3.x")] * 6,
         )
         self.assertRegex(self.text, r"fail-fast:\s*false")
 
@@ -72,8 +72,8 @@ class Workflow(unittest.TestCase):
         # ci-windows-shards AC-3, AC-4: shards 1..N of one N, each once, only on Windows;
         # the suite step hands the leg's shard to the runner, and the job name shows it
         windows = [leg for leg in legs(self.text) if leg["os"].startswith("windows")]
-        self.assertEqual({leg.get("shards") for leg in windows}, {"4"})
-        self.assertEqual(sorted(int(leg["shard"]) for leg in windows), [1, 2, 3, 4])
+        self.assertEqual({leg.get("shards") for leg in windows}, {"6"})
+        self.assertEqual(sorted(int(leg["shard"]) for leg in windows), [1, 2, 3, 4, 5, 6])
         others = [leg for leg in legs(self.text) if not leg["os"].startswith("windows")]
         self.assertFalse([leg for leg in others if "shard" in leg or "shards" in leg])
         job = block(block(self.text, "jobs"), "  test")
@@ -90,8 +90,8 @@ class Workflow(unittest.TestCase):
         # ci-windows-shards AC-4: the check above, fed a workflow whose shards are wrong
         good = self.text
         broken = {
-            "a shard missing": good.replace("shard: 4\n", "shard: 3\n"),
-            "two Ns": good.replace("shards: 4\n", "shards: 5\n", 1),
+            "a shard missing": good.replace("shard: 6\n", "shard: 3\n"),
+            "two Ns": good.replace("shards: 6\n", "shards: 5\n", 1),
         }
         for what, text in broken.items():
             with self.subTest(what=what):
