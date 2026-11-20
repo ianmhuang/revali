@@ -118,8 +118,8 @@ revali reviews its own changes on this public one.
 
 ## Requirements
 
-- Python 3.11+ (stdlib only), git, GitHub CLI (`gh auth login` done)
 - CI runs the suite on Linux, Windows and macOS hosts; no real review has run on macOS yet
+- Python 3.11+ (stdlib only), git, GitHub CLI (`gh auth login` done)
 - Claude Code CLI on PATH (`claude`), for the reviewer / diagnoser sessions
 - A place to run the sandbox, one of three runners (`[validate.<platform>] runner`); a
   project validates on `linux`, `windows` or both (`[project] platforms`):
