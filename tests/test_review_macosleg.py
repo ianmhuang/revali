@@ -2,14 +2,15 @@
 
 The workflow is read from its text with the standard library (no YAML library).
 
-AC-2: two `macos-latest` / Python `3.x` jobs, shard 1 of 2 and 2 of 2. The values the job's
+AC-2: two `macos-latest` / Python `3.x` jobs, shard 1 of 2 and 2 of 2 (macos-three-shards
+AC-1, author's change: three jobs, 1 of 3 to 3 of 3). The values the job's
 `RUN_PARALLEL_SHARD` takes on them are handed to `tests/run_parallel.py --list` on a
-throwaway tree, where the two lists must be the whole tree with nothing twice. One step,
+throwaway tree, where the lists must be the whole tree with nothing twice. One step,
 on macOS only and before the suite, installs coreutils with Homebrew and adds its `gnubin`
 to the PATH of the later steps. The Linux and Windows legs are what they were.
 
 AC-4: `tests/test_ci_workflow.py` passes on the workflow as committed and fails on a copy
-whose macOS leg is broken (no macOS jobs, both jobs on one shard, coreutils after the suite,
+whose macOS leg is broken (no macOS jobs, every job on one shard, coreutils after the suite,
 coreutils on every system).
 """
 
@@ -153,20 +154,27 @@ class MacosLeg(unittest.TestCase):
         self.steps = steps(self.text)
         self.macos = on(self.legs, "macos")
 
-    def test_two_jobs_on_the_latest_macos_and_python(self):
-        self.assertEqual(len(self.macos), 2, self.legs)
+    # macos-three-shards AC-2 (author's change): renamed from
+    # test_two_jobs_on_the_latest_macos_and_python
+    def test_three_jobs_on_the_latest_macos_and_python(self):
+        # macos-three-shards AC-2 (author's change): was 2
+        self.assertEqual(len(self.macos), 3, self.legs)
         for leg in self.macos:
             with self.subTest(leg=leg):
                 self.assertEqual((leg.get("os"), leg.get("python")), ("macos-latest", "3.x"))
                 self.assertNotIn("lint", leg)
         self.assertEqual(
             sorted((leg.get("shard"), leg.get("shards")) for leg in self.macos),
-            [("1", "2"), ("2", "2")],
+            # macos-three-shards AC-2 (author's change): was 1 and 2 of 2
+            [("1", "3"), ("2", "3"), ("3", "3")],
         )
 
-    def test_the_two_jobs_run_every_test_once(self):
+    # macos-three-shards AC-2 (author's change): renamed from
+    # test_the_two_jobs_run_every_test_once
+    def test_the_three_jobs_run_every_test_once(self):
         values = sorted(shard_value(self.text, leg) for leg in self.macos)
-        self.assertEqual(values, ["1/2", "2/2"])
+        # macos-three-shards AC-2 (author's change): was ["1/2", "2/2"]
+        self.assertEqual(values, ["1/3", "2/3", "3/3"])
         tree = Tree(self)
         whole = tree.listed("")
         self.assertEqual(len(whole), 42, whole)
@@ -174,7 +182,8 @@ class MacosLeg(unittest.TestCase):
         parts = [tree.listed(value) for value in values]
         for value, part in zip(values, parts, strict=True):
             self.assertTrue(part, "the job with %s has nothing to run" % value)
-        self.assertEqual(sorted(parts[0] + parts[1]), sorted(whole))
+        # macos-three-shards AC-2 (author's change): every part, not the first two
+        self.assertEqual(sorted(sum(parts, [])), sorted(whole))
         # the suite step reads the value from the environment and runs on every leg
         suite = [step for step in self.steps if SUITE in step.get("run", "")]
         self.assertEqual(len(suite), 1, self.steps)
@@ -227,10 +236,10 @@ class MacosLeg(unittest.TestCase):
         )
         # and the macOS jobs are the only other ones
         self.assertEqual(len(self.legs), len(ubuntu) + len(windows) + len(self.macos))
-        self.assertEqual(len(self.legs), 10)
+        self.assertEqual(len(self.legs), 11)  # macos-three-shards AC-2 (author's change): was 10
 
     def test_lint_stays_on_the_one_ubuntu_leg(self):
-        self.assertEqual(len(self.macos), 2)
+        self.assertEqual(len(self.macos), 3)  # macos-three-shards AC-2 (author's change)
         lint = [leg for leg in self.legs if "lint" in leg]
         self.assertEqual(
             [(leg["os"], leg["python"], leg["lint"]) for leg in lint],
@@ -317,14 +326,16 @@ class WorkflowTestsHoldTheLeg(unittest.TestCase):
         return [str(test) for test, _text in result.failures + result.errors]
 
     def test_the_committed_workflow_is_accepted(self):
-        self.assertEqual(len(on(matrix_legs(read(*WORKFLOW)), "macos")), 2)
+        # macos-three-shards AC-2 (author's change): was 2
+        self.assertEqual(len(on(matrix_legs(read(*WORKFLOW)), "macos")), 3)
         self.assertEqual(self.problems(read(*WORKFLOW)), [])
 
     def test_a_broken_macos_leg_is_caught(self):
         good = read(*WORKFLOW)
         broken = {
             "no macOS jobs": without_macos_legs,
-            "both macOS jobs on shard 1": macos_jobs_on_one_shard,
+            # macos-three-shards AC-2 (author's change): was "both macOS jobs on shard 1"
+            "every macOS job on shard 1": macos_jobs_on_one_shard,
             "coreutils after the suite": coreutils_after_the_suite,
             "coreutils on every system": coreutils_on_every_system,
         }

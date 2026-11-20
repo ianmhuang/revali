@@ -274,7 +274,7 @@ normal new round.
 revali's own CI ([.github/workflows/test.yml](../.github/workflows/test.yml)) runs lint and the
 suite on Linux, Windows and macOS on every push, and `revali merge` waits for it as it waits
 for any project's checks. The Windows and macOS legs are the slow ones: they run as six and
-two jobs in parallel, each one shard of the suite (`RUN_PARALLEL_SHARD=K/N`, the same as
+three jobs in parallel, each one shard of the suite (`RUN_PARALLEL_SHARD=K/N`, the same as
 `tests/run_parallel.py --shard K/N`), which together run every test once on each, and
 `revali merge` waits for all of them. The macOS jobs install GNU coreutils first, since the
 sandbox runs each step under `timeout`. The shards are balanced by the seconds per test

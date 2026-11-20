@@ -1,7 +1,7 @@
 # Lint and the whole suite on every push, on Linux, Windows and macOS. Push only: revali
 # opens a draft PR for each review, so a pull_request trigger would run every push twice.
 # `revali merge` waits for these checks; the Windows and macOS legs are the slow ones, so
-# they run as six and two jobs, each one shard of the suite (`RUN_PARALLEL_SHARD`, see
+# they run as six and three jobs, each one shard of the suite (`RUN_PARALLEL_SHARD`, see
 # tests/run_parallel.py, which balances them by tests/durations.json), which together run
 # every test once on each. The macOS jobs install GNU coreutils first: the sandbox runs each
 # step under `timeout`, and the suite stands this machine's bash in for the sandbox host.
@@ -64,11 +64,15 @@ jobs:
           - os: macos-latest
             python: "3.x"
             shard: 1
-            shards: 2
+            shards: 3
           - os: macos-latest
             python: "3.x"
             shard: 2
-            shards: 2
+            shards: 3
+          - os: macos-latest
+            python: "3.x"
+            shard: 3
+            shards: 3
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
