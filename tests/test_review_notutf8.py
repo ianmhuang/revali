@@ -3,7 +3,8 @@
 AC-1: `preflight` and `run` stop with exit 1 and a line naming revali.toml and UTF-8.
 AC-2: `status`, `wait` and `merge` behave as with a revali.toml that is not valid TOML.
 AC-3: the same when the user's config.toml is the file, and the line names that file.
-AC-4: a defaults.toml that is not UTF-8 is one ConfigError problem naming it.
+AC-4: a defaults.toml that is not UTF-8 is one ConfigError problem naming it, and at the
+      command line one ERROR line naming it with exit 1, as when it is not valid TOML.
 
 Every command runs in-process through revali.cli.main with stdout and stderr captured; an
 exception that escapes main is what a user sees as a traceback, and it fails the test.
@@ -12,6 +13,7 @@ exception that escapes main is what a user sees as a traceback, and it fails the
 import contextlib
 import io
 import os
+from unittest import mock
 
 from revali import config
 from revali.state import State
@@ -224,3 +226,56 @@ class DefaultsFile(Case):
                 self.assertIn(path, problems[0])
                 self.assertIn("UTF-8", problems[0])
                 self.assertNotIn("\n", problems[0])
+
+
+class DefaultsAtTheCommandLine(Case):
+    """AC-4 from the command line (round 2): a damaged revali checkout. Every command that
+    reads defaults.toml stops with exit 1 and one ERROR line naming that file, whether the
+    file is not UTF-8 or not valid TOML."""
+
+    COMMANDS = (
+        ["status"],
+        ["wait"],
+        ["merge"],
+        ["preflight"],
+        ["run", "--foreground"],
+        ["init"],
+    )
+
+    def setUp(self):
+        super().setUp()
+        # revali reads this copy where it would read its own defaults.toml
+        self.defaults = os.path.join(self.tmp, "defaults.toml")
+        real = config.load_defaults
+        patcher = mock.patch.object(config, "load_defaults", lambda: real(self.defaults))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        with open(config.DEFAULTS_FILE, "rb") as fh:
+            self.shipped = fh.read()
+
+    def lines_naming_defaults(self, out):
+        return [ln for ln in out.splitlines() if self.defaults in ln]
+
+    def test_every_command_stops_with_one_error_line_naming_defaults(self):
+        # the line names the copy, which shows the copy is the file the command read
+        self.put(self.defaults, NOT_TOML + self.shipped)
+        for argv in self.COMMANDS:
+            with self.subTest("not valid TOML", argv=argv):
+                code, out = cli(argv)
+                self.assertEqual(code, 1, out)
+                self.assertNotIn("Traceback", out)
+                named = self.lines_naming_defaults(out)
+                self.assertEqual(len(named), 1, out)
+                self.assertIn("ERROR", named[0])
+        for name, data in not_utf8_variants(self.shipped):
+            self.put(self.defaults, data)
+            for argv in self.COMMANDS:
+                with self.subTest(name, argv=argv):
+                    code, out = cli(argv)
+                    self.assertEqual(code, 1, out)
+                    self.assertNotIn("Traceback", out)
+                    self.assertNotIn("UnicodeDecodeError", out)
+                    named = self.lines_naming_defaults(out)
+                    self.assertEqual(len(named), 1, out)
+                    self.assertIn("ERROR", named[0])
+                    self.assertIn("UTF-8", named[0])
