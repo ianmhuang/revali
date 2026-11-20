@@ -346,7 +346,7 @@ class Tree:
 
 
 class Wiring(unittest.TestCase):
-    """AC-3: the Windows leg as four shard jobs, the rest as it was."""
+    """AC-3: the Windows leg as four shard jobs (six since ci-shard-time), the rest as it was."""
 
     def setUp(self):
         self.wf = Parsed(read(".github", "workflows", "test.yml"))
@@ -357,8 +357,9 @@ class Wiring(unittest.TestCase):
         template = self.wf.shard_template()
         return [render(template, leg).strip() for leg in legs]
 
-    def test_the_windows_leg_is_four_jobs_one_shard_each(self):
-        # ci-shard-time AC-6 (author's change): six jobs, eight legs in all
+    def test_the_windows_leg_is_six_jobs_one_shard_each(self):
+        # ci-shard-time AC-6 (author's change, renamed from ..._is_four_jobs_...): six jobs,
+        # eight legs in all
         self.assertEqual(len(self.windows), 6)
         self.assertEqual(sorted(self.shard_values(self.windows)), ["%d/6" % k for k in range(1, 7)])
         self.assertEqual(
@@ -383,8 +384,9 @@ class Wiring(unittest.TestCase):
         strategy = dict(pair(ln) for ln in under(self.wf.job, "strategy") if pair(ln))
         self.assertEqual(strategy.get("fail-fast"), "false")
 
-    def test_lint_stays_on_the_one_ubuntu_leg_among_six(self):
-        self.assertEqual(len(self.wf.legs), 8)  # ci-shard-time AC-6 (author's change)
+    def test_lint_stays_on_the_one_ubuntu_leg_among_eight(self):
+        # ci-shard-time AC-6 (author's change, renamed from ..._among_six)
+        self.assertEqual(len(self.wf.legs), 8)
         lint_steps = [
             step for step in self.wf.steps if re.search(r"\b(ruff|black)\b", step.get("run", ""))
         ]

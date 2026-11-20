@@ -10,7 +10,8 @@ import tempfile
 import unittest
 
 from tests.helpers import ROOT, rmtree_force
-from tests.run_parallel import SHARD_ENV, select_shard
+from tests.run_parallel import DURATIONS_FILE as DURATIONS
+from tests.run_parallel import SHARD_ENV, class_weights, load_durations, select_shard
 
 RUNNER = os.path.join(ROOT, "tests", "run_parallel.py")
 
@@ -379,12 +380,14 @@ class Shards(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stderr)
         everything = listed(res.stdout)
         self.assertGreater(len(everything), 1000)
-        for n in range(1, 6):
-            with self.subTest(n=n):
-                flat = [tid for k in range(1, n + 1) for tid in select_shard(everything, k, n)]
-                self.assertEqual(sorted(flat), sorted(everything))
-                if n <= 4:  # every shard CI runs has work
-                    self.assertTrue(all(select_shard(everything, k, n) for k in range(1, n + 1)))
+        weights = class_weights(everything, load_durations(os.path.join(ROOT, "tests", DURATIONS)))
+        for n in range(1, 8):
+            for how, w in (("count", None), ("time", weights)):
+                with self.subTest(n=n, by=how):
+                    parts = [select_shard(everything, k, n, w) for k in range(1, n + 1)]
+                    self.assertEqual(sorted(t for part in parts for t in part), sorted(everything))
+                    if n <= 6:  # every shard CI runs (six, ci-shard-time) has work
+                        self.assertTrue(all(parts))
 
 
 class RepositoryWiring(unittest.TestCase):

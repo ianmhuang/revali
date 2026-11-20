@@ -136,10 +136,12 @@ class Loading(unittest.TestCase):
             json.dumps(
                 {"m.Ok": 1.5, "m.Int": 2, "m.Str": "3", "m.Neg": -1, "m.Bool": True, "m.Null": None}
             ).encode("utf-8")
-            + b""
         )
         self.assertEqual(load_durations(self.path), {"m.Ok": 1.5, "m.Int": 2.0})
         self.write(b'{"m.Nan": NaN, "m.Inf": Infinity, "m.Ok": 1}')
+        self.assertEqual(load_durations(self.path), {"m.Ok": 1.0})
+        # round 1 F2: an int too large for a float is dropped, not an OverflowError
+        self.write(b'{"m.Huge": 1' + b"0" * 400 + b', "m.Ok": 1}')
         self.assertEqual(load_durations(self.path), {"m.Ok": 1.0})
 
 
@@ -215,6 +217,30 @@ class Runner(unittest.TestCase):
         # the recorded file, put next to the tests, is read back as the weights
         os.replace(out_file, os.path.join(self.tree.tests, DURATIONS_FILE))
         self.assertEqual(self.shard_classes(2), [[FAST_A, FAST_B], [SLOW]])
+
+    def test_a_file_that_cannot_be_written_comes_after_the_verdict(self):
+        # round 1 F3: the summary and verdict are printed, then one ERROR line, exit 1
+        out_file = os.path.join(self.tree.root, "no such dir", "d.json")
+        code, out = self.tree.run("-j", "2", "--durations-out", out_file)
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("Traceback", out)
+        lines = [line for line in out.splitlines() if line.strip()]
+        self.assertRegex(lines[-3], r"^Ran 11 tests in ")
+        self.assertEqual(lines[-2], "OK")
+        self.assertTrue(lines[-1].startswith("ERROR: cannot write durations to "), lines[-1])
+        self.assertIn(out_file, lines[-1])
+
+    def test_a_worker_without_a_result_writes_no_file(self):
+        # round 1 F3: a partial file would replace the committed one with fewer classes
+        crash = "import os\nimport unittest\n\n\nclass DiesCase(unittest.TestCase):\n"
+        crash += "    def test_dies(self):\n        os._exit(3)\n"
+        tree = Tree({"test_uneven": UNEVEN, "test_crash": crash})
+        self.addCleanup(rmtree_force, tree.root)
+        out_file = os.path.join(tree.root, "measured.json")
+        code, out = tree.run("-j", "2", "--durations-out", out_file)
+        self.assertEqual(code, 1, out)
+        self.assertFalse(os.path.exists(out_file))
+        self.assertIn("durations not written to %s: 1 worker(s) left no result" % out_file, out)
 
     def test_a_shard_records_only_its_own_classes(self):
         out_file = os.path.join(self.tree.root, "part.json")

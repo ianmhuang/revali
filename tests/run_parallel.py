@@ -33,8 +33,11 @@ Classes are placed by weight, heaviest first onto the least loaded worker or sha
 weight is a class's seconds in `durations.json` in the start directory. A class the file
 does not list weighs its test count times the median seconds per test of the listed classes.
 Without a usable file, every class weighs its test count. `--durations-out FILE` writes the
-seconds of each class this run ran. To refresh the committed file after the suite has
-changed, run the whole suite on the Windows host (the CI leg the file balances):
+seconds of each class this run ran; when a worker leaves no result the file is not written,
+so a refresh never drops classes. The same file also spreads classes over the workers of a
+Linux run, whose relative class times were not measured. To refresh the committed file
+after the suite has changed, run the whole suite on the Windows host (the CI leg the file
+balances):
 
     python tests/run_parallel.py --durations-out tests/durations.json
 """
@@ -108,8 +111,12 @@ def load_durations(path: str) -> Dict[str, float]:
     for name, value in data.items():
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
-        if math.isfinite(value) and value >= 0:
-            out[str(name)] = float(value)
+        try:
+            seconds = float(value)
+        except OverflowError:  # an int too large for a float
+            continue
+        if math.isfinite(seconds) and seconds >= 0:
+            out[str(name)] = seconds
     return out
 
 
@@ -345,6 +352,7 @@ def main(argv=None) -> int:
     env.pop(SHARD_ENV, None)  # this run's shard, not the shard of a runner a test starts
     buckets = shard(ids, args.jobs, weights)
     seconds: Dict[str, float] = {}
+    silent = 0  # workers that ended without writing their result
     procs: List[Tuple[int, subprocess.Popen, str, str, int]] = []
     tmp = tempfile.mkdtemp(prefix="run_parallel-")
     try:
@@ -386,6 +394,7 @@ def main(argv=None) -> int:
             record = read_result(result_path)
             if record is None:
                 counts["errors"] += 1
+                silent += 1
                 total_ran += size  # collected, assigned, never reported
                 out.write(
                     "worker %d: exit %d without a result (%d tests not accounted for, counted "
@@ -428,15 +437,27 @@ def main(argv=None) -> int:
         except OSError:
             pass
 
-    if args.durations_out:
-        with open(args.durations_out, "w", encoding="utf-8", newline="\n") as fh:
-            json.dump(dict(sorted(seconds.items())), fh, indent=0)
-            fh.write("\n")
     tail = " (shard %d of %d)" % part if part else ""
     out.write("\nRan %d tests in %.1fs%s\n\n" % (total_ran, time.monotonic() - started, tail))
     verdict = format_verdict(counts)
     out.write(verdict + "\n")
-    return 0 if verdict.startswith("OK") else 1
+    result = 0 if verdict.startswith("OK") else 1
+    if args.durations_out:
+        # after the summary, so a file that cannot be written does not cost the verdict
+        if silent:
+            out.write(
+                "durations not written to %s: %d worker(s) left no result, so their classes "
+                "would be missing\n" % (args.durations_out, silent)
+            )
+            return 1
+        try:
+            with open(args.durations_out, "w", encoding="utf-8", newline="\n") as fh:
+                json.dump(dict(sorted(seconds.items())), fh, indent=0)
+                fh.write("\n")
+        except OSError as exc:
+            out.write("ERROR: cannot write durations to %s (%s)\n" % (args.durations_out, exc))
+            return 1
+    return result
 
 
 if __name__ == "__main__":
