@@ -449,16 +449,22 @@ def read_toml_text(path: str) -> str:
         ) from exc
 
 
+def read_toml(path: str) -> dict:
+    """The TOML table of a file revali reads: a ConfigError naming the file when it is not
+    UTF-8 (read_toml_text) or not valid TOML."""
+    text = read_toml_text(path)
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(["%s: not valid TOML: %s" % (path, exc)]) from exc
+
+
 def load_defaults(path: str = DEFAULTS_FILE) -> dict:
     if path in _DEFAULTS_CACHE:
         return _DEFAULTS_CACHE[path]
     if not os.path.isfile(path):
         raise ConfigError(["%s is missing; the revali checkout is incomplete" % path])
-    text = read_toml_text(path)
-    try:
-        data = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(["%s: not valid TOML: %s" % (path, exc)]) from exc
+    data = read_toml(path)
     problems: List[str] = []
     _check_layer(data, "defaults.toml", problems)
     if problems:
@@ -695,11 +701,7 @@ def load_user_config() -> UserConfig:
     path = os.path.join(user_home(), "config.toml")
     if not os.path.isfile(path):
         return UserConfig(path=path)
-    text = read_toml_text(path)
-    try:
-        data = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(["%s: not valid TOML: %s" % (path, exc)]) from exc
+    data = read_toml(path)
     problems: List[str] = []
     cfg = UserConfig(path=path)
     for key, value in data.items():
@@ -724,9 +726,10 @@ def load_user_config() -> UserConfig:
 
 def paths_for(repo_root: str) -> PathsCfg:
     """The [paths] table for a repo: from its config when it loads; else the raw [paths]
-    table of revali.toml (so a broken config still points at the right state dir, and
-    `merge` still archives where the user or project said) over the defaults. Used by
-    commands that must find the state directory before a full config is required."""
+    tables of the user's config.toml and then revali.toml, each skipped when its file does
+    not parse, over the defaults (so a broken config still points at the right state dir,
+    and `merge` still archives where the user or project said). Used by commands that must
+    find the state directory before a full config is required."""
     try:
         return load_project_config(repo_root).paths
     except ConfigError:
@@ -749,8 +752,8 @@ def _raw_paths(file: str) -> dict:
     if not os.path.isfile(file):
         return {}
     try:
-        table = tomllib.loads(read_toml_text(file)).get("paths", {})
-    except (OSError, ConfigError, tomllib.TOMLDecodeError):
+        table = read_toml(file).get("paths", {})
+    except (OSError, ConfigError):
         return {}
     return table if isinstance(table, dict) else {}
 

@@ -15,7 +15,7 @@ from revali.config import (
     TOOL_ROOT,
     ConfigError,
     paths_for,
-    read_toml_text,
+    read_toml,
     user_home,
 )
 
@@ -116,15 +116,16 @@ def _ignore(root: str) -> Tuple[str, str]:
     already holds the rule, else the state directory, which git ignores by another rule
     (`.git/info/exclude`, a global excludes file)."""
     # [paths] state_dir comes from the user's config.toml and the project's revali.toml.
-    # paths_for falls back to the defaults when either does not load (not UTF-8 included), so
-    # each file is read here first: init stops on one it cannot read, and names it
+    # paths_for drops the [paths] of either file when it cannot parse it, so each file is
+    # parsed here first: init stops on one that is not UTF-8 or not valid TOML, and names it
+    # (an unknown key does not stop it: its [paths] still reach paths_for; preflight reports it)
     config_files = (os.path.join(user_home(), "config.toml"), os.path.join(root, PROJECT_FILE))
     for path in config_files:
         if not os.path.isfile(path):
             continue
         try:
-            read_toml_text(path)
-        except ConfigError as exc:  # not UTF-8, in the words every other command uses
+            read_toml(path)
+        except ConfigError as exc:  # in the words every other command uses
             raise InitError("; ".join(exc.problems)) from exc
         except OSError as exc:
             raise InitError("cannot read %s (%s)" % (path, exc)) from exc
