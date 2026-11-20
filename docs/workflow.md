@@ -276,9 +276,10 @@ suite on Linux, Windows and macOS on every push, and `revali merge` waits for it
 for any project's checks. Every leg runs as jobs in parallel, each one shard of the suite
 (`RUN_PARALLEL_SHARD=K/N`, the same as `tests/run_parallel.py --shard K/N`), which together
 run every test once on each: two for each Ubuntu Python version (lint on the first 3.x job
-only), six on Windows and three on macOS, and `revali merge` waits for all of them. The macOS jobs install GNU coreutils first, since the
-sandbox runs each step under `timeout`. The shards are balanced by the seconds per test
-class recorded in [tests/durations.json](../tests/durations.json) (the runner's docstring says how to refresh
+only), six on Windows and three on macOS, and `revali merge` waits for all of them. The
+macOS jobs install GNU coreutils first, since the sandbox runs each step under `timeout`.
+The shards are balanced by the seconds per test class recorded in
+[tests/durations.json](../tests/durations.json) (the runner's docstring says how to refresh
 it). revali's own
 `revali.toml` raises `checks_timeout_min` above the job's `timeout-minutes`; its comment has
 the measured times. A leg's time depends on the runner it lands on, so every leg

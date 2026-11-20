@@ -499,7 +499,9 @@ class Committed(unittest.TestCase):
         self.assertIsInstance(data, dict)
         return data
 
-    def test_the_windows_leg_is_six_shard_jobs_and_ubuntu_stays(self):
+    # ubuntu-shards AC-2 (author's change), review F1: renamed from
+    # test_the_windows_leg_is_six_shard_jobs_and_ubuntu_stays
+    def test_the_windows_leg_is_six_shard_jobs_and_ubuntu_two_per_version(self):
         self.assertEqual(self.values, ["%d/6" % k for k in range(1, 7)])
         for leg in self.windows:
             self.assertEqual((leg["os"], leg["python"]), ("windows-latest", "3.x"))

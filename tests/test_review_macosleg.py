@@ -212,7 +212,9 @@ class MacosLeg(unittest.TestCase):
         # nothing else in the workflow uses Homebrew
         self.assertEqual(len([s for s in self.steps if "brew " in s.get("run", "")]), 1)
 
-    def test_the_linux_and_windows_legs_are_what_they_were(self):
+    # ubuntu-shards AC-2 (author's change), review F1: renamed from
+    # test_the_linux_and_windows_legs_are_what_they_were
+    def test_the_linux_and_windows_legs_are_their_shard_jobs(self):
         ubuntu = on(self.legs, "ubuntu")
         windows = on(self.legs, "windows")
         # ubuntu-shards AC-2 (author's change): two shard jobs per Python version (was one

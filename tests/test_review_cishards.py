@@ -346,7 +346,10 @@ class Tree:
 
 
 class Wiring(unittest.TestCase):
-    """AC-3: the Windows leg as four shard jobs (six since ci-shard-time), the rest as it was."""
+    """AC-3: the Windows leg as four shard jobs (six since ci-shard-time), the rest as it was.
+
+    Since ubuntu-shards AC-2 (author's change): each Ubuntu leg as two shard jobs, and the
+    macOS leg as three (macos-ci, macos-three-shards)."""
 
     def setUp(self):
         self.wf = Parsed(read(".github", "workflows", "test.yml"))
