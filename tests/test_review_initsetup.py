@@ -320,7 +320,7 @@ class ExistingFiles(InitRepo):
     def test_a_bom_before_the_heading_line_does_not_hide_it(self):
         # round 2: a CLAUDE.md an editor saved with a UTF-8 BOM, the heading on its first
         # line, has the heading line: it is kept, not given the block a second time
-        data = ("﻿%s\n\nOur own wording of it.\n" % HEADING).encode("utf-8")
+        data = ("\ufeff%s\n\nOur own wording of it.\n" % HEADING).encode("utf-8")
         with open(self.path("CLAUDE.md"), "wb") as fh:
             fh.write(data)
         code, out = self.init()
@@ -330,7 +330,7 @@ class ExistingFiles(InitRepo):
 
     def test_a_claude_md_with_a_bom_and_no_heading_gets_the_block(self):
         # the BOM alone is no reason to keep the file: what is there stays, the block follows
-        original = "﻿# proj\n\nOur rules.\n".encode("utf-8")
+        original = "\ufeff# proj\n\nOur rules.\n".encode("utf-8")
         with open(self.path("CLAUDE.md"), "wb") as fh:
             fh.write(original)
         code, out = self.init()

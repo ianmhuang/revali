@@ -217,7 +217,7 @@ class NeverOverwrites(InitCase):
 
     def test_a_claude_md_with_a_bom_and_the_heading_first_is_kept(self):
         # round 2 follow-up: the BOM is not part of the heading line
-        data = ("﻿%s\n\nOur own wording.\n" % HEADING).encode("utf-8")
+        data = ("\ufeff%s\n\nOur own wording.\n" % HEADING).encode("utf-8")
         with open(os.path.join(self.repo, "CLAUDE.md"), "wb") as fh:
             fh.write(data)
         _, out = self.init()

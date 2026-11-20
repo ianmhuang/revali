@@ -85,7 +85,7 @@ def _claude_md(path: str, block: str) -> str:
         raise InitError("cannot read %s (%s)" % (path, exc)) from exc
     heading = snippet_heading(block)
     # an editor may have saved the file with a BOM, which strip() keeps on the first line
-    lines = text.lstrip("﻿").splitlines()
+    lines = text.lstrip("\ufeff").splitlines()
     if heading and any(line.strip() == heading for line in lines):
         return "kept"
     # the file's own line ending (CRLF in a Windows checkout with core.autocrlf), so the
