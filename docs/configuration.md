@@ -21,7 +21,8 @@ The three files are read as UTF-8. One that is not, or is not valid TOML, is a c
 error naming the file (for a file that is not UTF-8, also the line of the first bad byte):
 `preflight` and `run` list it and stop; `status`, `wait` and `merge` fall back to the
 defaults to find the state directory, and `merge` of a ready branch then stops on it. A
-`defaults.toml` that does not load stops every command with that one ERROR line.
+`defaults.toml` that does not load stops every command that reads it (all but `version`, and
+`stats` when the user's file sets `history_path`) with an ERROR line naming the file.
 
 Unknown keys are errors in every layer. `[review] engine` and
 `[validate] engine` name the CLI that runs the session (`claude`; the old
