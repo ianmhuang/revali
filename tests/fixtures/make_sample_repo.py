@@ -129,8 +129,15 @@ none
 """
 
 
+# Kept out of the index, where they would record the directory the fixture was built in
+# and a copy would carry it.
+NO_INDEX_CACHE = ["-c", "core.untrackedCache=false", "-c", "core.fsmonitor=false"]
+
+
 def git(args, cwd):
-    subprocess.run(["git"] + args, cwd=cwd, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git"] + NO_INDEX_CACHE + args, cwd=cwd, check=True, capture_output=True, text=True
+    )
 
 
 def write(path, text):
@@ -142,6 +149,9 @@ def write(path, text):
 # (with_remote, with_branch, runner) -> what build() returned under _build_root
 _built = {}
 _build_root = None
+# The temporary directory as the process starts. A test may point tempfile.tempdir at a
+# directory of its own and delete it; the builds must outlive that test.
+_TEMP = tempfile.gettempdir()
 
 
 def build_dir():
@@ -154,14 +164,22 @@ def create(target, with_remote=True, with_branch=True, runner="wsl"):
 
     A git call costs 70-85 ms on a busy Windows host, and a build makes about 15, so every
     test but the first of each kind copies files instead. The copies of a kind share their
-    commit ids. The builds live in a temporary directory removed at exit; a build that
-    fails is removed and raises, so the next call builds again.
+    commit ids, and every copy carries the environment of the first build (git config,
+    `GIT_*` variables). The builds live in a temporary directory removed at exit; a build
+    that fails is removed and raises, so the next call builds again. A build that is gone
+    from disk is made again. `target` is expected to be absent or empty: files already
+    there stay, unknown to the copy's index.
     """
     global _build_root
     key = (bool(with_remote), bool(with_branch), runner)
+    if _build_root is not None and not os.path.isdir(_build_root):
+        _build_root = None
+        _built.clear()
+    if key in _built and not _on_disk(_built[key]):
+        del _built[key]
     if key not in _built:
         if _build_root is None:
-            _build_root = tempfile.mkdtemp(prefix="revali fixtures ")
+            _build_root = tempfile.mkdtemp(prefix="revali fixtures ", dir=_TEMP)
             atexit.register(_remove, _build_root)
         place = tempfile.mkdtemp(dir=_build_root)
         try:
@@ -170,6 +188,12 @@ def create(target, with_remote=True, with_branch=True, runner="wsl"):
             _remove(place)
             raise
     return _copy(_built[key], target)
+
+
+def _on_disk(proto):
+    if not os.path.isdir(os.path.join(proto["repo"], ".git")):
+        return False
+    return not proto["remote"] or os.path.isdir(proto["remote"])
 
 
 def _copy(proto, target):
@@ -209,6 +233,8 @@ def _remove(path):
         shutil.rmtree(path, onexc=retry)
     else:
         shutil.rmtree(path, onerror=lambda f, p, e: retry(f, p, e[1]))
+    if os.path.exists(path):
+        sys.stderr.write("make_sample_repo: could not remove %s\n" % path)
 
 
 def build(target, with_remote=True, with_branch=True, runner="wsl"):

@@ -73,7 +73,9 @@ class NoGlobalIdentity(unittest.TestCase):
 
     def test_fixture_repo_commits_with_its_own_identity(self):
         # AC-5: the repository every RepoCase test builds carries a repo-local identity
-        info = make_sample_repo.create(
+        # fixture-copy (author's change, review round 1 F3): build() rather than create(),
+        # whose copy may come from a build made under another test's git config
+        info = make_sample_repo.build(
             os.path.join(self.tmp, "sample"), with_remote=True, with_branch=True
         )
         repo = info["repo"]

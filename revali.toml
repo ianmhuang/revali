@@ -27,7 +27,8 @@ budget_usd = 1.0
 [validate.linux]
 runner = "wsl"
 distro = "Ubuntu"
-# The suite builds a git repo per test: 7-8 minutes serially for ~1000 tests in
+# The suite gives every test its own git repo (since fixture-copy, a copy of one built
+# once per worker for each kind): 7-8 minutes serially for ~1000 tests in
 # the WSL sandbox (2026-09-05), far longer on the Windows host; run_parallel.py
 # shards it by test class over the CPUs and prints one unittest-style summary.
 command_timeout_min = 30
@@ -45,8 +46,11 @@ method = "squash"
 # 44661036941). Runner CPUs differ per job: the 7763 is 25-45% slower than the others.
 # Since ci-shard-time it runs as six jobs balanced by tests/durations.json: 469 s (EPYC
 # 9V45), 787 s (EPYC 7763), 764 s (EPYC 7763), 486 s (EPYC 9V45), 779 s (EPYC 7763) and
-# 548 s (Xeon 6973P), and the slowest job took 13.4 minutes (run 44671669777), so merge
-# waits about 14. The docs and the workflow point here instead of repeating the figures.
+# 548 s (Xeon 6973P), and the slowest job took 13.4 minutes (run 44671669777). Since
+# fixture-copy a test copies its fixture repo instead of building it: 548 s (Xeon 8573C),
+# 429 s (EPYC 9V74), 502 s (EPYC 9V74), 597 s (EPYC 7763), 592 s (EPYC 7763) and 601 s
+# (EPYC 7763), and the slowest job took 10.3 minutes (run 44681575353), so merge waits
+# about 11. The docs and the workflow point here instead of repeating the figures.
 # Keep this above the job's timeout-minutes in .github/workflows/test.yml, so a hung leg is
 # cancelled and reported as failed before merge stops waiting.
 checks_timeout_min = 75

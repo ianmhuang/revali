@@ -199,6 +199,54 @@ class Lifetime(Case):
         self.assertFalse(os.path.exists(built), built)
         self.assertTrue(os.path.isdir(os.path.join(self.path("child"), ".git")))
 
+    def child(self, body):
+        """Run `body` in a fresh process (an empty cache) with `m` and `check(info)` defined."""
+        code = (
+            "import os, sys, subprocess, tempfile\n"
+            "sys.path.insert(0, %r)\n"
+            "from tests.fixtures import make_sample_repo as m\n"
+            "from tests.helpers import rmtree_force\n"
+            "def check(info):\n"
+            "    out = subprocess.run(['git', 'log', '--format=%%s', 'main'], cwd=info['repo'],\n"
+            "                         capture_output=True, text=True, check=True).stdout\n"
+            "    assert out.strip() == 'Initial sample project', out\n"
+            "    subprocess.run(['git', 'fsck', '--no-progress'], cwd=info['repo'], check=True)\n"
+            "    if info['remote']:\n"
+            "        subprocess.run(['git', '--git-dir', info['remote'], 'rev-parse', 'main'],\n"
+            "                       capture_output=True, check=True)\n" % ROOT
+        ) + body
+        res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        return res.stdout
+
+    def test_a_temp_dir_a_test_deletes_does_not_take_the_builds_along(self):
+        # AC-3 (review round 1 F2): the first create() runs while tempfile.tempdir points at
+        # a directory the test removes afterwards, as tests/test_short_path_temp.py does
+        own = self.path("own temp")
+        self.child(
+            "os.makedirs(%r)\n"
+            "tempfile.tempdir = %r\n"
+            "m.create(os.path.join(%r, 'first'), True, True, 'local')\n"
+            "tempfile.tempdir = None\n"
+            "rmtree_force(%r)\n"
+            "check(m.create(%r, True, True, 'local'))\n"
+            "check(m.create(%r, False, True, 'local'))\n"
+            % (own, own, own, own, self.path("second"), self.path("third"))
+        )
+
+    def test_a_build_deleted_from_disk_is_made_again(self):
+        # AC-3: the cache does not hand out a build that is gone
+        self.child(
+            "m.create(%r, True, True, 'local')\n"
+            "m.create(%r, False, True, 'local')\n"
+            "rmtree_force(m._built[(False, True, 'local')]['repo'])\n"
+            "check(m.create(%r, False, True, 'local'))\n"
+            "rmtree_force(m.build_dir())\n"
+            "check(m.create(%r, True, True, 'local'))\n"
+            "assert os.path.isdir(m.build_dir())\n"
+            % (self.path("a"), self.path("b"), self.path("c"), self.path("d"))
+        )
+
     def test_a_failed_build_raises_and_is_not_kept(self):
         # AC-3: a kind this suite uses nowhere else, so the first call is a build
         kind = (True, True, "failing build")
