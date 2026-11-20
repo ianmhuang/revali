@@ -17,6 +17,12 @@ setting one of them is a configuration error.
    platforms, anything project-specific. [templates/revali.toml](../templates/revali.toml) is a
    starting point; a key left out inherits from the layers above.
 
+The three files are read as UTF-8. One that is not, or is not valid TOML, is a configuration
+error naming the file (for a file that is not UTF-8, also the line of the first bad byte):
+`preflight` and `run` list it and stop; `status`, `wait` and `merge` fall back to the
+defaults to find the state directory, and `merge` of a ready branch then stops on it. A
+`defaults.toml` that does not load stops every command with that one ERROR line.
+
 Unknown keys are errors in every layer. `[review] engine` and
 `[validate] engine` name the CLI that runs the session (`claude`; the old
 `prompt | hybrid` meaning moved to `strategy`). Keys that name a file

@@ -10,6 +10,7 @@ import io
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from revali import config
 from tests.helpers import RepoCase, rmtree_force
@@ -55,8 +56,9 @@ class Case(RepoCase):
         return [ln for ln in out.splitlines() if "ERROR" in ln or ln.startswith("  - ")]
 
     def assert_names_not_utf8(self, out, path):
-        named = [ln for ln in out.splitlines() if path in ln]
-        self.assertTrue(named, "no line names %s:\n%s" % (path, out))
+        # review round 1 F3: the line naming the file is one of the ERROR or problem lines
+        named = [ln for ln in self.error_lines(out) if path in ln]
+        self.assertTrue(named, "no ERROR or problem line names %s:\n%s" % (path, out))
         self.assertTrue(any("not UTF-8" in ln for ln in named), "no line says not UTF-8:\n%s" % out)
         self.assertNotIn("Traceback", out)
         self.assertNotIn("UnicodeDecodeError", out)
@@ -78,13 +80,48 @@ class ProjectFile(Case):
         self.assert_names_not_utf8(out, self.project_file())
 
     def test_status_wait_and_merge_go_on_as_with_a_file_that_is_not_toml(self):
+        with open(self.project_file(), "rb") as fh:
+            original = fh.read()
         self.spoil(self.project_file(), NOT_TOML)
         expected = {cmd: run([cmd]) for cmd in ("status", "wait", "merge")}
+        # review round 1 F2: from the original text, so the file is not UTF-8 and nothing else
+        with open(self.project_file(), "wb") as fh:
+            fh.write(original)
         self.spoil(self.project_file(), NOT_UTF8)
         for cmd, (code, out) in expected.items():
             with self.subTest(cmd=cmd):
                 self.assertEqual(run([cmd]), (code, out))
                 self.assertNotIn("Traceback", out)
+
+
+class DamagedDefaults(Case):
+    """Review round 1 F1 and the AC-4 scope note: a defaults.toml that is not UTF-8 (or not
+    valid TOML) is one ERROR line and exit 1 at the command line, from any command, `init`
+    included, where it was a traceback."""
+
+    def damaged_defaults(self, head):
+        """A copy of defaults.toml with `head` before its text, which load_defaults reads
+        by default while the returned patch is active."""
+        path = os.path.join(self.tmp, "defaults.toml")
+        with open(config.DEFAULTS_FILE, "rb") as fh:
+            body = fh.read()
+        with open(path, "wb") as fh:
+            fh.write(head + body)
+        config._DEFAULTS_CACHE.pop(path, None)
+        self.addCleanup(config._DEFAULTS_CACHE.pop, path, None)
+        return path, mock.patch.object(config.load_defaults, "__defaults__", (path,))
+
+    def test_every_command_reports_it_in_one_line(self):
+        for head, words in ((NOT_UTF8, "not UTF-8"), (NOT_TOML, "not valid TOML")):
+            path, patch = self.damaged_defaults(head)
+            with patch:
+                for argv in (["status"], ["wait"], ["merge"], ["preflight"], ["init"]):
+                    with self.subTest(argv=argv, words=words):
+                        code, out = run(argv)
+                        self.assertEqual(code, 1, out)
+                        self.assertNotIn("Traceback", out)
+                        named = [ln for ln in self.error_lines(out) if path in ln and words in ln]
+                        self.assertTrue(named, out)
 
 
 class UserFile(Case):
