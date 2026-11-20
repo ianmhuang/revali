@@ -182,7 +182,7 @@ failing platform when several are listed, `logs/`) and as PR comments (summaries
 ## Development
 
 ```
-python tests/run_parallel.py                        # the suite, one worker per CPU (-j N, or RUN_PARALLEL_JOBS=N); --shard K/N runs one of N parts
+python tests/run_parallel.py                        # the suite, one worker per CPU (-j N, or RUN_PARALLEL_JOBS=N); --shard K/N runs one of N parts; --durations-out tests/durations.json refreshes the class times that balance them
 python tests/run_parallel.py tests.test_pipeline    # a module, a class or a test, as for unittest
 python -m unittest discover -s tests -t .           # the same tests, serially
 python tests/fixtures/make_sample_repo.py "<dir>"   # throwaway sample project
