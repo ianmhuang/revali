@@ -438,7 +438,7 @@ def read_toml_text(path: str) -> str:
     with open(path, "rb") as fh:
         data = fh.read()
     try:
-        return data.decode("utf-8").removeprefix("﻿")
+        return data.decode("utf-8").removeprefix("\ufeff")
     except UnicodeDecodeError as exc:
         line = data[: exc.start].count(b"\n") + 1
         raise ConfigError(

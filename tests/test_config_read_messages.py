@@ -47,6 +47,10 @@ class ProjectFileWithBom(Case):
         self.assertEqual(code, EXIT_OK, out)
         self.assertIn("preflight OK", out)
         self.assertNotIn("not valid TOML", out)
+        # review round 1 F2: run as well
+        code, out = run(["run", "--foreground", "--dry-run"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertNotIn("not valid TOML", out)
 
     def test_its_keys_take_effect(self):
         self.write_bytes(
