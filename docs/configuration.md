@@ -19,13 +19,13 @@ setting one of them is a configuration error.
 
 The three files are read as UTF-8; a BOM at the start, which some Windows editors write, is
 ignored. One that is not UTF-8, or is not valid TOML, is a configuration error naming the
-file (for a file that is not UTF-8, also the line of the first bad byte): `preflight` and
-`run` list it and stop; `status`, `wait` and `merge` fall back to the defaults to find the
-state directory, and `merge` of a ready branch then stops on it. `init` stops on one that is
-not UTF-8, naming it, and for one that is not valid TOML takes the state directory from the
-defaults. A `defaults.toml` that does not load stops every command that reads it (all but
-`version`, and `stats` when the user's file sets `history_path`) with an ERROR line naming
-the file.
+file (for a file that is not UTF-8, also the line of the first bad byte): `preflight`,
+`run` and `init` list it and stop. `status`, `wait` and `merge` ignore that file's `[paths]`
+to find the state directory (the other file's `[paths]` and the defaults still apply), and
+`merge` of a ready branch then stops on it. A file that parses but holds a key revali does
+not know stops `preflight` and `run`; `init` still completes, taking `[paths]` from it. A
+`defaults.toml` that does not load stops every command that reads it (all but `version`,
+and `stats` when the user's file sets `history_path`) with an ERROR line naming the file.
 
 Unknown keys are errors in every layer. `[review] engine` and
 `[validate] engine` name the CLI that runs the session (`claude`; the old
