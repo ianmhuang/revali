@@ -22,8 +22,6 @@ COPIES = (
 )
 CLAUDE_FILE = "CLAUDE.md"
 SNIPPET_TEMPLATE = "CLAUDE-snippet.md"
-# a CLAUDE.md holding this line already has the block (in the user's own wording, maybe)
-SNIPPET_HEADING = "## Changes go through revali"
 
 NEXT_STEPS = """next:
   - edit revali.toml: the [validate.<platform>] commands (setup, test, new_test) are
@@ -42,7 +40,7 @@ def _read_template(name: str) -> str:
     try:
         with open(path, "r", encoding="utf-8", newline="") as fh:
             return fh.read().replace("\r\n", "\n")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise InitError("cannot read the template %s (%s)" % (path, exc)) from exc
 
 
@@ -53,6 +51,17 @@ def snippet_block(text: str) -> str:
     if text.lstrip().startswith("<!--") and end >= 0:
         text = text[end + 3 :]
     return text.lstrip("\n")
+
+
+def snippet_heading(block: str) -> str:
+    """The block's `## ` heading (its first non-empty line when it has none): a CLAUDE.md
+    holding that line already has the block, in the user's own wording maybe. Taken from the
+    template, so rewording the template's heading cannot leave init looking for the old one."""
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+    for line in lines:
+        if line.startswith("## "):
+            return line
+    return lines[0] if lines else ""
 
 
 def _create(path: str, text: str) -> None:
@@ -74,30 +83,45 @@ def _claude_md(path: str, block: str) -> str:
             text = fh.read()
     except (OSError, UnicodeDecodeError) as exc:
         raise InitError("cannot read %s (%s)" % (path, exc)) from exc
-    if any(line.strip() == SNIPPET_HEADING for line in text.splitlines()):
+    heading = snippet_heading(block)
+    if heading and any(line.strip() == heading for line in text.splitlines()):
         return "kept"
+    # the file's own line ending (CRLF in a Windows checkout with core.autocrlf), so the
+    # appended block does not leave it with mixed endings
     prefix = ""
     if text:
         prefix = "\n" if text.endswith("\n") else "\n\n"
+    data = prefix + block  # the block is LF (templates are read that way)
+    if "\r\n" in text:
+        data = data.replace("\n", "\r\n")
     try:
-        with open(path, "a", encoding="utf-8", newline="\n") as fh:
-            fh.write(prefix + block)
+        with open(path, "a", encoding="utf-8", newline="") as fh:
+            fh.write(data)
     except OSError as exc:
         raise InitError("cannot write %s (%s)" % (path, exc)) from exc
     return "appended"
 
 
-def _ignore(root: str) -> str:
-    entry = paths_for(root).state_dir.rstrip("/") + "/"
+def _ignore(root: str) -> Tuple[str, str]:
+    """(action, what it is about): `.gitignore` when that file was written, appended or
+    already holds the rule, else the state directory, which git ignores by another rule
+    (`.git/info/exclude`, a global excludes file)."""
+    try:
+        entry = paths_for(root).state_dir.rstrip("/") + "/"
+    except (OSError, UnicodeDecodeError) as exc:  # revali.toml read for [paths] state_dir
+        path = os.path.join(root, "revali.toml")
+        raise InitError("cannot read %s (%s)" % (path, exc)) from exc
     gitignore = os.path.join(root, ".gitignore")
     existed = os.path.isfile(gitignore)
     try:
         changed = gitops.ensure_gitignore(root, entry)
-    except OSError as exc:
-        raise InitError("cannot write %s (%s)" % (gitignore, exc)) from exc
-    if not changed:
-        return "kept"
-    return "appended" if existed else "wrote"
+    except (OSError, UnicodeDecodeError) as exc:
+        raise InitError("cannot update %s (%s)" % (gitignore, exc)) from exc
+    if changed:
+        return ("appended" if existed else "wrote"), ".gitignore"
+    if existed:
+        return "kept", ".gitignore"
+    return "kept", "%s (already ignored by git)" % entry
 
 
 def init_project(root: str, report: Callable[[str, str], None]) -> List[Tuple[str, str]]:
@@ -121,7 +145,7 @@ def init_project(root: str, report: Callable[[str, str], None]) -> List[Tuple[st
         _create(path, texts[name])
         record("wrote", rel)
     record(_claude_md(os.path.join(root, CLAUDE_FILE), block), CLAUDE_FILE)
-    record(_ignore(root), ".gitignore")
+    record(*_ignore(root))
     return done
 
 

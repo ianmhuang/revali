@@ -51,7 +51,8 @@ Preflight's `ok:` line lists the ids it parsed, so a criterion that was not
 read is visible before anything is pushed.
 
 To make an authoring session do this without being asked each time, paste
-[templates/CLAUDE-snippet.md](../templates/CLAUDE-snippet.md) into the project's `CLAUDE.md`.
+[templates/CLAUDE-snippet.md](../templates/CLAUDE-snippet.md) into the project's `CLAUDE.md`;
+`revali init` does that (Project setup below).
 
 ## Several agents on one repository
 

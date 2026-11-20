@@ -9,7 +9,7 @@ import unittest
 from unittest import mock
 
 from revali import EXIT_ERROR, EXIT_OK
-from tests.fixtures.make_sample_repo import CHANGE_MD, PLATFORM_LOCAL
+from tests.fixtures.make_sample_repo import CHANGE_MD
 from tests.helpers import CLAUDE_STUB, GH_STUB, ROOT, _quote, git, rmtree_force, run_cli
 
 TEMPLATES = os.path.join(ROOT, "templates")
@@ -40,6 +40,9 @@ class InitCase(unittest.TestCase):
             ("user.name", "Fixture"),
             ("commit.gpgsign", "false"),
             ("core.autocrlf", "false"),
+            # the machine's global excludes (~/.config/git/ignore may hold .revali/) must not
+            # decide what these tests see
+            ("core.excludesFile", os.path.join(self.tmp, "no-excludes")),
         ):
             git(["config", key, value], self.repo)
         self.write("README.md", "# proj\n")
@@ -133,7 +136,14 @@ class WritesWhatIsMissing(InitCase):
         code, out = self.init()
         self.assertEqual(code, EXIT_OK, out)
         self.assertFalse(self.exists(".gitignore"))
-        self.assertIn("kept .gitignore", "\n".join(out.splitlines()))
+        # round 1 F4: no line about a .gitignore that does not exist
+        self.assertIn("kept .revali/ (already ignored by git)", out.splitlines())
+        self.assertNotIn(".gitignore", out)
+
+    def test_a_gitignore_that_has_the_rule_is_kept(self):
+        self.write(".gitignore", ".revali/\n")
+        _, out = self.init()
+        self.assertIn("kept .gitignore", out.splitlines())
 
     def test_from_a_subdirectory_writes_at_the_root(self):
         os.makedirs(os.path.join(self.repo, "src"))
@@ -165,6 +175,38 @@ class NeverOverwrites(InitCase):
         self.assertEqual(code, EXIT_OK, out)
         self.assertEqual(self.read("CLAUDE.md"), "# proj\n\nOur rules.\n\n" + snippet_block())
         self.assertIn("appended CLAUDE.md", out.splitlines())
+
+    def test_a_crlf_claude_md_gets_a_crlf_block(self):
+        # round 1 F3: no mixed line endings
+        self.write("CLAUDE.md", "")
+        with open(os.path.join(self.repo, "CLAUDE.md"), "wb") as fh:
+            fh.write(b"# proj\r\n\r\nOur rules.\r\n")
+        self.init()
+        with open(os.path.join(self.repo, "CLAUDE.md"), "rb") as fh:
+            data = fh.read()
+        expected = "# proj\r\n\r\nOur rules.\r\n\r\n" + snippet_block().replace("\n", "\r\n")
+        self.assertEqual(data, expected.encode("utf-8"))
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
+
+    def test_the_heading_comes_from_the_template(self):
+        # round 1 follow-up: a reworded template heading is the one init looks for
+        from revali.project_init import snippet_heading
+
+        self.assertEqual(snippet_heading(snippet_block()), HEADING)
+        other = os.path.join(self.tmp, "templates")
+        os.makedirs(other)
+        for name in os.listdir(TEMPLATES):
+            text = template(name)
+            if name == "CLAUDE-snippet.md":
+                text = text.replace(HEADING, "## Use revali for every change")
+            with open(os.path.join(other, name), "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+        mine = "# proj\n\n## Use revali for every change\n\nOur wording.\n"
+        self.write("CLAUDE.md", mine)
+        with mock.patch("revali.project_init.TEMPLATES_DIR", other):
+            _, out = self.init()
+        self.assertEqual(self.read("CLAUDE.md"), mine)
+        self.assertIn("kept CLAUDE.md", out.splitlines())
 
     def test_claude_md_with_the_heading_is_kept(self):
         text = "# proj\n\n%s\n\nOur own wording.\n" % HEADING
@@ -226,6 +268,33 @@ class Failures(InitCase):
         for rel in ("revali.toml", "CONVENTIONS.md", ".github", "CLAUDE.md", ".gitignore"):
             self.assertFalse(self.exists(rel), rel)
 
+    def test_a_gitignore_that_is_not_utf8(self):
+        # round 1 F1: a Latin-1 .gitignore without the rule, so revali reads it to append the
+        # line, and that UTF-8 read fails. (A UTF-16 one never gets here: git 2.55 reads its
+        # NUL-only second line as a pattern that ignores every path, `.revali/` included.)
+        with open(os.path.join(self.repo, ".gitignore"), "wb") as fh:
+            fh.write("# café\nbuild/\n".encode("latin-1"))
+        code, out = self.init()
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertNotIn("Traceback", out)
+        errors = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
+        self.assertEqual(len(errors), 1, out)
+        self.assertIn(".gitignore", errors[0])
+        self.assertEqual(self.read("revali.toml"), template("revali.toml"))  # written before
+        self.assertIn("wrote CLAUDE.md", out.splitlines())
+
+    def test_a_revali_toml_that_is_not_utf8(self):
+        # round 1 F1: init keeps it, then reads it for [paths] state_dir
+        with open(os.path.join(self.repo, "revali.toml"), "wb") as fh:
+            fh.write(b"[project]\n# caf\xe9\n")
+        code, out = self.init()
+        self.assertEqual(code, EXIT_ERROR, out)
+        errors = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
+        self.assertEqual(len(errors), 1, out)
+        self.assertIn("revali.toml", errors[0])
+        self.assertIn("kept revali.toml", out.splitlines())
+        self.assertTrue(self.exists("CONVENTIONS.md"))
+
     def test_a_file_that_cannot_be_written(self):
         self.write(".github", "a file where the directory would go\n")
         code, out = self.init()
@@ -258,15 +327,8 @@ class PreflightAfterInit(InitCase):
         git(["remote", "add", "origin", remote], self.repo)
         git(["push", "-q", "-u", "origin", "main"], self.repo)
         self.assertEqual(self.init()[0], EXIT_OK)
-        # the template's wsl platform needs a distro; the harness runs the local runner,
-        # as the user is told to edit these commands
-        toml = self.read("revali.toml")
-        start = toml.index("[validate.linux]")
-        end = toml.index("[merge]")
-        self.write(
-            "revali.toml",
-            toml[:start] + "[validate.linux]\n" + PLATFORM_LOCAL + "\n\n" + toml[end:],
-        )
+        # round 1 F5: revali.toml exactly as init wrote it (preflight probes no runner)
+        self.assertEqual(self.read("revali.toml"), template("revali.toml"))
         git(["add", "-A"], self.repo)
         git(["commit", "-q", "-m", "Set up revali"], self.repo)
         git(["push", "-q", "origin", "main"], self.repo)
