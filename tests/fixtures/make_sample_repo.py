@@ -6,13 +6,19 @@ Creates: src/calc.py, tests/test_calc.py, revali.toml, CONVENTIONS.md,
 .gitignore, requirements.txt, one commit on main, a bare `origin` remote the
 main branch is pushed to, and a feature branch `feature/mul` with a change and
 a filled-in .revali/feature__mul/change.md.
+
+The command line and build() run git each time; create(), which the tests use, builds
+each kind once per process and copies it.
 """
 
+import atexit
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -123,8 +129,15 @@ none
 """
 
 
+# Kept out of the index, where they would record the directory the fixture was built in
+# and a copy would carry it.
+NO_INDEX_CACHE = ["-c", "core.untrackedCache=false", "-c", "core.fsmonitor=false"]
+
+
 def git(args, cwd):
-    subprocess.run(["git"] + args, cwd=cwd, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git"] + NO_INDEX_CACHE + args, cwd=cwd, check=True, capture_output=True, text=True
+    )
 
 
 def write(path, text):
@@ -133,7 +146,99 @@ def write(path, text):
         fh.write(text)
 
 
+# (with_remote, with_branch, runner) -> what build() returned under _build_root
+_built = {}
+_build_root = None
+# The temporary directory as the process starts. A test may point tempfile.tempdir at a
+# directory of its own and delete it; the builds must outlive that test.
+_TEMP = tempfile.gettempdir()
+
+
+def build_dir():
+    """The directory this process builds its fixtures in, or None before the first build."""
+    return _build_root
+
+
 def create(target, with_remote=True, with_branch=True, runner="wsl"):
+    """A copy of the fixture build() makes with these options, built once per process.
+
+    A git call costs 70-85 ms on a busy Windows host, and a build makes about 15, so every
+    test but the first of each kind copies files instead. The copies of a kind share their
+    commit ids, and every copy carries the environment of the first build (git config,
+    `GIT_*` variables). The builds live in a temporary directory removed at exit; a build
+    that fails is removed and raises, so the next call builds again. A build that is gone
+    from disk is made again. `target` is expected to be absent or empty: files already
+    there stay, unknown to the copy's index.
+    """
+    global _build_root
+    key = (bool(with_remote), bool(with_branch), runner)
+    if _build_root is not None and not os.path.isdir(_build_root):
+        _build_root = None
+        _built.clear()
+    if key in _built and not _on_disk(_built[key]):
+        del _built[key]
+    if key not in _built:
+        if _build_root is None:
+            _build_root = tempfile.mkdtemp(prefix="revali fixtures ", dir=_TEMP)
+            atexit.register(_remove, _build_root)
+        place = tempfile.mkdtemp(dir=_build_root)
+        try:
+            _built[key] = build(os.path.join(place, "sample"), *key)
+        except BaseException:
+            _remove(place)
+            raise
+    return _copy(_built[key], target)
+
+
+def _on_disk(proto):
+    if not os.path.isdir(os.path.join(proto["repo"], ".git")):
+        return False
+    return not proto["remote"] or os.path.isdir(proto["remote"])
+
+
+def _copy(proto, target):
+    target = os.path.abspath(target)
+    shutil.copytree(proto["repo"], target, symlinks=True, dirs_exist_ok=True)
+    remote = None
+    if proto["remote"]:
+        remote = target + ".git"
+        shutil.copytree(proto["remote"], remote, symlinks=True, dirs_exist_ok=True)
+        _set_origin_url(target, remote)
+    return {"repo": target, "remote": remote, "branch": proto["branch"]}
+
+
+def _set_origin_url(repo, url):
+    """Point origin at `url` by rewriting .git/config, which `git config` would do in a call."""
+    path = os.path.join(repo, ".git", "config")
+    with open(path, "r", encoding="utf-8", newline="") as fh:
+        lines = fh.read().split("\n")
+    found = [i for i, line in enumerate(lines) if line.strip().startswith("url = ")]
+    if len(found) != 1:
+        raise RuntimeError("%s: expected one url line, found %d" % (path, len(found)))
+    quoted = url.replace("\\", "\\\\").replace('"', '\\"')
+    lines[found[0]] = '\turl = "%s"' % quoted
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write("\n".join(lines))
+
+
+def _remove(path):
+    def retry(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)  # git objects are read-only on Windows
+            func(p)
+        except OSError:
+            pass
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=lambda f, p, e: retry(f, p, e[1]))
+    if os.path.exists(path):
+        sys.stderr.write("make_sample_repo: could not remove %s\n" % path)
+
+
+def build(target, with_remote=True, with_branch=True, runner="wsl"):
+    """Build the fixture at `target` with git (what the command line does)."""
     target = os.path.abspath(target)
     os.makedirs(target, exist_ok=True)
     git(["init", "-q", "-b", "main"], target)
@@ -175,7 +280,7 @@ def main(argv):
     if not argv or argv[0].startswith("-"):
         print(__doc__)
         return 2
-    info = create(
+    info = build(
         argv[0],
         with_remote="--no-remote" not in argv,
         with_branch="--no-branch" not in argv,
