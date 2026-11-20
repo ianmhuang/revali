@@ -24,10 +24,10 @@ change the discovery start and top-level directories (the defaults are this repo
 
 `--shard K/N`, else the environment variable RUN_PARALLEL_SHARD, runs only shard K of N:
 the collected classes are split into N shards the way they are split over workers, so N
-runs with K = 1..N on the same tree run every test exactly once (CI runs the Windows leg
-as six jobs this way). A module that does not import is reported by shard 1 only. The
-variable is not passed on to the workers, so a test that starts this runner itself is not
-sharded by it.
+runs with K = 1..N on the same tree run every test exactly once (CI runs every leg this
+way: two jobs per Ubuntu Python version, six on Windows, three on macOS). A module that
+does not import is reported by shard 1 only. The variable is not passed on to the workers,
+so a test that starts this runner itself is not sharded by it.
 
 Classes are placed by weight, heaviest first onto the least loaded worker or shard. The
 weight is a class's seconds in `durations.json` in the start directory. A class the file
@@ -39,7 +39,8 @@ a worker leaves no result the file is not written, so a lost worker does not dro
 classes from a refresh. The same file also spreads classes over the workers of a
 Linux run, whose relative class times were not measured. To refresh the committed file
 after the suite has changed, run the whole suite, unsharded and with every test passing, on
-the Windows host (the CI leg the file balances):
+the Windows host (its seconds balance the shard jobs of every CI leg, the Ubuntu and macOS
+ones included):
 
     python tests/run_parallel.py --durations-out tests/durations.json
 """

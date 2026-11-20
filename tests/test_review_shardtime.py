@@ -499,7 +499,9 @@ class Committed(unittest.TestCase):
         self.assertIsInstance(data, dict)
         return data
 
-    def test_the_windows_leg_is_six_shard_jobs_and_ubuntu_stays(self):
+    # ubuntu-shards AC-2 (author's change), review F1: renamed from
+    # test_the_windows_leg_is_six_shard_jobs_and_ubuntu_stays
+    def test_the_windows_leg_is_six_shard_jobs_and_ubuntu_two_per_version(self):
         self.assertEqual(self.values, ["%d/6" % k for k in range(1, 7)])
         for leg in self.windows:
             self.assertEqual((leg["os"], leg["python"]), ("windows-latest", "3.x"))
@@ -514,11 +516,21 @@ class Committed(unittest.TestCase):
             ],
         )
         others = [leg for leg in self.legs if leg not in self.windows and leg not in macos]
+        # ubuntu-shards AC-2 (author's change): two shard jobs per Python version (was one
+        # job each, unsharded)
         self.assertEqual(
-            sorted(others, key=lambda leg: leg["python"]),
+            sorted(others, key=lambda leg: (leg["python"], leg["shard"])),
             [
-                {"os": "ubuntu-latest", "python": "3.11"},
-                {"os": "ubuntu-latest", "python": "3.x", "lint": "true"},
+                {"os": "ubuntu-latest", "python": "3.11", "shard": "1", "shards": "2"},
+                {"os": "ubuntu-latest", "python": "3.11", "shard": "2", "shards": "2"},
+                {
+                    "os": "ubuntu-latest",
+                    "python": "3.x",
+                    "lint": "true",
+                    "shard": "1",
+                    "shards": "2",
+                },
+                {"os": "ubuntu-latest", "python": "3.x", "shard": "2", "shards": "2"},
             ],
         )
 

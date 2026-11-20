@@ -346,7 +346,10 @@ class Tree:
 
 
 class Wiring(unittest.TestCase):
-    """AC-3: the Windows leg as four shard jobs (six since ci-shard-time), the rest as it was."""
+    """AC-3: the Windows leg as four shard jobs (six since ci-shard-time), the rest as it was.
+
+    Since ubuntu-shards AC-2 (author's change): each Ubuntu leg as two shard jobs, and the
+    macOS leg as three (macos-ci, macos-three-shards)."""
 
     def setUp(self):
         self.wf = Parsed(read(".github", "workflows", "test.yml"))
@@ -366,10 +369,11 @@ class Wiring(unittest.TestCase):
         self.assertEqual(
             {(leg["os"], leg["python"]) for leg in self.windows}, {("windows-latest", "3.x")}
         )
-        # what stays: the two Ubuntu legs on the whole suite, eight legs in all
+        # what stays: the two Ubuntu legs on the whole suite, eight legs in all;
+        # ubuntu-shards AC-2 (author's change): each Ubuntu leg is two shard jobs
         self.assertEqual(
             sorted((leg["os"], leg["python"]) for leg in self.ubuntu),
-            [("ubuntu-latest", "3.11"), ("ubuntu-latest", "3.x")],
+            [("ubuntu-latest", "3.11")] * 2 + [("ubuntu-latest", "3.x")] * 2,
         )
         # macos-ci AC-4 (author's change): two macOS shard jobs, ten legs in all;
         # macos-three-shards AC-2 (author's change): three, eleven legs
@@ -378,8 +382,9 @@ class Wiring(unittest.TestCase):
             {(leg["os"], leg["python"]) for leg in self.macos}, {("macos-latest", "3.x")}
         )
         # macos-ci AC-4 (author's change): was 8; macos-three-shards AC-2 (author's change): was 10
-        self.assertEqual(len(self.wf.legs), 11)
-        self.assertEqual(self.shard_values(self.ubuntu), ["", ""])
+        # ubuntu-shards AC-2 (author's change): was 11, and the Ubuntu values were ["", ""]
+        self.assertEqual(len(self.wf.legs), 13)
+        self.assertEqual(self.shard_values(self.ubuntu), ["1/2", "2/2", "1/2", "2/2"])
         # the suite step is README's command, on every leg; a failing shard fails the run
         suite = self.wf.suite_steps()
         self.assertEqual(len(suite), 1, "one suite step")
@@ -392,11 +397,12 @@ class Wiring(unittest.TestCase):
         strategy = dict(pair(ln) for ln in under(self.wf.job, "strategy") if pair(ln))
         self.assertEqual(strategy.get("fail-fast"), "false")
 
-    def test_lint_stays_on_the_one_ubuntu_leg_among_eleven(self):
+    def test_lint_stays_on_the_one_ubuntu_leg_among_thirteen(self):
         # ci-shard-time AC-6 (author's change, renamed from ..._among_six); macos-ci AC-4
         # (author's change, renamed from ..._among_eight): the two macOS jobs;
-        # macos-three-shards AC-2 (author's change), renamed from ..._among_ten: three
-        self.assertEqual(len(self.wf.legs), 11)
+        # macos-three-shards AC-2 (author's change), renamed from ..._among_ten: three;
+        # ubuntu-shards AC-2 (author's change), renamed from ..._among_eleven: four Ubuntu jobs
+        self.assertEqual(len(self.wf.legs), 13)
         lint_steps = [
             step for step in self.wf.steps if re.search(r"\b(ruff|black)\b", step.get("run", ""))
         ]
@@ -416,19 +422,33 @@ class Wiring(unittest.TestCase):
             sorted(names), ["windows-latest / python 3.x / shard %d of 6" % k for k in range(1, 7)]
         )
         others = [render(template, leg) for leg in self.ubuntu]
-        self.assertEqual([name for name in others if "shard" in name], [])
+        # ubuntu-shards AC-2 (author's change): the Ubuntu names show their shard too (none did)
+        self.assertEqual(
+            others,
+            [
+                "ubuntu-latest / python 3.11 / shard 1 of 2",
+                "ubuntu-latest / python 3.11 / shard 2 of 2",
+                "ubuntu-latest / python 3.x / lint / shard 1 of 2",
+                "ubuntu-latest / python 3.x / shard 2 of 2",
+            ],
+        )
         # macos-ci AC-4 (author's change): the macOS jobs, ten jobs and names (was eight);
         # macos-three-shards AC-2 (author's change): three macOS jobs, eleven in all
         macos = [render(template, leg) for leg in self.macos]
         self.assertEqual(
             sorted(macos), ["macos-latest / python 3.x / shard %d of 3" % k for k in (1, 2, 3)]
         )
-        self.assertEqual(len(set(names + others + macos)), 11, "eleven jobs, eleven names")
+        # ubuntu-shards AC-2 (author's change): was 11
+        self.assertEqual(len(set(names + others + macos)), 13, "thirteen jobs, thirteen names")
 
-    def test_the_rendered_values_run_every_test_once_on_windows_and_all_on_ubuntu(self):
+    # ubuntu-shards AC-2 (author's change): renamed from
+    # test_the_rendered_values_run_every_test_once_on_windows_and_all_on_ubuntu
+    def test_the_rendered_values_run_every_test_once_on_each_leg(self):
         windows = sorted(self.shard_values(self.windows))
         ubuntu = self.shard_values(self.ubuntu)
-        self.assertEqual((len(windows), len(ubuntu)), (6, 2))
+        self.assertEqual(
+            (len(windows), len(ubuntu)), (6, 4)
+        )  # ubuntu-shards AC-2 (author's change): was (6, 2)
         tree = Tree()
         self.addCleanup(rmtree_force, tree.root)
         seen = []
@@ -452,11 +472,20 @@ class Wiring(unittest.TestCase):
                 self.assertTrue(ran, "a macOS job with nothing to run")
             seen.extend(ran)
         self.assertEqual(sorted(seen), EVERYTHING)
-        for value in sorted(set(ubuntu)):
-            code, out, ran = tree.run(value)
-            with self.subTest(ubuntu=value):
-                self.assertEqual(code, 0, out)
-                self.assertEqual(ran, EVERYTHING)
+        # ubuntu-shards AC-2 (author's change): each Ubuntu Python version's two jobs the
+        # same way (each Ubuntu job ran everything)
+        for python in ("3.11", "3.x"):
+            these = [leg for leg in self.ubuntu if leg["python"] == python]
+            values = sorted(self.shard_values(these))
+            self.assertEqual(values, ["1/2", "2/2"], python)
+            seen = []
+            for value in values:
+                code, out, ran = tree.run(value)
+                with self.subTest(ubuntu=python, shard=value):
+                    self.assertEqual(code, 0, out)
+                    self.assertTrue(ran, "a Ubuntu job with nothing to run")
+                seen.extend(ran)
+            self.assertEqual(sorted(seen), EVERYTHING, python)
 
 
 # --- AC-4 --------------------------------------------------------------------------------

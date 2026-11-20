@@ -56,15 +56,14 @@ class Workflow(unittest.TestCase):
     def test_matrix_legs(self):
         # AC-2; ci/windows-job AC-1 added the Windows leg; ci-windows-shards AC-3 runs it as
         # four shards, ci-shard-time AC-6 as six; macos-ci AC-2 adds macOS as two,
-        # macos-three-shards AC-1 makes it three
+        # macos-three-shards AC-1 makes it three; ubuntu-shards AC-1 runs each Ubuntu leg
+        # as two
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(target, ["py311"])
         self.assertEqual(
             [(leg["os"], leg["python"]) for leg in legs(self.text)],
-            [
-                ("ubuntu-latest", "3.11"),
-                ("ubuntu-latest", "3.x"),
-            ]
+            [("ubuntu-latest", "3.11")] * 2
+            + [("ubuntu-latest", "3.x")] * 2
             + [("windows-latest", "3.x")] * 6
             + [("macos-latest", "3.x")] * 3,
         )
@@ -81,9 +80,14 @@ class Workflow(unittest.TestCase):
             self.assertEqual(
                 sorted(int(leg["shard"]) for leg in these), list(range(1, n + 1)), system
             )
-        others = [leg for leg in legs(self.text) if leg["os"].startswith("ubuntu")]
-        self.assertEqual(len(others), 2)
-        self.assertFalse([leg for leg in others if "shard" in leg or "shards" in leg])
+        # ubuntu-shards AC-1: each Ubuntu Python version as two (the Ubuntu legs ran the
+        # whole suite, and this test checked that they had no shard)
+        ubuntu = [leg for leg in legs(self.text) if leg["os"].startswith("ubuntu")]
+        for python in ("3.11", "3.x"):
+            these = [leg for leg in ubuntu if leg["python"] == python]
+            self.assertEqual({leg.get("shards") for leg in these}, {"2"}, python)
+            self.assertEqual(sorted(int(leg["shard"]) for leg in these), [1, 2], python)
+        self.assertEqual(len(ubuntu), 4)
         job = block(block(self.text, "jobs"), "  test")
         self.assertRegex(
             job.split("steps:", 1)[0],
@@ -105,6 +109,14 @@ class Workflow(unittest.TestCase):
                 "shard: 3\n            shards: 3\n", "shard: 2\n            shards: 3\n"
             ),
             "two macOS Ns": good.replace("shards: 3\n", "shards: 2\n", 1),
+            # ubuntu-shards AC-1
+            "a Ubuntu 3.11 shard missing": good.replace(
+                'python: "3.11"\n            shard: 2\n', 'python: "3.11"\n            shard: 1\n'
+            ),
+            "two Ubuntu Ns": good.replace("shards: 2\n", "shards: 3\n", 1),
+            "a Ubuntu leg on the whole suite": good.replace(
+                "lint: true\n            shard: 1\n            shards: 2\n", "lint: true\n"
+            ),
         }
         for what, text in broken.items():
             with self.subTest(what=what):
@@ -141,11 +153,15 @@ class Workflow(unittest.TestCase):
                 self.assertEqual(tomllib.loads(read(*rel))["merge"]["checks_timeout_min"], 30)
 
     def test_one_leg_lints_with_the_projects_lint_line(self):
-        # AC-3
+        # AC-3; ubuntu-shards AC-1: the first of the two Ubuntu 3.x jobs
         lint = tomllib.loads(read("revali.toml"))["project"]["lint"]
         self.assertEqual(
-            [(leg["os"], leg["python"]) for leg in legs(self.text) if leg.get("lint") == "true"],
-            [("ubuntu-latest", "3.x")],
+            [
+                (leg["os"], leg["python"], leg.get("shard"))
+                for leg in legs(self.text)
+                if leg.get("lint") == "true"
+            ],
+            [("ubuntu-latest", "3.x", "1")],
         )
         steps = self.text.split("steps:", 1)[1]
         lint_step = steps.split("- name: lint\n", 1)[1].split("- ", 1)[0]
