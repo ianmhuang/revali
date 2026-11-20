@@ -69,7 +69,8 @@ class Workflow(unittest.TestCase):
         )
         self.assertRegex(self.text, r"fail-fast:\s*false")
 
-    def test_the_windows_shards_cover_the_suite_once(self):
+    def test_the_shards_of_each_system_cover_the_suite_once(self):
+        # renamed from test_the_windows_shards_cover_the_suite_once (macos-ci review F2)
         # ci-windows-shards AC-3, AC-4: shards 1..N of one N, each once, only on Windows;
         # the suite step hands the leg's shard to the runner, and the job name shows it.
         # macos-ci AC-2: macOS the same way, as two
@@ -109,7 +110,7 @@ class Workflow(unittest.TestCase):
                 self.assertNotEqual(text, good)
                 self.text = text
                 with self.assertRaises(AssertionError):
-                    self.test_the_windows_shards_cover_the_suite_once()
+                    self.test_the_shards_of_each_system_cover_the_suite_once()
         self.text = good
 
     def test_macos_gets_gnu_coreutils_before_the_suite(self):
@@ -181,10 +182,14 @@ class Docs(unittest.TestCase):
                 self.assertNotIn("Linux and Windows on every push", text)
 
     def test_readme_says_where_ci_runs_and_what_a_mac_ssh_host_needs(self):
-        # macos-ci AC-6
-        text = " ".join(read("README.md").split())
-        self.assertIn("CI runs the suite on Linux, Windows and macOS hosts", text)
-        self.assertIn("no real review has run on a macOS host yet", text)
+        # macos-ci AC-6; review round 1 F1: under Requirements
+        text = read("README.md")
+        requirements = text.split("\n## Requirements\n", 1)[1].split("\n## ", 1)[0]
+        self.assertIn(
+            "- CI runs the suite on Linux, Windows and macOS hosts; no real review has run on "
+            "macOS yet\n",
+            requirements,
+        )
         ssh = next(
             ln for ln in read("README.md").splitlines() if ln.startswith('| `runner = "ssh"`')
         )

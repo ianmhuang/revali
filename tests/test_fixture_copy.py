@@ -303,6 +303,17 @@ class Background(Case):
         remote = self.path("spied") + ".git"
         self.assertEqual(git(["config", "receive.autogc"], git_dir=remote), "false")
 
+    def test_a_global_config_with_safe_bare_repository_explicit_still_builds(self):
+        # review round 1 follow-up: the remote's config is set through --git-dir, which
+        # git allows when it refuses to find a bare repository from the working directory
+        config = self.path("gitconfig")
+        with open(config, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("[safe]\n\tbareRepository = explicit\n")
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": config}):
+            info = make_sample_repo.build(self.path("built"), True, True, "local")
+        self.assertEqual(git(["config", "receive.autogc"], git_dir=info["remote"]), "false")
+        self.assertEqual(refs(git_dir=info["remote"]).keys(), {"refs/heads/main"})
+
     def test_a_global_config_that_asks_for_maintenance_does_not_reach_the_build(self):
         # The loose-objects task with auto = 1 runs after any commit or push that leaves a
         # loose object and packs them into objects/pack/loose-*.pack; autoDetach off runs it

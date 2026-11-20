@@ -271,7 +271,9 @@ def build(target, with_remote=True, with_branch=True, runner="wsl"):
     if with_remote:
         remote = target + ".git"
         git(["init", "-q", "--bare", remote], target)
-        git(["config", "receive.autogc", "false"], remote)
+        # --git-dir, not the bare repository as the working directory: git refuses that
+        # under safe.bareRepository = explicit
+        git(["--git-dir", remote, "config", "receive.autogc", "false"], target)
         git(["remote", "add", "origin", remote], target)
         git(["push", "-q", "-u", "origin", "main"], target)
 

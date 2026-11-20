@@ -114,12 +114,12 @@ answer a question), `3` a human must decide, `4` (`wait` only) still running.
 Status: package version 0.4.0; [CHANGELOG.md](CHANGELOG.md) lists what each release
 contains. Verified end to end on a private GitHub repository with real Reviewer sessions
 and real WSL and ssh sandboxes ([docs/sandbox.md](docs/sandbox.md) has the record);
-revali reviews its own changes on this public one. CI runs the suite on Linux, Windows and
-macOS hosts with fake `gh` and `claude`; no real review has run on a macOS host yet.
+revali reviews its own changes on this public one.
 
 ## Requirements
 
 - Python 3.11+ (stdlib only), git, GitHub CLI (`gh auth login` done)
+- CI runs the suite on Linux, Windows and macOS hosts; no real review has run on macOS yet
 - Claude Code CLI on PATH (`claude`), for the reviewer / diagnoser sessions
 - A place to run the sandbox, one of three runners (`[validate.<platform>] runner`); a
   project validates on `linux`, `windows` or both (`[project] platforms`):

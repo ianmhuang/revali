@@ -1,7 +1,7 @@
 """Print the CPU model and logical processor count of the machine, for the CI log.
 
-The Windows leg's time varies with the runner it lands on, and the log names no machine
-otherwise. Standard library only. Linux reads /proc/cpuinfo, macOS asks `sysctl -n
+A leg's time varies with the runner it lands on, and the log names no machine otherwise.
+Standard library only. Linux reads /proc/cpuinfo, macOS asks `sysctl -n
 machdep.cpu.brand_string` and Windows reads the registry (the three CI platforms); anywhere
 else, or when that read fails, it falls back to `platform.processor()` and then `unknown`,
 with the reason for the failure in parentheses.
