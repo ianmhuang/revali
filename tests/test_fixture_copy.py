@@ -276,6 +276,66 @@ class Lifetime(Case):
         self.assertEqual(len(entries()), len(before) + 1)
 
 
+class Background(Case):
+    """macos-ci AC-1: no git process is left running in a build that create() copies."""
+
+    def test_every_builder_git_call_turns_automatic_maintenance_off(self):
+        real = subprocess.run
+        calls = []
+
+        def spy(cmd, *a, **kw):
+            calls.append(list(cmd))
+            return real(cmd, *a, **kw)
+
+        with mock.patch.object(make_sample_repo.subprocess, "run", side_effect=spy):
+            make_sample_repo.build(self.path("spied"), True, True, "local")
+        self.assertTrue(any("push" in cmd for cmd in calls), calls)
+        self.assertTrue(any("--bare" in cmd for cmd in calls), calls)
+        for cmd in calls:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(cmd[0], "git")
+                opts = cmd[1 : 1 + len(make_sample_repo.GIT_OPTIONS)]
+                self.assertEqual(opts, make_sample_repo.GIT_OPTIONS)
+                pairs = set(zip(opts[::2], opts[1::2], strict=True))
+                for setting in ("maintenance.auto=false", "gc.auto=0"):
+                    self.assertIn(("-c", setting), pairs)
+        # a local push clears -c before the receiving end starts: the remote's own config
+        remote = self.path("spied") + ".git"
+        self.assertEqual(git(["config", "receive.autogc"], git_dir=remote), "false")
+
+    def test_a_global_config_with_safe_bare_repository_explicit_still_builds(self):
+        # review round 1 follow-up: the remote's config is set through --git-dir, which
+        # git allows when it refuses to find a bare repository from the working directory
+        config = self.path("gitconfig")
+        with open(config, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("[safe]\n\tbareRepository = explicit\n")
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": config}):
+            info = make_sample_repo.build(self.path("built"), True, True, "local")
+        self.assertEqual(git(["config", "receive.autogc"], git_dir=info["remote"]), "false")
+        self.assertEqual(refs(git_dir=info["remote"]).keys(), {"refs/heads/main"})
+
+    def test_a_global_config_that_asks_for_maintenance_does_not_reach_the_build(self):
+        # The loose-objects task with auto = 1 runs after any commit or push that leaves a
+        # loose object and packs them into objects/pack/loose-*.pack; autoDetach off runs it
+        # before the command returns. A build it reached would hold such a pack, in the
+        # repository (commit) or in the remote (push, through receive.autogc).
+        config = self.path("gitconfig")
+        with open(config, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(
+                "[maintenance]\n\tautoDetach = false\n"
+                '[maintenance "gc"]\n\tenabled = false\n'
+                '[maintenance "loose-objects"]\n\tenabled = true\n\tauto = 1\n'
+                "[receive]\n\tautogc = true\n"
+            )
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": config}):
+            info = make_sample_repo.build(self.path("built"), True, True, "local")
+        for git_dir in (os.path.join(info["repo"], ".git"), info["remote"]):
+            with self.subTest(git_dir=git_dir):
+                pack_dir = os.path.join(git_dir, "objects", "pack")
+                packs = os.listdir(pack_dir) if os.path.isdir(pack_dir) else []
+                self.assertEqual([p for p in packs if p.endswith(".pack")], [])
+
+
 class CommandLine(Case):
     def test_the_script_builds_the_same_repository(self):
         # AC-4

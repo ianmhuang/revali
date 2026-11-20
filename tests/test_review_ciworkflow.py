@@ -139,6 +139,7 @@ class Matrix(WorkflowCase):
         # ci-windows-shards AC-4 (author's change, renamed from test_three_legs): the
         # Windows leg runs as four jobs, one shard of the suite each.
         # ci-shard-time AC-6 (author's change): six jobs.
+        # macos-ci AC-2 (author's change): macOS on the latest 3.x is back, as two jobs.
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(len(target), 1)
         m = re.fullmatch(r"py(\d)(\d+)", target[0])
@@ -149,7 +150,8 @@ class Matrix(WorkflowCase):
                 ("ubuntu-latest", pinned),
                 ("ubuntu-latest", "3.x"),
             ]
-            + [("windows-latest", "3.x")] * 6,
+            + [("windows-latest", "3.x")] * 6
+            + [("macos-latest", "3.x")] * 2,  # macos-ci AC-2 (author's change)
         )
 
     def test_legs_drive_runner_and_interpreter(self):

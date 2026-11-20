@@ -1,14 +1,16 @@
 """Print the CPU model and logical processor count of the machine, for the CI log.
 
-The Windows leg's time varies with the runner it lands on, and the log names no machine
-otherwise. Standard library only. Linux reads /proc/cpuinfo and Windows the registry (the
-two CI platforms); anywhere else, or when that read fails, it falls back to
-`platform.processor()` and then `unknown`, with the reason for the failure in parentheses.
+A leg's time varies with the runner it lands on, and the log names no machine otherwise.
+Standard library only. Linux reads /proc/cpuinfo, macOS asks `sysctl -n
+machdep.cpu.brand_string` and Windows reads the registry (the three CI platforms); anywhere
+else, or when that read fails, it falls back to `platform.processor()` and then `unknown`,
+with the reason for the failure in parentheses.
 It always exits 0, so it never fails a job.
 """
 
 import os
 import platform
+import subprocess
 import sys
 
 
@@ -20,6 +22,15 @@ def _primary_model() -> str:
                 if line.startswith("model name"):
                     return line.split(":", 1)[1].strip()
         return ""
+    if sys.platform == "darwin":
+        res = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        return res.stdout.strip()
     if os.name == "nt":
         import winreg
 

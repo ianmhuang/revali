@@ -50,7 +50,10 @@ method = "squash"
 # fixture-copy a test copies its fixture repo instead of building it: 548 s (Xeon 8573C),
 # 429 s (EPYC 9V74), 502 s (EPYC 9V74), 597 s (EPYC 7763), 592 s (EPYC 7763) and 601 s
 # (EPYC 7763), and the slowest job took 10.3 minutes (run 44681575353), so merge waits
-# about 11. The docs and the workflow point here instead of repeating the figures.
+# about 11. Since macos-ci macOS runs beside them as two jobs: 314 s (Apple M2 Pro, 5
+# processors) and 611 s (Apple M1, 3 processors); its slowest job took 10.5 minutes and the
+# slowest Windows job 10.7 (run 44694774736), so merge still waits about 11. The docs and
+# the workflow point here instead of repeating the figures.
 # Keep this above the job's timeout-minutes in .github/workflows/test.yml, so a hung leg is
 # cancelled and reported as failed before merge stops waiting.
 checks_timeout_min = 75

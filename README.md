@@ -96,10 +96,9 @@ sequenceDiagram
     R->>G: comment on the issues a branch commit says it fixes
 ```
 
-The preflight baseline (the existing suite in the sandbox) runs on every
-`revali run` until the first review round is recorded, and not for
-`kind: docs`. A sandbox `setup` or `build` failure is exit 1 (environment),
-not a FAIL verdict.
+The preflight baseline (the existing suite in the sandbox) runs on every `revali run`
+until the first review round is recorded, and not for `kind: docs`. A sandbox `setup` or
+`build` failure is exit 1 (environment), not a FAIL verdict.
 
 | Role | Started by | Reads | Writes | Model |
 |---|---|---|---|---|
@@ -119,6 +118,7 @@ revali reviews its own changes on this public one.
 
 ## Requirements
 
+- CI runs the suite on Linux, Windows and macOS hosts; no real review has run on macOS yet
 - Python 3.11+ (stdlib only), git, GitHub CLI (`gh auth login` done)
 - Claude Code CLI on PATH (`claude`), for the reviewer / diagnoser sessions
 - A place to run the sandbox, one of three runners (`[validate.<platform>] runner`); a
@@ -127,7 +127,7 @@ revali reviews its own changes on this public one.
 | Runner | Where the sandbox runs | Isolation | Platforms | Verified end to end |
 |---|---|---|---|---|
 | `runner = "wsl"` (default) | a clone inside a WSL distro (Ubuntu) on a Windows host | its own Linux system | `linux` | yes, 2026-08-30 and 2026-09-04 |
-| `runner = "ssh"` | a clone on a machine reached by key-based ssh, with git, bash and coreutils installed | another machine | `linux`; `windows` when bash is its ssh shell | `linux` yes, 2026-08-30; `windows` not yet |
+| `runner = "ssh"` | a clone on a machine reached by key-based ssh, with git, bash and coreutils installed (a Mac: Homebrew's coreutils, its `gnubin` on the PATH of the non-interactive ssh shell; not verified end to end) | another machine | `linux`; `windows` when bash is its ssh shell | `linux` yes, 2026-08-30; `windows` not yet |
 | `runner = "local"` | a git worktree on the host itself: a host that is its own sandbox, or a first look before setting one up | no isolation | `linux`; `windows` on a Windows host | no record |
 
 ## Usage

@@ -52,8 +52,9 @@ Things a linter cannot check; formatting is not listed.
   no absolute paths, no user names, and a platform-only tool in `revali/` only
   behind a platform check (`taskkill`, `msvcrt` / `fcntl`, `windll`) or a
   configuration choice that preflight checks (the wsl runner).
-  CI ([.github/workflows/test.yml](.github/workflows/test.yml)) runs the suite on Linux and
-  Windows on every push, and lint on one Linux job, and `revali merge` waits for it.
+  CI ([.github/workflows/test.yml](.github/workflows/test.yml)) runs the suite on Linux,
+  Windows and macOS on every push, and lint on one Linux job, and `revali merge` waits for
+  it.
 - What a user may want to change lives in [defaults.toml](defaults.toml), not in code:
   models, budgets, the stage and platform timeouts, paths. Internal timeouts and
   margins (the `gh` and `git` calls, the runner's cancel margins), the default of
