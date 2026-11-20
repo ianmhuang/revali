@@ -232,6 +232,13 @@ stated.
   `merged_outside`), the same move of the state directory, and the local
   branch is left alone. The remote branch, the base branch and the issues a commit fixes
   are not touched
+- on `revali init` (human-started, once per project), in the working tree it runs in:
+  writes `revali.toml`, `CONVENTIONS.md`, `.github/release.yml` and `CLAUDE.md` at the
+  repository root from revali's templates, each only when it does not exist; appends
+  the snippet block to an existing `CLAUDE.md` that lacks its heading; makes the state
+  directory ignored the way the first item above describes, without the commit. No
+  existing file is overwritten, nothing is committed or pushed, and gh is not called;
+  the only git calls find the repository root and ask `git check-ignore`
 - after a review round that stops before its tests are committed (a failed
   or timed-out Reviewer session, unusable output, a smoke run that fails
   twice), deletes the untracked files matching `test_file_pattern` under

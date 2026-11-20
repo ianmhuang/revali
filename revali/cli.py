@@ -108,9 +108,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_archive.add_argument(
         "--branch", default="", help="branch to record instead of the checked-out one"
     )
+    _command(
+        sub,
+        "init",
+        "write the project's setup files from revali's templates (never overwrites)",
+        _cmd_init,
+    )
     _command(sub, "stats", "summarise the run history", _cmd_stats)
     _command(sub, "version", "print the version", pipeline.cmd_version)
     return parser
+
+
+def _cmd_init(args) -> int:
+    from revali.project_init import cmd_init
+
+    return cmd_init(args)
 
 
 def _cmd_stats(args) -> int:

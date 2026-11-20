@@ -20,6 +20,7 @@ COMMANDS = (
     "stop",
     "merge",
     "archive",  # feature/archive-outside-merge
+    "init",  # feature/init
     "stats",
     "version",
 )
@@ -92,6 +93,7 @@ class SubcommandHelp(unittest.TestCase):
             "stop": pipeline.cmd_stop,
             "merge": pipeline.cmd_merge,
             "archive": pipeline.cmd_archive,
+            "init": cli._cmd_init,
             "stats": cli._cmd_stats,
             "version": pipeline.cmd_version,
         }

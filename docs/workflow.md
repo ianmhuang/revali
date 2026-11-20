@@ -51,7 +51,8 @@ Preflight's `ok:` line lists the ids it parsed, so a criterion that was not
 read is visible before anything is pushed.
 
 To make an authoring session do this without being asked each time, paste
-[templates/CLAUDE-snippet.md](../templates/CLAUDE-snippet.md) into the project's `CLAUDE.md`.
+[templates/CLAUDE-snippet.md](../templates/CLAUDE-snippet.md) into the project's `CLAUDE.md`;
+`revali init` does that (Project setup below).
 
 ## Several agents on one repository
 
@@ -357,12 +358,21 @@ no run from it is in progress.
 
 ## Project setup
 
-Copy [templates/revali.toml](../templates/revali.toml) to the repo root and edit the commands; copy
-[templates/CONVENTIONS.md](../templates/CONVENTIONS.md) if the project has none; add `.revali/` to
+Run `python <revali dir>/revali.py init` once in the project's repository. It writes each
+of the files below that the project does not have yet, never overwrites one, commits
+nothing, and lists what it wrote and kept; then edit the commands in `revali.toml` and
+commit.
+
+What init does, which is also how to do it by hand:
+copy [templates/revali.toml](../templates/revali.toml) to the repo root and edit the commands; copy
+[templates/CONVENTIONS.md](../templates/CONVENTIONS.md) if the project has none; copy
+[templates/release.yml](../templates/release.yml) to `.github/release.yml`; add `.revali/` to
 `.gitignore`, or to `.git/info/exclude` if the line must stay out of the
 tracked `.gitignore` (see [docs/side-effects.md](side-effects.md)); paste
 [templates/CLAUDE-snippet.md](../templates/CLAUDE-snippet.md) into the project's
-`CLAUDE.md`. Before each run the author writes
+`CLAUDE.md` (init appends it unless `CLAUDE.md` already has its `## Changes go through
+revali` heading, and leaves `<revali dir>` in it for you to replace or to name in your
+global Claude instructions). Before each run the author writes
 `.revali/<branch>/change.md` from [templates/change.md](../templates/change.md) (branch `feature/x`
 maps to directory `feature__x`); see Workflow above.
 

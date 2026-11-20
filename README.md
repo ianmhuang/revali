@@ -133,6 +133,7 @@ revali reviews its own changes on this public one.
 ## Usage
 
 ```
+python <revali dir>/revali.py init                     # once per project: write revali.toml, CONVENTIONS.md, CLAUDE.md, .github/release.yml that are missing
 python <revali dir>/revali.py preflight [--base <b>]   # checks only (no lint, no baseline); fetches the base, commits and pushes nothing
 python <revali dir>/revali.py run [--base <b>] [--reviewer-model <m>]   # detached (<m>: this run's reviewer); then:
 python <revali dir>/revali.py wait --timeout 9m        # repeat until it returns other than 4; --branch <b> for another branch's run
