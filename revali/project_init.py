@@ -10,7 +10,7 @@ import os
 from typing import Callable, List, Tuple
 
 from revali import EXIT_ERROR, EXIT_OK, gitops
-from revali.config import PROJECT_FILE, TOOL_ROOT, paths_for, user_home
+from revali.config import PROJECT_FILE, TOOL_ROOT, ConfigError, paths_for, user_home
 
 TEMPLATES_DIR = os.path.join(TOOL_ROOT, "templates")
 
@@ -108,8 +108,9 @@ def _ignore(root: str) -> Tuple[str, str]:
     """(action, what it is about): `.gitignore` when that file was written, appended or
     already holds the rule, else the state directory, which git ignores by another rule
     (`.git/info/exclude`, a global excludes file)."""
-    # [paths] state_dir comes from the user's config.toml and the project's revali.toml; a
-    # decode error carries no file name, so each file is read here first to name the one
+    # [paths] state_dir comes from the user's config.toml and the project's revali.toml.
+    # paths_for falls back to the defaults when either does not load (not UTF-8 included), so
+    # each file is read here first: init stops on one it cannot read, and names it
     config_files = (os.path.join(user_home(), "config.toml"), os.path.join(root, PROJECT_FILE))
     for path in config_files:
         if not os.path.isfile(path):
@@ -121,7 +122,9 @@ def _ignore(root: str) -> Tuple[str, str]:
             raise InitError("cannot read %s (%s)" % (path, exc)) from exc
     try:
         entry = paths_for(root).state_dir.rstrip("/") + "/"
-    except (OSError, UnicodeDecodeError) as exc:  # a file changed after the check above
+    except ConfigError as exc:  # defaults.toml, which paths_for does not fall back from
+        raise InitError("; ".join(exc.problems)) from exc
+    except OSError as exc:  # a file changed after the check above
         raise InitError("cannot read %s or %s (%s)" % (config_files + (exc,))) from exc
     gitignore = os.path.join(root, ".gitignore")
     existed = os.path.isfile(gitignore)

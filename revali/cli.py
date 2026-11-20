@@ -5,6 +5,7 @@ import argparse
 import sys
 
 from revali import EXIT_ERROR, NAME, VERSION, pipeline
+from revali.config import ConfigError
 from revali.state import StateError
 
 
@@ -151,6 +152,10 @@ def main(argv=None) -> int:
         return int(args.func(args))
     except StateError as exc:  # a hand-edited or damaged state.json, from any command
         print(pipeline.state_error_line(exc))
+        return EXIT_ERROR
+    except ConfigError as exc:  # one no command handles: a damaged defaults.toml, say
+        for problem in exc.problems:
+            print("ERROR: %s" % problem)
         return EXIT_ERROR
     except KeyboardInterrupt:
         print("interrupted")

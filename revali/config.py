@@ -430,16 +430,34 @@ def _pr_problems(pr: PrCfg) -> List[str]:
 _DEFAULTS_CACHE: dict = {}
 
 
+def _read_toml_text(path: str) -> str:
+    """The text of a TOML file revali reads, which must be UTF-8. A file that is not is a
+    ConfigError naming it and where the first bad byte is, as a file that is not valid TOML
+    is (a UnicodeDecodeError names no file)."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        line = data[: exc.start].count(b"\n") + 1
+        raise ConfigError(
+            [
+                "%s: not UTF-8 (line %d: byte 0x%02x); save it as UTF-8"
+                % (path, line, data[exc.start])
+            ]
+        ) from exc
+
+
 def load_defaults(path: str = DEFAULTS_FILE) -> dict:
     if path in _DEFAULTS_CACHE:
         return _DEFAULTS_CACHE[path]
     if not os.path.isfile(path):
         raise ConfigError(["%s is missing; the revali checkout is incomplete" % path])
-    with open(path, "r", encoding="utf-8", newline="") as fh:
-        try:
-            data = tomllib.loads(fh.read())
-        except tomllib.TOMLDecodeError as exc:
-            raise ConfigError(["%s: not valid TOML: %s" % (path, exc)]) from exc
+    text = _read_toml_text(path)
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(["%s: not valid TOML: %s" % (path, exc)]) from exc
     problems: List[str] = []
     _check_layer(data, "defaults.toml", problems)
     if problems:
@@ -667,21 +685,20 @@ def load_project_config(repo_root: str, user_cfg: Optional[UserConfig] = None) -
         )
     if user_cfg is None:
         user_cfg = load_user_config()
-    with open(path, "r", encoding="utf-8", newline="") as fh:
-        return parse_project_config(
-            fh.read(), path, user_sections=user_cfg.sections, repo_root=repo_root
-        )
+    return parse_project_config(
+        _read_toml_text(path), path, user_sections=user_cfg.sections, repo_root=repo_root
+    )
 
 
 def load_user_config() -> UserConfig:
     path = os.path.join(user_home(), "config.toml")
     if not os.path.isfile(path):
         return UserConfig(path=path)
-    with open(path, "r", encoding="utf-8", newline="") as fh:
-        try:
-            data = tomllib.loads(fh.read())
-        except tomllib.TOMLDecodeError as exc:
-            raise ConfigError(["%s: not valid TOML: %s" % (path, exc)]) from exc
+    text = _read_toml_text(path)
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(["%s: not valid TOML: %s" % (path, exc)]) from exc
     problems: List[str] = []
     cfg = UserConfig(path=path)
     for key, value in data.items():
@@ -726,13 +743,13 @@ def paths_for(repo_root: str) -> PathsCfg:
 
 
 def _raw_paths(file: str) -> dict:
-    """The [paths] table of a TOML file as written, {} when absent or unreadable."""
+    """The [paths] table of a TOML file as written, {} when absent or unreadable (not UTF-8
+    or not valid TOML included)."""
     if not os.path.isfile(file):
         return {}
     try:
-        with open(file, "r", encoding="utf-8", newline="") as fh:
-            table = tomllib.loads(fh.read()).get("paths", {})
-    except (OSError, tomllib.TOMLDecodeError):
+        table = tomllib.loads(_read_toml_text(file)).get("paths", {})
+    except (OSError, ConfigError, tomllib.TOMLDecodeError):
         return {}
     return table if isinstance(table, dict) else {}
 
