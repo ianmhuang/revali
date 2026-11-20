@@ -251,6 +251,15 @@ BAD_FILES = (
     ("not UTF-8", b'\xff\xfe{"tests.test_sizes.One": 50.0}'),
     ("unreadable (a directory)", DIRECTORY),
     ("none of the collected classes", {"tests.test_gone.Gone": 50.0, "tests.other.One": 9.0}),
+    # round 1 F2: json reads this as an int that no float can hold
+    ("an integer too large for a float", b'{"tests.test_sizes.One": 1' + b"0" * 400 + b"}"),
+    (
+        "values that are not seconds",
+        b'{"tests.test_sizes.One": "50", "tests.test_sizes.Five": -1,'
+        b' "tests.test_sizes.Three": true, "tests.test_sizes.TwoA": null,'
+        b' "tests.test_sizes.TwoB": NaN, "tests.test_other.Solo": Infinity,'
+        b' "tests.test_other.Pair": [50.0]}',
+    ),
 )
 
 
@@ -351,6 +360,17 @@ class EveryTestOnce(unittest.TestCase):
 TIMED = (("FastA", 5), ("FastB", 5), ("Slow", 2))
 SLEEP = 0.3
 
+# a class whose only test ends its worker before the worker writes its result
+CRASH = (
+    "import os\n"
+    "import unittest\n"
+    "\n"
+    "\n"
+    "class Dies(unittest.TestCase):\n"
+    "    def test_dies(self):\n"
+    "        os._exit(3)\n"
+)
+
 
 class DurationsOut(TreeCase):
     """AC-4: `--durations-out FILE` writes the seconds of each class the run ran."""
@@ -416,6 +436,18 @@ class DurationsOut(TreeCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(sorted(self.load(self.t.file)), self.names)
         self.assertEqual(partition(self.t.parts(2)), by_time)
+
+    def test_a_worker_that_leaves_no_result_keeps_the_file_that_was_there(self):
+        # round 1 F3: the refresh writes over the file it reads; a run that lost a worker
+        # does not know that worker's classes, so it must not replace the file with fewer
+        tree = self.tree(test_t=module(TIMED, record=False), test_crash=CRASH)
+        before = json.dumps({cid("test_t", "Slow"): 9.0}).encode("utf-8")
+        tree.durations(before)
+        code, out, _ = tree.run("-j", "2", "--durations-out", tree.file)
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAILED (errors=1)", out)  # the lost worker, counted as it was before
+        with open(tree.file, "rb") as fh:
+            self.assertEqual(fh.read(), before)
 
 
 def matrix_legs():
