@@ -62,12 +62,13 @@ def snippet_block():
 
 
 def file_lines(out):
-    """The per-file output lines as (action, path) pairs, in output order."""
+    """The per-file output lines as (action, path) pairs, in output order. The path is the
+    word after the action; a line may say more after it."""
     pairs = []
     for line in out.splitlines():
         words = line.split()
         if len(words) >= 2 and words[0].rstrip(":") in ACTIONS:
-            pairs.append((words[0].rstrip(":"), words[-1].replace("\\", "/")))
+            pairs.append((words[0].rstrip(":"), words[1].replace("\\", "/")))
     return pairs
 
 
@@ -292,6 +293,22 @@ class ExistingFiles(InitRepo):
                 self.assertNotIn(ROOT, result)
                 self.assertNotIn(ROOT.replace("\\", "/"), result)
 
+    def test_a_crlf_claude_md_keeps_one_line_ending(self):
+        # round 1 F3: the block is appended in the file's own line ending
+        original = b"# proj\r\n\r\nOur rules.\r\n"
+        with open(self.path("CLAUDE.md"), "wb") as fh:
+            fh.write(original)
+        code, out = self.init()
+        self.assertEqual(code, EXIT_OK, out)
+        data = self.raw("CLAUDE.md")
+        self.assertTrue(data.startswith(original), data)
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""), "a bare LF in a CRLF file")
+        self.assertNotIn(b"\r", data.replace(b"\r\n", b""), "a bare CR")
+        as_lf = data.replace(b"\r\n", b"\n").decode("utf-8")
+        expected = "# proj\n\nOur rules.\n\n" + snippet_block()
+        self.assertEqual(as_lf.rstrip("\n"), expected.rstrip("\n"))
+        self.assertEqual(reported(out).get("CLAUDE.md"), "appended", out)
+
     def test_claude_md_that_has_the_heading_line_is_kept(self):
         text = "# proj\n\n%s\n\nOur own wording of it.\n" % HEADING
         self.write("CLAUDE.md", text)
@@ -335,6 +352,13 @@ class ExistingFiles(InitRepo):
         self.assertFalse(self.exists(".gitignore"))
         with open(self.exclude, "rb") as fh:
             self.assertEqual(fh.read(), b".revali/\n")
+        # round 1 F4: no line about a .gitignore that does not exist; the line is about the
+        # state directory, which is kept as git has it
+        seen = reported(out)
+        self.assertNotIn(".gitignore", seen, out)
+        self.assertEqual(seen.get(".revali/"), "kept", out)
+        for rel in SETUP_FILES:
+            self.assertEqual(seen.get(rel), "wrote", out)
 
 
 class Failures(InitRepo):
@@ -369,6 +393,41 @@ class Failures(InitRepo):
                 self.assertEqual(self.read(rel), template(COPIED[rel]), rel)
             elif action == "wrote":
                 self.assertTrue(self.exists(rel), rel)
+
+    def test_a_gitignore_that_is_not_utf8_is_one_error_line(self):
+        # round 1 F1: Latin-1 bytes git parses and a UTF-8 read rejects; the rule is missing,
+        # so init has to read the file to append the line
+        mine = "# café\nbuild/\n".encode("latin-1")
+        with open(self.path(".gitignore"), "wb") as fh:
+            fh.write(mine)
+        code, out = self.init()  # an uncaught decode error would end the test here
+        self.assertEqual(code, EXIT_ERROR, out)
+        errors = error_lines(out)
+        self.assertEqual(len(errors), 1, out)
+        self.assertIn(".gitignore", errors[0])  # the line names the path
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.raw(".gitignore"), mine)
+        # files already written stay, and were reported
+        seen = reported(out)
+        for rel, name in COPIED.items():
+            self.assertEqual(self.read(rel), template(name), rel)
+            self.assertEqual(seen.get(rel), "wrote", out)
+        self.assertTrue(self.exists("CLAUDE.md"))
+
+    def test_a_kept_revali_toml_that_is_not_utf8_is_one_error_line(self):
+        # round 1 F1: init keeps the file, then needs its [paths] state_dir for the ignore rule
+        mine = b"[project]\n# caf\xe9\n"
+        with open(self.path("revali.toml"), "wb") as fh:
+            fh.write(mine)
+        code, out = self.init()
+        self.assertEqual(code, EXIT_ERROR, out)
+        errors = error_lines(out)
+        self.assertEqual(len(errors), 1, out)
+        self.assertIn("revali.toml", errors[0])  # the line names the path
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.raw("revali.toml"), mine)
+        self.assertEqual(reported(out).get("revali.toml"), "kept", out)
+        self.assertEqual(self.read("CONVENTIONS.md"), template("CONVENTIONS.md"))
 
     def test_a_template_that_cannot_be_read(self):
         # White-box by need: the only way to make a template unreadable without touching the
