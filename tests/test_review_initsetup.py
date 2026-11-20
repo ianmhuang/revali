@@ -317,6 +317,30 @@ class ExistingFiles(InitRepo):
         self.assertEqual(self.raw("CLAUDE.md"), text.encode("utf-8"))
         self.assertEqual(reported(out).get("CLAUDE.md"), "kept", out)
 
+    def test_a_bom_before_the_heading_line_does_not_hide_it(self):
+        # round 2: a CLAUDE.md an editor saved with a UTF-8 BOM, the heading on its first
+        # line, has the heading line: it is kept, not given the block a second time
+        data = ("﻿%s\n\nOur own wording of it.\n" % HEADING).encode("utf-8")
+        with open(self.path("CLAUDE.md"), "wb") as fh:
+            fh.write(data)
+        code, out = self.init()
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(self.raw("CLAUDE.md"), data)
+        self.assertEqual(reported(out).get("CLAUDE.md"), "kept", out)
+
+    def test_a_claude_md_with_a_bom_and_no_heading_gets_the_block(self):
+        # the BOM alone is no reason to keep the file: what is there stays, the block follows
+        original = "﻿# proj\n\nOur rules.\n".encode("utf-8")
+        with open(self.path("CLAUDE.md"), "wb") as fh:
+            fh.write(original)
+        code, out = self.init()
+        self.assertEqual(code, EXIT_OK, out)
+        data = self.raw("CLAUDE.md")
+        self.assertTrue(data.startswith(original), data)
+        added = data[len(original) :].decode("utf-8")
+        self.assertEqual(added.rstrip("\n"), ("\n" + snippet_block()).rstrip("\n"))
+        self.assertEqual(reported(out).get("CLAUDE.md"), "appended", out)
+
     def test_a_second_run_keeps_every_file_and_exits_0(self):
         code, out = self.init()
         self.assertEqual(code, EXIT_OK, out)
@@ -428,6 +452,27 @@ class Failures(InitRepo):
         self.assertEqual(self.raw("revali.toml"), mine)
         self.assertEqual(reported(out).get("revali.toml"), "kept", out)
         self.assertEqual(self.read("CONVENTIONS.md"), template("CONVENTIONS.md"))
+
+    def test_a_user_config_that_is_not_utf8_is_named_in_the_error(self):
+        # round 2 F6: [paths] state_dir is also read from the user's config.toml; when that
+        # is the file that cannot be read, the ERROR line names it and not the project's
+        # revali.toml, which init has just written from the template
+        user_config = os.path.join(self.home, "config.toml")
+        with open(user_config, "wb") as fh:
+            fh.write(b"# caf\xe9\n")
+        code, out = self.init()  # an uncaught decode error would end the test here
+        self.assertEqual(code, EXIT_ERROR, out)
+        errors = error_lines(out)
+        self.assertEqual(len(errors), 1, out)
+        self.assertNotIn("Traceback", out)
+        self.assertIn(user_config, errors[0])  # the line names the path
+        self.assertNotIn(self.path("revali.toml"), errors[0])
+        # files already written stay, and were reported
+        seen = reported(out)
+        for rel, name in COPIED.items():
+            self.assertEqual(self.read(rel), template(name), rel)
+            self.assertEqual(seen.get(rel), "wrote", out)
+        self.assertTrue(self.exists("CLAUDE.md"))
 
     def test_a_template_that_cannot_be_read(self):
         # White-box by need: the only way to make a template unreadable without touching the
