@@ -430,14 +430,15 @@ def _pr_problems(pr: PrCfg) -> List[str]:
 _DEFAULTS_CACHE: dict = {}
 
 
-def _read_toml_text(path: str) -> str:
+def read_toml_text(path: str) -> str:
     """The text of a TOML file revali reads, which must be UTF-8. A file that is not is a
     ConfigError naming it and where the first bad byte is, as a file that is not valid TOML
-    is (a UnicodeDecodeError names no file)."""
+    is (a UnicodeDecodeError names no file). A leading BOM, which some Windows editors
+    write, is dropped: tomllib rejects it, and revali never writes these files back."""
     with open(path, "rb") as fh:
         data = fh.read()
     try:
-        return data.decode("utf-8")
+        return data.decode("utf-8").removeprefix("﻿")
     except UnicodeDecodeError as exc:
         line = data[: exc.start].count(b"\n") + 1
         raise ConfigError(
@@ -453,7 +454,7 @@ def load_defaults(path: str = DEFAULTS_FILE) -> dict:
         return _DEFAULTS_CACHE[path]
     if not os.path.isfile(path):
         raise ConfigError(["%s is missing; the revali checkout is incomplete" % path])
-    text = _read_toml_text(path)
+    text = read_toml_text(path)
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
@@ -686,7 +687,7 @@ def load_project_config(repo_root: str, user_cfg: Optional[UserConfig] = None) -
     if user_cfg is None:
         user_cfg = load_user_config()
     return parse_project_config(
-        _read_toml_text(path), path, user_sections=user_cfg.sections, repo_root=repo_root
+        read_toml_text(path), path, user_sections=user_cfg.sections, repo_root=repo_root
     )
 
 
@@ -694,7 +695,7 @@ def load_user_config() -> UserConfig:
     path = os.path.join(user_home(), "config.toml")
     if not os.path.isfile(path):
         return UserConfig(path=path)
-    text = _read_toml_text(path)
+    text = read_toml_text(path)
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
@@ -748,7 +749,7 @@ def _raw_paths(file: str) -> dict:
     if not os.path.isfile(file):
         return {}
     try:
-        table = tomllib.loads(_read_toml_text(file)).get("paths", {})
+        table = tomllib.loads(read_toml_text(file)).get("paths", {})
     except (OSError, ConfigError, tomllib.TOMLDecodeError):
         return {}
     return table if isinstance(table, dict) else {}

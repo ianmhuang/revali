@@ -10,7 +10,14 @@ import os
 from typing import Callable, List, Tuple
 
 from revali import EXIT_ERROR, EXIT_OK, gitops
-from revali.config import PROJECT_FILE, TOOL_ROOT, ConfigError, paths_for, user_home
+from revali.config import (
+    PROJECT_FILE,
+    TOOL_ROOT,
+    ConfigError,
+    paths_for,
+    read_toml_text,
+    user_home,
+)
 
 TEMPLATES_DIR = os.path.join(TOOL_ROOT, "templates")
 
@@ -116,9 +123,10 @@ def _ignore(root: str) -> Tuple[str, str]:
         if not os.path.isfile(path):
             continue
         try:
-            with open(path, "r", encoding="utf-8", newline="") as fh:
-                fh.read()
-        except (OSError, UnicodeDecodeError) as exc:
+            read_toml_text(path)
+        except ConfigError as exc:  # not UTF-8, in the words every other command uses
+            raise InitError("; ".join(exc.problems)) from exc
+        except OSError as exc:
             raise InitError("cannot read %s (%s)" % (path, exc)) from exc
     try:
         entry = paths_for(root).state_dir.rstrip("/") + "/"

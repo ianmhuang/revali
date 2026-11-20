@@ -17,7 +17,8 @@ setting one of them is a configuration error.
    platforms, anything project-specific. [templates/revali.toml](../templates/revali.toml) is a
    starting point; a key left out inherits from the layers above.
 
-The three files are read as UTF-8. One that is not, or is not valid TOML, is a configuration
+The three files are read as UTF-8; a BOM at the start, which some Windows editors write, is
+ignored. One that is not UTF-8, or is not valid TOML, is a configuration
 error naming the file (for a file that is not UTF-8, also the line of the first bad byte):
 `preflight` and `run` list it and stop; `status`, `wait` and `merge` fall back to the
 defaults to find the state directory, and `merge` of a ready branch then stops on it. A
