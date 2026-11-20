@@ -58,7 +58,15 @@ def model_here() -> Optional[str]:
             where = r"HARDWARE\DESCRIPTION\System\CentralProcessor\0"
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, where) as key:
                 return str(winreg.QueryValueEx(key, "ProcessorNameString")[0]).strip() or None
-    except (ImportError, OSError):
+        elif sys.platform == "darwin":  # macos-ci AC-5
+            res = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return res.stdout.strip() or None if res.returncode == 0 else None
+    except (ImportError, OSError, subprocess.SubprocessError):
         return None
     return None
 
@@ -174,19 +182,22 @@ class RunnerFactsScript(unittest.TestCase):
 
     def test_a_model_it_cannot_read_is_unknown_with_the_reason(self):
         # round 1 F2: the reason the primary source failed reaches the log
+        # macos-ci AC-5: on macOS the source is sysctl, which fails too
         with (
             mock.patch("builtins.open", side_effect=PermissionError("denied")),
             mock.patch.dict(sys.modules, {"winreg": None}),
+            mock.patch.object(self.facts.subprocess, "run", side_effect=OSError("no sysctl")),
             mock.patch("platform.processor", return_value=""),
             mock.patch("platform.platform", return_value="SomeOS-1"),
         ):
             model = self.facts.cpu_model()
             code, out = self.run_main()
-        if sys.platform.startswith("linux") or os.name == "nt":
-            if os.name == "nt":  # round 2 F1: each platform's own reason
-                self.assertRegex(model, r"^unknown \((ModuleNotFoundError|ImportError): .+\)$")
-            else:
-                self.assertEqual(model, "unknown (PermissionError: denied)")
+        if os.name == "nt":  # round 2 F1: each platform's own reason
+            self.assertRegex(model, r"^unknown \((ModuleNotFoundError|ImportError): .+\)$")
+        elif sys.platform.startswith("linux"):
+            self.assertEqual(model, "unknown (PermissionError: denied)")
+        elif sys.platform == "darwin":
+            self.assertEqual(model, "unknown (OSError: no sysctl)")
         else:
             self.assertEqual(model, "unknown")
         self.assertEqual(code, 0)
@@ -205,6 +216,38 @@ class RunnerFactsScript(unittest.TestCase):
             mock.patch("platform.processor", return_value=""),
         ):
             self.assertEqual(self.facts.cpu_model(), "unknown")
+
+    def test_macos_asks_sysctl(self):
+        # macos-ci AC-5, on any host: the darwin branch runs sysctl and keeps its answer
+        done = subprocess.CompletedProcess([], 0, stdout="Apple M2 (Virtual)\n", stderr="")
+        with (
+            mock.patch.object(sys, "platform", "darwin"),
+            mock.patch.object(self.facts.subprocess, "run", return_value=done) as run,
+        ):
+            self.assertEqual(self.facts.cpu_model(), "Apple M2 (Virtual)")
+        self.assertEqual(run.call_args.args[0], ["sysctl", "-n", "machdep.cpu.brand_string"])
+        self.assertTrue(run.call_args.kwargs.get("check"))
+        self.assertTrue(run.call_args.kwargs.get("timeout"))
+
+    def test_macos_sysctl_failing_falls_back_with_the_reason(self):
+        # a failed sysctl gives its reason after the fallback; an empty answer none
+        empty = subprocess.CompletedProcess([], 0, stdout="\n", stderr="")
+        for patch, fallback, want in (
+            ({"side_effect": subprocess.CalledProcessError(1, ["sysctl"])}, "arm", "arm ("),
+            ({"side_effect": OSError("gone")}, "", "unknown (OSError: gone)"),
+            ({"return_value": empty}, "arm", "arm"),
+        ):
+            with self.subTest(want=want):
+                with (
+                    mock.patch.object(sys, "platform", "darwin"),
+                    mock.patch.object(self.facts.subprocess, "run", **patch),
+                    mock.patch("platform.processor", return_value=fallback),
+                ):
+                    model = self.facts.cpu_model()
+                if want.endswith("("):
+                    self.assertRegex(model, r"^arm \(CalledProcessError: .+\)$")
+                else:
+                    self.assertEqual(model, want)
 
     def test_a_failing_fallback_keeps_the_first_reason(self):
         with (

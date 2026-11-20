@@ -1,8 +1,10 @@
-# Lint and the whole suite on every push, on Linux and Windows (no macOS leg). Push only:
-# revali opens a draft PR for each review, so a pull_request trigger would run every push
-# twice. `revali merge` waits for these checks; the Windows leg is the slow one, so it runs
-# as six jobs, each one shard of the suite (`RUN_PARALLEL_SHARD`, see tests/run_parallel.py,
-# which balances them by tests/durations.json), which together run every test once.
+# Lint and the whole suite on every push, on Linux, Windows and macOS. Push only: revali
+# opens a draft PR for each review, so a pull_request trigger would run every push twice.
+# `revali merge` waits for these checks; the Windows and macOS legs are the slow ones, so
+# they run as six and two jobs, each one shard of the suite (`RUN_PARALLEL_SHARD`, see
+# tests/run_parallel.py, which balances them by tests/durations.json), which together run
+# every test once on each. The macOS jobs install GNU coreutils first: the sandbox runs each
+# step under `timeout`, and the suite stands this machine's bash in for the sandbox host.
 # revali.toml raises checks_timeout_min above the job's timeout-minutes (its comment has the
 # measured times).
 name: test
@@ -23,7 +25,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 70
     env:
-      # the Windows jobs' shard, read by the suite step; empty on Ubuntu (the whole suite)
+      # the Windows and macOS jobs' shard, read by the suite step; empty on Ubuntu (the
+      # whole suite)
       RUN_PARALLEL_SHARD: ${{ matrix.shard && format('{0}/{1}', matrix.shard, matrix.shards) || '' }}
     strategy:
       fail-fast: false
@@ -58,6 +61,14 @@ jobs:
             python: "3.x"
             shard: 6
             shards: 6
+          - os: macos-latest
+            python: "3.x"
+            shard: 1
+            shards: 2
+          - os: macos-latest
+            python: "3.x"
+            shard: 2
+            shards: 2
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -71,5 +82,10 @@ jobs:
       - name: lint
         if: matrix.lint
         run: ruff check . && black --check .
+      - name: GNU coreutils
+        if: runner.os == 'macOS'
+        run: |
+          brew install coreutils
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
       - name: suite
         run: python tests/run_parallel.py

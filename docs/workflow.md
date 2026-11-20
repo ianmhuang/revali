@@ -272,15 +272,16 @@ twice. The rule keys on that commit: amend or rebase it and the next run is a
 normal new round.
 
 revali's own CI ([.github/workflows/test.yml](../.github/workflows/test.yml)) runs lint and the
-suite on Linux and Windows on every push, and `revali merge` waits for it as it waits for
-any project's checks. The Windows leg is the slow one: it runs as six jobs in parallel,
-each one shard of the suite (`RUN_PARALLEL_SHARD=K/6`, the same as
-`tests/run_parallel.py --shard K/6`), which together run every test once, and `revali merge`
-waits for all six. The shards are balanced by the seconds per test class recorded in
-[tests/durations.json](../tests/durations.json) (the runner's docstring says how to refresh
+suite on Linux, Windows and macOS on every push, and `revali merge` waits for it as it waits
+for any project's checks. The Windows and macOS legs are the slow ones: they run as six and
+two jobs in parallel, each one shard of the suite (`RUN_PARALLEL_SHARD=K/N`, the same as
+`tests/run_parallel.py --shard K/N`), which together run every test once on each, and
+`revali merge` waits for all of them. The macOS jobs install GNU coreutils first, since the
+sandbox runs each step under `timeout`. The shards are balanced by the seconds per test
+class recorded in [tests/durations.json](../tests/durations.json) (the runner's docstring says how to refresh
 it). revali's own
 `revali.toml` raises `checks_timeout_min` above the job's `timeout-minutes`; its comment has
-the measured times. The Windows leg's time depends on the runner it lands on, so every leg
+the measured times. A leg's time depends on the runner it lands on, so every leg
 prints the CPU model and the logical processor count before the suite
 ([.github/runner_facts.py](../.github/runner_facts.py)).
 

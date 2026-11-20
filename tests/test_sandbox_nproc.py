@@ -194,8 +194,13 @@ class StepLogHint(RepoCase):
         self.assertTrue(step.text.rstrip("\n").endswith(lines[0]), step.text)
 
     def test_own_value_named(self):
-        step = self.run_step("echo '%s' >&2; exit 1" % FORK_FAIL, max_procs=300)
-        self.assertIn("max_procs = 300", step.text)
+        # The limit is set for real on the host's bash: a value above the default the other
+        # tests use, since a macOS runner's user already runs more than 300 processes and
+        # bash could not start the step (macos-ci AC-3; this test had 300)
+        step = self.run_step("echo '%s' >&2; exit 1" % FORK_FAIL, max_procs=8192)
+        self.assertEqual(step.returncode, 1)
+        self.assertIn("max_procs = 8192", step.text)
+        self.assertNotIn("max_procs = 4096", step.text)
 
     def test_other_patterns(self):
         for text in ("RuntimeError: can't start new thread", "Error: spawn EAGAIN"):

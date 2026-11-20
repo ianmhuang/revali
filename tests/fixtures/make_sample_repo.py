@@ -132,11 +132,18 @@ none
 # Kept out of the index, where they would record the directory the fixture was built in
 # and a copy would carry it.
 NO_INDEX_CACHE = ["-c", "core.untrackedCache=false", "-c", "core.fsmonitor=false"]
+# No git process left behind: after a commit, git may start maintenance or gc in the
+# background (git 2.56 on macOS does), which writes into the build, for instance
+# .git/objects/maintenance.lock, while create() copies it. The receiving end of a push
+# does the same in the remote; a local push clears -c settings before starting it, so the
+# remote turns it off in its own config (build()).
+NO_BACKGROUND = ["-c", "maintenance.auto=false", "-c", "gc.auto=0"]
+GIT_OPTIONS = NO_INDEX_CACHE + NO_BACKGROUND
 
 
 def git(args, cwd):
     subprocess.run(
-        ["git"] + NO_INDEX_CACHE + args, cwd=cwd, check=True, capture_output=True, text=True
+        ["git"] + GIT_OPTIONS + args, cwd=cwd, check=True, capture_output=True, text=True
     )
 
 
@@ -263,7 +270,8 @@ def build(target, with_remote=True, with_branch=True, runner="wsl"):
     remote = None
     if with_remote:
         remote = target + ".git"
-        subprocess.run(["git", "init", "-q", "--bare", remote], check=True, capture_output=True)
+        git(["init", "-q", "--bare", remote], target)
+        git(["config", "receive.autogc", "false"], remote)
         git(["remote", "add", "origin", remote], target)
         git(["push", "-q", "-u", "origin", "main"], target)
 

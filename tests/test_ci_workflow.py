@@ -55,7 +55,7 @@ class Workflow(unittest.TestCase):
 
     def test_matrix_legs(self):
         # AC-2; ci/windows-job AC-1 added the Windows leg; ci-windows-shards AC-3 runs it as
-        # four shards, ci-shard-time AC-6 as six
+        # four shards, ci-shard-time AC-6 as six; macos-ci AC-2 adds macOS as two
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(target, ["py311"])
         self.assertEqual(
@@ -64,17 +64,23 @@ class Workflow(unittest.TestCase):
                 ("ubuntu-latest", "3.11"),
                 ("ubuntu-latest", "3.x"),
             ]
-            + [("windows-latest", "3.x")] * 6,
+            + [("windows-latest", "3.x")] * 6
+            + [("macos-latest", "3.x")] * 2,
         )
         self.assertRegex(self.text, r"fail-fast:\s*false")
 
     def test_the_windows_shards_cover_the_suite_once(self):
         # ci-windows-shards AC-3, AC-4: shards 1..N of one N, each once, only on Windows;
-        # the suite step hands the leg's shard to the runner, and the job name shows it
-        windows = [leg for leg in legs(self.text) if leg["os"].startswith("windows")]
-        self.assertEqual({leg.get("shards") for leg in windows}, {"6"})
-        self.assertEqual(sorted(int(leg["shard"]) for leg in windows), [1, 2, 3, 4, 5, 6])
-        others = [leg for leg in legs(self.text) if not leg["os"].startswith("windows")]
+        # the suite step hands the leg's shard to the runner, and the job name shows it.
+        # macos-ci AC-2: macOS the same way, as two
+        for system, n in (("windows", 6), ("macos", 2)):
+            these = [leg for leg in legs(self.text) if leg["os"].startswith(system)]
+            self.assertEqual({leg.get("shards") for leg in these}, {str(n)}, system)
+            self.assertEqual(
+                sorted(int(leg["shard"]) for leg in these), list(range(1, n + 1)), system
+            )
+        others = [leg for leg in legs(self.text) if leg["os"].startswith("ubuntu")]
+        self.assertEqual(len(others), 2)
         self.assertFalse([leg for leg in others if "shard" in leg or "shards" in leg])
         job = block(block(self.text, "jobs"), "  test")
         self.assertRegex(
@@ -92,6 +98,11 @@ class Workflow(unittest.TestCase):
         broken = {
             "a shard missing": good.replace("shard: 6\n", "shard: 3\n"),
             "two Ns": good.replace("shards: 6\n", "shards: 5\n", 1),
+            # macos-ci AC-2
+            "a macOS shard missing": good.replace(
+                "shard: 2\n            shards: 2\n", "shard: 1\n            shards: 2\n"
+            ),
+            "two macOS Ns": good.replace("shards: 2\n", "shards: 3\n", 1),
         }
         for what, text in broken.items():
             with self.subTest(what=what):
@@ -100,6 +111,19 @@ class Workflow(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     self.test_the_windows_shards_cover_the_suite_once()
         self.text = good
+
+    def test_macos_gets_gnu_coreutils_before_the_suite(self):
+        # macos-ci AC-2: the sandbox runs each step under coreutils `timeout`, which macOS
+        # lacks; only the macOS jobs install it, and its gnubin goes on PATH
+        steps = re.split(r"^      - ", self.text.split("    steps:\n", 1)[1], flags=re.M)
+        names = [step.split("\n", 1)[0] for step in steps]
+        at = names.index("name: GNU coreutils")
+        self.assertLess(at, names.index("name: suite"))
+        step = steps[at]
+        self.assertIn("if: runner.os == 'macOS'", step)
+        self.assertIn("brew install coreutils", step)
+        self.assertIn('echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"', step)
+        self.assertEqual(self.text.count("brew install"), 1)
 
     def test_a_hung_leg_ends_before_merge_stops_waiting(self):
         # ci/windows-job AC-2: the job's timeout-minutes is below revali's own
@@ -146,14 +170,27 @@ class Workflow(unittest.TestCase):
 
 class Docs(unittest.TestCase):
     def test_conventions_and_workflow_doc_name_the_ci(self):
-        # AC-7
+        # AC-7; macos-ci AC-6: macOS joined Linux and Windows (this test asserted that the
+        # docs did not claim macOS while CI had no macOS leg)
         for rel in (("CONVENTIONS.md",), ("docs", "workflow.md")):
             with self.subTest(path="/".join(rel)):
                 text = " ".join(read(*rel).split())
-                self.assertIn("the suite on Linux and Windows on every push", text)
+                self.assertIn("the suite on Linux, Windows and macOS on every push", text)
                 self.assertIn("`revali merge` waits for it", text)
                 self.assertIn("test.yml", text)
-                self.assertNotIn("Windows and macOS on every push", text)
+                self.assertNotIn("Linux and Windows on every push", text)
+
+    def test_readme_says_where_ci_runs_and_what_a_mac_ssh_host_needs(self):
+        # macos-ci AC-6
+        text = " ".join(read("README.md").split())
+        self.assertIn("CI runs the suite on Linux, Windows and macOS hosts", text)
+        self.assertIn("no real review has run on a macOS host yet", text)
+        ssh = next(
+            ln for ln in read("README.md").splitlines() if ln.startswith('| `runner = "ssh"`')
+        )
+        self.assertIn("Homebrew's coreutils", ssh)
+        self.assertIn("`gnubin`", ssh)
+        self.assertIn("not verified end to end", ssh)
 
     def test_readme_within_its_cap(self):
         # AC-7; docs/readme-refresh AC-8 raised the cap from 170 to 200

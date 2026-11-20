@@ -503,7 +503,16 @@ class Committed(unittest.TestCase):
         self.assertEqual(self.values, ["%d/6" % k for k in range(1, 7)])
         for leg in self.windows:
             self.assertEqual((leg["os"], leg["python"]), ("windows-latest", "3.x"))
-        others = [leg for leg in self.legs if leg not in self.windows]
+        # macos-ci AC-4 (author's change): the two macOS shard jobs, apart from "others"
+        macos = [leg for leg in self.legs if leg.get("os", "").startswith("macos")]
+        self.assertEqual(
+            sorted(macos, key=lambda leg: leg["shard"]),
+            [
+                {"os": "macos-latest", "python": "3.x", "shard": "1", "shards": "2"},
+                {"os": "macos-latest", "python": "3.x", "shard": "2", "shards": "2"},
+            ],
+        )
+        others = [leg for leg in self.legs if leg not in self.windows and leg not in macos]
         self.assertEqual(
             sorted(others, key=lambda leg: leg["python"]),
             [

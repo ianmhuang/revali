@@ -96,10 +96,9 @@ sequenceDiagram
     R->>G: comment on the issues a branch commit says it fixes
 ```
 
-The preflight baseline (the existing suite in the sandbox) runs on every
-`revali run` until the first review round is recorded, and not for
-`kind: docs`. A sandbox `setup` or `build` failure is exit 1 (environment),
-not a FAIL verdict.
+The preflight baseline (the existing suite in the sandbox) runs on every `revali run`
+until the first review round is recorded, and not for `kind: docs`. A sandbox `setup` or
+`build` failure is exit 1 (environment), not a FAIL verdict.
 
 | Role | Started by | Reads | Writes | Model |
 |---|---|---|---|---|
@@ -115,7 +114,8 @@ answer a question), `3` a human must decide, `4` (`wait` only) still running.
 Status: package version 0.4.0; [CHANGELOG.md](CHANGELOG.md) lists what each release
 contains. Verified end to end on a private GitHub repository with real Reviewer sessions
 and real WSL and ssh sandboxes ([docs/sandbox.md](docs/sandbox.md) has the record);
-revali reviews its own changes on this public one.
+revali reviews its own changes on this public one. CI runs the suite on Linux, Windows and
+macOS hosts with fake `gh` and `claude`; no real review has run on a macOS host yet.
 
 ## Requirements
 
@@ -127,7 +127,7 @@ revali reviews its own changes on this public one.
 | Runner | Where the sandbox runs | Isolation | Platforms | Verified end to end |
 |---|---|---|---|---|
 | `runner = "wsl"` (default) | a clone inside a WSL distro (Ubuntu) on a Windows host | its own Linux system | `linux` | yes, 2026-08-30 and 2026-09-04 |
-| `runner = "ssh"` | a clone on a machine reached by key-based ssh, with git, bash and coreutils installed | another machine | `linux`; `windows` when bash is its ssh shell | `linux` yes, 2026-08-30; `windows` not yet |
+| `runner = "ssh"` | a clone on a machine reached by key-based ssh, with git, bash and coreutils installed (a Mac: Homebrew's coreutils, its `gnubin` on the PATH of the non-interactive ssh shell; not verified end to end) | another machine | `linux`; `windows` when bash is its ssh shell | `linux` yes, 2026-08-30; `windows` not yet |
 | `runner = "local"` | a git worktree on the host itself: a host that is its own sandbox, or a first look before setting one up | no isolation | `linux`; `windows` on a Windows host | no record |
 
 ## Usage
