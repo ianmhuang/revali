@@ -37,6 +37,15 @@ class Case(RepoCase):
         with open(path, "rb") as fh:
             return fh.read()
 
+    def gitignore_without_the_state_dir(self):
+        # review round 1 F1: the fixture's .gitignore already ignores .revali/, so an init
+        # that went on with the default state directory would leave it alone; start from one
+        # that ignores nothing revali uses, so going on would have to change it
+        path = os.path.join(self.repo, ".gitignore")
+        with open(path, "wb") as fh:
+            fh.write(b"build/\n")
+        return b"build/\n"
+
     def error_lines(self, out):
         return [ln for ln in out.splitlines() if ln.startswith("ERROR")]
 
@@ -46,8 +55,11 @@ class NotValidToml(Case):
 
     def test_the_projects_file_stops_init(self):
         self.append_bytes(self.project_file(), BROKEN)
-        before = self.gitignore_bytes()
+        before = self.gitignore_without_the_state_dir()
         code, out = run(["init"])
+        self.assertEqual(
+            self.gitignore_bytes(), before, out
+        )  # first: fails on its own if init went on
         self.assertEqual(code, 1, out)
         self.assertNotIn("Traceback", out)
         errors = self.error_lines(out)
@@ -55,20 +67,21 @@ class NotValidToml(Case):
         self.assertTrue(
             errors[0].startswith("ERROR: %s: not valid TOML: " % self.project_file()), out
         )
-        self.assertEqual(self.gitignore_bytes(), before)
         self.assertIn("kept revali.toml", out.splitlines())  # reported before it stopped
 
     def test_the_users_file_stops_init_and_is_the_one_named(self):
         self.append_bytes(self.user_file(), b"= not toml\n")
-        before = self.gitignore_bytes()
+        before = self.gitignore_without_the_state_dir()
         code, out = run(["init"])
+        self.assertEqual(
+            self.gitignore_bytes(), before, out
+        )  # first: fails on its own if init went on
         self.assertEqual(code, 1, out)
         self.assertNotIn("Traceback", out)
         errors = self.error_lines(out)
         self.assertEqual(len(errors), 1, out)
         self.assertTrue(errors[0].startswith("ERROR: %s: not valid TOML: " % self.user_file()), out)
         self.assertNotIn(self.project_file(), errors[0])
-        self.assertEqual(self.gitignore_bytes(), before)
 
     def test_the_message_is_the_one_preflight_gives(self):
         self.append_bytes(self.project_file(), BROKEN)
