@@ -33,11 +33,13 @@ Classes are placed by weight, heaviest first onto the least loaded worker or sha
 weight is a class's seconds in `durations.json` in the start directory. A class the file
 does not list weighs its test count times the median seconds per test of the listed classes.
 Without a usable file, every class weighs its test count. `--durations-out FILE` writes the
-seconds of each class this run ran; when a worker leaves no result the file is not written,
-so a refresh never drops classes. The same file also spreads classes over the workers of a
+seconds of each class this run ran, and only those: a shard or a run given names writes a
+smaller file, and so does a run where a module does not import or a setUpClass fails. When
+a worker leaves no result the file is not written, so a lost worker does not drop its
+classes from a refresh. The same file also spreads classes over the workers of a
 Linux run, whose relative class times were not measured. To refresh the committed file
-after the suite has changed, run the whole suite on the Windows host (the CI leg the file
-balances):
+after the suite has changed, run the whole suite, unsharded and with every test passing, on
+the Windows host (the CI leg the file balances):
 
     python tests/run_parallel.py --durations-out tests/durations.json
 """
