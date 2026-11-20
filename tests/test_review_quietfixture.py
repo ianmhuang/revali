@@ -5,7 +5,8 @@ starts it (or `git gc --auto`) in the remote; either may go on writing into the 
 it is copied. The build is made here under a global git configuration that asks for both,
 with git's own trace (`GIT_TRACE2_EVENT`) on, which every git process of the build writes
 to, the ones git starts itself included. The trace must name the commands the build runs
-and neither `maintenance` nor `gc`.
+and neither `maintenance` nor `gc`. The same holds when that configuration also sets
+`safe.bareRepository = explicit` (round 2), under which the build must still complete.
 """
 
 import json
@@ -105,14 +106,29 @@ class NoBackgroundGit(unittest.TestCase):
             check=True,
         ).stdout.split("\n")
         self.assertEqual(log[:2], ["Add mul", "Initial sample project"])
-        refs = subprocess.run(
+        self.assertEqual(self.remote_refs(info), ["refs/heads/main"])
+
+    def remote_refs(self, info):
+        return subprocess.run(
             ["git", "--git-dir", info["remote"], "for-each-ref", "--format=%(refname)"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             check=True,
         ).stdout.split()
-        self.assertEqual(refs, ["refs/heads/main"])
+
+    def test_a_build_where_a_bare_repository_must_be_named(self):
+        # round 2: under safe.bareRepository = explicit git refuses a bare repository it
+        # finds from the working directory. The build still completes, its remote gets the
+        # push, and nothing is started in either
+        with open(self.config, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write("[safe]\n\tbareRepository = explicit\n")
+        info, trace = self.traced_build("named", True, True)
+        names = self.commands(trace)
+        for name in ("commit", "push", "receive-pack"):
+            self.assertIn(name, names)
+        self.assert_no_background(trace)
+        self.assertEqual(self.remote_refs(info), ["refs/heads/main"])
 
     def test_a_build_without_a_remote_or_a_branch(self):
         info, trace = self.traced_build("bare bones", False, False)
