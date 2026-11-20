@@ -118,12 +118,12 @@ class Legs(WorkflowCase):
         self.assertEqual(pinned, "3.11")
         # ci-windows-shards (author's change): the Windows leg is four jobs, one per shard;
         # ci-shard-time AC-6 (author's change): six; macos-ci AC-2 (author's change): two
-        # macOS jobs on the latest 3.x
+        # macOS jobs on the latest 3.x; macos-three-shards AC-2 (author's change): three
         self.assertCountEqual(
             [(leg.get("os"), leg.get("python")) for leg in self.legs],
             [("ubuntu-latest", pinned), ("ubuntu-latest", "3.x")]
             + [("windows-latest", "3.x")] * 6
-            + [("macos-latest", "3.x")] * 2,  # macos-ci AC-2 (author's change)
+            + [("macos-latest", "3.x")] * 3,  # macos-three-shards AC-2 (author's change)
         )
 
     def test_lint_stays_on_the_one_ubuntu_leg(self):

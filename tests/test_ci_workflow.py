@@ -55,7 +55,8 @@ class Workflow(unittest.TestCase):
 
     def test_matrix_legs(self):
         # AC-2; ci/windows-job AC-1 added the Windows leg; ci-windows-shards AC-3 runs it as
-        # four shards, ci-shard-time AC-6 as six; macos-ci AC-2 adds macOS as two
+        # four shards, ci-shard-time AC-6 as six; macos-ci AC-2 adds macOS as two,
+        # macos-three-shards AC-1 makes it three
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(target, ["py311"])
         self.assertEqual(
@@ -65,7 +66,7 @@ class Workflow(unittest.TestCase):
                 ("ubuntu-latest", "3.x"),
             ]
             + [("windows-latest", "3.x")] * 6
-            + [("macos-latest", "3.x")] * 2,
+            + [("macos-latest", "3.x")] * 3,
         )
         self.assertRegex(self.text, r"fail-fast:\s*false")
 
@@ -73,8 +74,8 @@ class Workflow(unittest.TestCase):
         # renamed from test_the_windows_shards_cover_the_suite_once (macos-ci review F2)
         # ci-windows-shards AC-3, AC-4: shards 1..N of one N, each once, only on Windows;
         # the suite step hands the leg's shard to the runner, and the job name shows it.
-        # macos-ci AC-2: macOS the same way, as two
-        for system, n in (("windows", 6), ("macos", 2)):
+        # macos-ci AC-2: macOS the same way, as two; macos-three-shards AC-1: as three
+        for system, n in (("windows", 6), ("macos", 3)):
             these = [leg for leg in legs(self.text) if leg["os"].startswith(system)]
             self.assertEqual({leg.get("shards") for leg in these}, {str(n)}, system)
             self.assertEqual(
@@ -99,11 +100,11 @@ class Workflow(unittest.TestCase):
         broken = {
             "a shard missing": good.replace("shard: 6\n", "shard: 3\n"),
             "two Ns": good.replace("shards: 6\n", "shards: 5\n", 1),
-            # macos-ci AC-2
+            # macos-ci AC-2; macos-three-shards AC-1: the macOS shards are 1..3 of 3
             "a macOS shard missing": good.replace(
-                "shard: 2\n            shards: 2\n", "shard: 1\n            shards: 2\n"
+                "shard: 3\n            shards: 3\n", "shard: 2\n            shards: 3\n"
             ),
-            "two macOS Ns": good.replace("shards: 2\n", "shards: 3\n", 1),
+            "two macOS Ns": good.replace("shards: 3\n", "shards: 2\n", 1),
         }
         for what, text in broken.items():
             with self.subTest(what=what):
