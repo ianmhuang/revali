@@ -514,11 +514,21 @@ class Committed(unittest.TestCase):
             ],
         )
         others = [leg for leg in self.legs if leg not in self.windows and leg not in macos]
+        # ubuntu-shards AC-2 (author's change): two shard jobs per Python version (was one
+        # job each, unsharded)
         self.assertEqual(
-            sorted(others, key=lambda leg: leg["python"]),
+            sorted(others, key=lambda leg: (leg["python"], leg["shard"])),
             [
-                {"os": "ubuntu-latest", "python": "3.11"},
-                {"os": "ubuntu-latest", "python": "3.x", "lint": "true"},
+                {"os": "ubuntu-latest", "python": "3.11", "shard": "1", "shards": "2"},
+                {"os": "ubuntu-latest", "python": "3.11", "shard": "2", "shards": "2"},
+                {
+                    "os": "ubuntu-latest",
+                    "python": "3.x",
+                    "lint": "true",
+                    "shard": "1",
+                    "shards": "2",
+                },
+                {"os": "ubuntu-latest", "python": "3.x", "shard": "2", "shards": "2"},
             ],
         )
 

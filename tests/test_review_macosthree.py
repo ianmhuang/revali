@@ -201,11 +201,21 @@ class ThreeMacosJobs(unittest.TestCase):
         self.assertEqual(len(self.macos), 3, self.legs)
         ubuntu = on(self.legs, "ubuntu")
         windows = on(self.legs, "windows")
+        # ubuntu-shards AC-2 (author's change): two shard jobs per Python version (was one
+        # job each, unsharded)
         self.assertEqual(
-            sorted(ubuntu, key=lambda leg: leg["python"]),
+            sorted(ubuntu, key=lambda leg: (leg["python"], leg["shard"])),
             [
-                {"os": "ubuntu-latest", "python": "3.11"},
-                {"os": "ubuntu-latest", "python": "3.x", "lint": "true"},
+                {"os": "ubuntu-latest", "python": "3.11", "shard": "1", "shards": "2"},
+                {"os": "ubuntu-latest", "python": "3.11", "shard": "2", "shards": "2"},
+                {
+                    "os": "ubuntu-latest",
+                    "python": "3.x",
+                    "lint": "true",
+                    "shard": "1",
+                    "shards": "2",
+                },
+                {"os": "ubuntu-latest", "python": "3.x", "shard": "2", "shards": "2"},
             ],
         )
         self.assertEqual(
@@ -215,13 +225,17 @@ class ThreeMacosJobs(unittest.TestCase):
                 for k in range(1, 7)
             ],
         )
-        self.assertEqual([shard_value(self.text, leg) for leg in ubuntu], ["", ""])
+        # ubuntu-shards AC-2 (author's change): was ["", ""]
+        self.assertEqual(
+            [shard_value(self.text, leg) for leg in ubuntu], ["1/2", "2/2", "1/2", "2/2"]
+        )
         self.assertEqual(
             sorted(shard_value(self.text, leg) for leg in windows),
             ["%d/6" % k for k in range(1, 7)],
         )
-        # two Ubuntu, six Windows and three macOS jobs, and no other
-        self.assertEqual(len(self.legs), 11, self.legs)
+        # four Ubuntu, six Windows and three macOS jobs, and no other
+        # (ubuntu-shards AC-2 (author's change): was two Ubuntu jobs, 11 in all)
+        self.assertEqual(len(self.legs), 13, self.legs)
         every = steps(self.text)
         brew = [i for i, step in enumerate(every) if any("brew " in ln for ln in step)]
         self.assertEqual(len(brew), 1, every)

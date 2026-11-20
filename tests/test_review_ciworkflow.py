@@ -141,16 +141,15 @@ class Matrix(WorkflowCase):
         # ci-shard-time AC-6 (author's change): six jobs.
         # macos-ci AC-2 (author's change): macOS on the latest 3.x is back, as two jobs;
         # macos-three-shards AC-2 (author's change): three.
+        # ubuntu-shards AC-2 (author's change): each Ubuntu leg is two shard jobs.
         target = tomllib.loads(read("pyproject.toml"))["tool"]["black"]["target-version"]
         self.assertEqual(len(target), 1)
         m = re.fullmatch(r"py(\d)(\d+)", target[0])
         pinned = "%s.%s" % (m.group(1), m.group(2))
         self.assertCountEqual(
             [(leg["os"], leg["python"]) for leg in self.legs],
-            [
-                ("ubuntu-latest", pinned),
-                ("ubuntu-latest", "3.x"),
-            ]
+            [("ubuntu-latest", pinned)] * 2  # ubuntu-shards AC-2 (author's change)
+            + [("ubuntu-latest", "3.x")] * 2  # ubuntu-shards AC-2 (author's change)
             + [("windows-latest", "3.x")] * 6
             + [("macos-latest", "3.x")] * 3,  # macos-three-shards AC-2 (author's change)
         )

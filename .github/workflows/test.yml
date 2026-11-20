@@ -1,9 +1,10 @@
 # Lint and the whole suite on every push, on Linux, Windows and macOS. Push only: revali
 # opens a draft PR for each review, so a pull_request trigger would run every push twice.
-# `revali merge` waits for these checks; the Windows and macOS legs are the slow ones, so
-# they run as six and three jobs, each one shard of the suite (`RUN_PARALLEL_SHARD`, see
-# tests/run_parallel.py, which balances them by tests/durations.json), which together run
-# every test once on each. The macOS jobs install GNU coreutils first: the sandbox runs each
+# `revali merge` waits for these checks, so every leg runs as jobs that are each one shard
+# of the suite (`RUN_PARALLEL_SHARD`, see tests/run_parallel.py, which balances them by
+# tests/durations.json) and together run every test once: two for each Ubuntu Python
+# version, six on Windows and three on macOS. Lint runs on the first Ubuntu 3.x job only.
+# The macOS jobs install GNU coreutils first: the sandbox runs each
 # step under `timeout`, and the suite stands this machine's bash in for the sandbox host.
 # revali.toml raises checks_timeout_min above the job's timeout-minutes (its comment has the
 # measured times).
@@ -25,8 +26,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 70
     env:
-      # the Windows and macOS jobs' shard, read by the suite step; empty on Ubuntu (the
-      # whole suite)
+      # the job's shard, read by the suite step
       RUN_PARALLEL_SHARD: ${{ matrix.shard && format('{0}/{1}', matrix.shard, matrix.shards) || '' }}
     strategy:
       fail-fast: false
@@ -34,9 +34,21 @@ jobs:
         include:
           - os: ubuntu-latest
             python: "3.11"
+            shard: 1
+            shards: 2
+          - os: ubuntu-latest
+            python: "3.11"
+            shard: 2
+            shards: 2
           - os: ubuntu-latest
             python: "3.x"
             lint: true
+            shard: 1
+            shards: 2
+          - os: ubuntu-latest
+            python: "3.x"
+            shard: 2
+            shards: 2
           - os: windows-latest
             python: "3.x"
             shard: 1

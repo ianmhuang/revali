@@ -215,11 +215,21 @@ class MacosLeg(unittest.TestCase):
     def test_the_linux_and_windows_legs_are_what_they_were(self):
         ubuntu = on(self.legs, "ubuntu")
         windows = on(self.legs, "windows")
+        # ubuntu-shards AC-2 (author's change): two shard jobs per Python version (was one
+        # job each, unsharded)
         self.assertEqual(
-            sorted(ubuntu, key=lambda leg: leg["python"]),
+            sorted(ubuntu, key=lambda leg: (leg["python"], leg["shard"])),
             [
-                {"os": "ubuntu-latest", "python": "3.11"},
-                {"os": "ubuntu-latest", "python": "3.x", "lint": "true"},
+                {"os": "ubuntu-latest", "python": "3.11", "shard": "1", "shards": "2"},
+                {"os": "ubuntu-latest", "python": "3.11", "shard": "2", "shards": "2"},
+                {
+                    "os": "ubuntu-latest",
+                    "python": "3.x",
+                    "lint": "true",
+                    "shard": "1",
+                    "shards": "2",
+                },
+                {"os": "ubuntu-latest", "python": "3.x", "shard": "2", "shards": "2"},
             ],
         )
         self.assertEqual(
@@ -229,14 +239,19 @@ class MacosLeg(unittest.TestCase):
                 for k in range(1, 7)
             ],
         )
-        self.assertEqual([shard_value(self.text, leg) for leg in ubuntu], ["", ""])
+        # ubuntu-shards AC-2 (author's change): was ["", ""]
+        self.assertEqual(
+            [shard_value(self.text, leg) for leg in ubuntu], ["1/2", "2/2", "1/2", "2/2"]
+        )
         self.assertEqual(
             sorted(shard_value(self.text, leg) for leg in windows),
             ["%d/6" % k for k in range(1, 7)],
         )
         # and the macOS jobs are the only other ones
         self.assertEqual(len(self.legs), len(ubuntu) + len(windows) + len(self.macos))
-        self.assertEqual(len(self.legs), 11)  # macos-three-shards AC-2 (author's change): was 10
+        # macos-three-shards AC-2 (author's change): was 10;
+        # ubuntu-shards AC-2 (author's change): was 11
+        self.assertEqual(len(self.legs), 13)
 
     def test_lint_stays_on_the_one_ubuntu_leg(self):
         self.assertEqual(len(self.macos), 3)  # macos-three-shards AC-2 (author's change)
