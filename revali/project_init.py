@@ -10,7 +10,7 @@ import os
 from typing import Callable, List, Tuple
 
 from revali import EXIT_ERROR, EXIT_OK, gitops
-from revali.config import TOOL_ROOT, paths_for
+from revali.config import PROJECT_FILE, TOOL_ROOT, paths_for, user_home
 
 TEMPLATES_DIR = os.path.join(TOOL_ROOT, "templates")
 
@@ -84,7 +84,9 @@ def _claude_md(path: str, block: str) -> str:
     except (OSError, UnicodeDecodeError) as exc:
         raise InitError("cannot read %s (%s)" % (path, exc)) from exc
     heading = snippet_heading(block)
-    if heading and any(line.strip() == heading for line in text.splitlines()):
+    # an editor may have saved the file with a BOM, which strip() keeps on the first line
+    lines = text.lstrip("﻿").splitlines()
+    if heading and any(line.strip() == heading for line in lines):
         return "kept"
     # the file's own line ending (CRLF in a Windows checkout with core.autocrlf), so the
     # appended block does not leave it with mixed endings
@@ -106,11 +108,21 @@ def _ignore(root: str) -> Tuple[str, str]:
     """(action, what it is about): `.gitignore` when that file was written, appended or
     already holds the rule, else the state directory, which git ignores by another rule
     (`.git/info/exclude`, a global excludes file)."""
+    # [paths] state_dir comes from the user's config.toml and the project's revali.toml; a
+    # decode error carries no file name, so each file is read here first to name the one
+    config_files = (os.path.join(user_home(), "config.toml"), os.path.join(root, PROJECT_FILE))
+    for path in config_files:
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                fh.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise InitError("cannot read %s (%s)" % (path, exc)) from exc
     try:
         entry = paths_for(root).state_dir.rstrip("/") + "/"
-    except (OSError, UnicodeDecodeError) as exc:  # revali.toml read for [paths] state_dir
-        path = os.path.join(root, "revali.toml")
-        raise InitError("cannot read %s (%s)" % (path, exc)) from exc
+    except (OSError, UnicodeDecodeError) as exc:  # a file changed after the check above
+        raise InitError("cannot read %s or %s (%s)" % (config_files + (exc,))) from exc
     gitignore = os.path.join(root, ".gitignore")
     existed = os.path.isfile(gitignore)
     try:

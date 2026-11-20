@@ -215,6 +215,16 @@ class NeverOverwrites(InitCase):
         self.assertEqual(self.read("CLAUDE.md"), text)
         self.assertIn("kept CLAUDE.md", out.splitlines())
 
+    def test_a_claude_md_with_a_bom_and_the_heading_first_is_kept(self):
+        # round 2 follow-up: the BOM is not part of the heading line
+        data = ("﻿%s\n\nOur own wording.\n" % HEADING).encode("utf-8")
+        with open(os.path.join(self.repo, "CLAUDE.md"), "wb") as fh:
+            fh.write(data)
+        _, out = self.init()
+        with open(os.path.join(self.repo, "CLAUDE.md"), "rb") as fh:
+            self.assertEqual(fh.read(), data)
+        self.assertIn("kept CLAUDE.md", out.splitlines())
+
     def test_a_second_run_keeps_everything(self):
         self.init()
         before = {
@@ -294,6 +304,20 @@ class Failures(InitCase):
         self.assertIn("revali.toml", errors[0])
         self.assertIn("kept revali.toml", out.splitlines())
         self.assertTrue(self.exists("CONVENTIONS.md"))
+
+    def test_a_user_config_that_is_not_utf8(self):
+        # round 2 F6: the ERROR names ~/.revali/config.toml, not the revali.toml init wrote
+        user_config = os.path.join(self.home, "config.toml")
+        with open(user_config, "wb") as fh:
+            fh.write(b"# caf\xe9\n")
+        code, out = self.init()
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertNotIn("Traceback", out)
+        errors = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
+        self.assertEqual(len(errors), 1, out)
+        self.assertIn(user_config, errors[0])
+        self.assertNotIn(os.path.join(self.repo, "revali.toml"), errors[0])
+        self.assertEqual(self.read("revali.toml"), template("revali.toml"))  # written before
 
     def test_a_file_that_cannot_be_written(self):
         self.write(".github", "a file where the directory would go\n")
