@@ -42,6 +42,7 @@ sys.path.insert(0, ROOT)
 
 from revali import PROMPT_VERSION, VERSION, gitops  # noqa: E402
 from revali.engines.base import ModelUnavailable, loop_advice, loop_stopped  # noqa: E402
+from revali.engines.claude import EFFORTS  # noqa: E402
 from revali.preflight import Stop, locate, review_left_out  # noqa: E402
 from revali.review import CHANGES_REQUESTED, build_prompt, spawn_reviewer  # noqa: E402
 from revali.state import State, safe_branch, write_json_atomic  # noqa: E402
@@ -91,6 +92,7 @@ class Result:
     severity: str = ""
     verdict: str = ""
     model: str = ""
+    effort: str = ""  # the reviewer effort the session ran at (M4.4.1); "" before its config
     cost: float = 0.0  # what the session reported; 0 when it failed without saying
     charged: float = 0.0  # what counts against --budget-usd: the cap when the cost is unknown
     duration_s: float = 0.0
@@ -328,6 +330,9 @@ def _run_in(
         ctx = locate_case(case, clone, default)
         if args.model:
             ctx.cfg.review.model = args.model
+        if args.effort:  # replaces the case's own, as --model does
+            ctx.cfg.review.effort = args.effort
+        effort = ctx.cfg.review.effort
         if cap:
             ctx.cfg.review.budget_usd = cap
         cap = ctx.cfg.review.budget_usd
@@ -336,10 +341,9 @@ def _run_in(
         prompt = build_prompt(ctx, State(), ctx.rdir, 1)
         _write(os.path.join(case_out, "prompt.md"), prompt)
         if args.dry_run:  # everything a session needs is in place; nothing is spent
-            return (
-                Result(case.name, READY, message="prompt.md %d lines" % prompt.count("\n")),
-                "",
-            )
+            ready = Result(case.name, READY, effort=effort)
+            ready.message = "prompt.md %d lines" % prompt.count("\n")
+            return ready, ""
         if on_session:
             on_session(cap)
         session = True
@@ -353,6 +357,7 @@ def _run_in(
         _write(os.path.join(case_out, "answer.json"), json.dumps(rr.data, indent=1))
         result = score(case, rr.data, args.line_margin)
         result.model = rr.model_actual or rr.model_requested
+        result.effort = effort
         result.cost = result.charged = rr.cost
         return result, ""
     except ModelUnavailable as exc:  # its usage limit, or overloaded (PR #99 round 6)
@@ -535,6 +540,8 @@ def _prior_results(path: str):
             for c in entries
         )
         and isinstance(prior.get("model") or "", str)
+        and isinstance(prior.get("effort") or "", str)  # absent before M4.4.1: none given
+        and all(isinstance(c.get("effort") or "", str) for c in entries)
         and isinstance(prior.get("session_budget_usd") or 0.0, (int, float))
         and isinstance(prior.get("line_margin", DEFAULT_MARGIN), int)
         and not any(isinstance(prior.get(k), bool) for k in ("session_budget_usd", "line_margin"))
@@ -567,12 +574,14 @@ def resume_from(args):
         )
     recorded = {
         "model": prior.get("model") or "",
+        "effort": prior.get("effort") or "",
         "session_budget_usd": prior.get("session_budget_usd") or 0.0,
         "line_margin": prior.get("line_margin", DEFAULT_MARGIN),
         "cases_dir": prior["cases_dirs"],
     }
     labels = {
         "model": "model",
+        "effort": "effort",
         "session_budget_usd": "session cap",
         "line_margin": "line margin",
         "cases_dir": "case directories",
@@ -614,6 +623,11 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--model", help="reviewer model (default: the case's config)")
     parser.add_argument(
+        "--effort",
+        choices=EFFORTS,
+        help="reviewer effort for every case (default: the case's config)",
+    )
+    parser.add_argument(
         "--session-budget-usd",
         type=float,
         help="each session's cap (default: the case's [review] budget_usd)",
@@ -649,6 +663,7 @@ def main(argv=None) -> int:
             return 1
     args.cases_dir = args.cases_dir or [CASES_DIR]
     args.model = args.model or ""
+    args.effort = args.effort or ""
     args.session_budget_usd = args.session_budget_usd or 0.0
     args.line_margin = DEFAULT_MARGIN if args.line_margin is None else args.line_margin
     missing = [d for d in args.cases_dir if not os.path.isdir(d)]
@@ -791,7 +806,7 @@ def _interrupted(name: str, cap: float) -> Result:
 def _print_case(r: Result, kept: bool = False) -> None:
     message = "; ".join(m for m in (r.message, "kept from the earlier run" if kept else "") if m)
     print(
-        "%-32s %-13s %-4s %-6s %-17s %-22s $%6.2f %6.0fs %s"
+        "%-32s %-13s %-4s %-6s %-17s %-22s %-6s $%6.2f %6.0fs %s"
         % (
             r.case,
             r.outcome,
@@ -799,6 +814,7 @@ def _print_case(r: Result, kept: bool = False) -> None:
             r.severity or "-",
             r.verdict or "-",
             r.model or "-",
+            r.effort or "-",
             r.cost,
             r.duration_s,
             message,
@@ -817,6 +833,7 @@ def _write_results(out_dir: str, args, results: List[Result]) -> None:
             "revali": VERSION,
             "prompt_version": PROMPT_VERSION,
             "model": args.model,
+            "effort": args.effort,
             "dry_run": args.dry_run,
             "cases_dirs": args.cases_dir,
             "budget_usd": args.budget_usd,

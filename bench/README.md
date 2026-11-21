@@ -37,6 +37,10 @@ session that fails still costs what it spent, and that counts; one that fails wi
 what it spent (a timeout, output that is not JSON) counts as its whole cap against the
 budget, and its line says the cost is unknown. `--model` sets the reviewer model for every
 case; without it the case repository's own configuration chooses, as `revali run` would.
+`--effort` (`low`, `medium`, `high`, `xhigh` or `max`, the levels the claude engine takes)
+does the same for `[review] effort`, replacing a case's own `revali.toml` too; any other
+value is a usage error. Each case's line and its entry in `results.json` (`effort`) give
+the effort its session ran at, `--dry-run` included.
 
 A case that fails in any way is reported as `error` (or `malformed` when its directory does
 not load) and the next case runs, except a session
@@ -66,8 +70,9 @@ spent in both `cost` and `charged`; either is said in its message, and the case 
 directory.
 
 `--budget-usd` is the total of every invocation: what `results.json` already charges counts
-against it before the first new session. The model, session cap, line margin and case
-directories come from `results.json`; given on the command line they must match it, and so
+against it before the first new session. The model, effort, session cap, line margin and case
+directories come from `results.json` (a file written before `--effort` existed resumes as
+one that gave none); given on the command line they must match it, and so
 must `PROMPT_VERSION`, or the run is refused before anything starts (a set measured with two
 settings has no single rate). `--out` and `--dry-run` cannot go with `--resume`. The case
 directories are recorded as absolute paths, so a resume may start from any directory. Case
@@ -122,6 +127,22 @@ What the number does not say:
   point a few lines away from where the original one did. Read `answer.json` before trusting
   a borderline case either way.
 - The cases are bugs a reviewer already caught once, so they are within its reach.
+
+## Comparing two runs
+
+Two runs compare when they differ in one setting only: the same `PROMPT_VERSION` (in
+`results.json`; a newer prompt is a new baseline), the same cases and the same model, e.g.
+
+```
+python tools/review_bench.py --budget-usd 95 --session-budget-usd 8 --effort high \
+    --cases bench/cases --cases ~/.revali/bench/cases --out ../bench-high
+python tools/review_bench.py --budget-usd 95 --session-budget-usd 8 --effort medium \
+    --cases bench/cases --cases ~/.revali/bench/cases --out ../bench-medium
+```
+
+and read them case by case, not only by the summary: with one sample per case, a
+difference of one or two cases can be noise, and a case caught by one run and missed by
+the other is the one to run again.
 
 ## Building a case from an archived round
 
