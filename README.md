@@ -144,14 +144,14 @@ python <revali dir>/revali.py stop                     # kill this working tree'
 python <revali dir>/revali.py reset                    # drop the branch's state.json, keep its files
 python <revali dir>/revali.py clean <branch>           # delete a branch's state directory
 python <revali dir>/revali.py archive [--branch <b>]   # record a PR merged or closed without revali merge, archive its files
+python <revali dir>/revali.py release <v> [--notes <line>] [--dry-run]   # on the pushed base tip with green CI: tag v<v>, push it, publish the GitHub Release
 python <revali dir>/revali.py stats                    # the run history per repository: first-try pass rate, rounds, cost
 python <revali dir>/revali.py version                  # the version; --version prints the same line
 python <revali dir>/revali.py --verbose <command>      # echo every command revali runs to the terminal
 ```
 
 What a run does, in order: preflight (ending with the existing suite in the sandbox
-as a baseline, by default running on alongside the next two steps), push + draft PR
-(its title and release label from change.md),
+as a baseline, by default running on alongside the next two steps), push + draft PR (its title and release label from change.md),
 reviewer round (`claude -p` with the diff, change.md, the checklist, the documents related to the diff and the earlier reviewer tests it changes; writes tests into `test_dir`; the script
 checks AC coverage, runs the project's `format` and `lint` lines over them, smoke-runs them, commits or archives them), validation
 (the new tests in the sandbox, plus the existing suite unless nothing but
@@ -172,7 +172,7 @@ failing platform when several are listed, `logs/`) and as PR comments (summaries
 - [docs/files.md](docs/files.md): every file revali reads or writes and the key that moves it
 - [docs/sandbox.md](docs/sandbox.md): the `wsl`, `ssh` and `local` runners, several platforms, retries and limits, the verification record
 - [docs/side-effects.md](docs/side-effects.md): every git and GitHub action revali takes, read before the first run
-- [docs/releasing.md](docs/releasing.md): the release steps, the documentation audit, release notes for a project that uses revali
+- [docs/releasing.md](docs/releasing.md): the release steps and `revali release`, the documentation audit, release notes for a project that uses revali
 - [bench/README.md](bench/README.md): the reviewer benchmark, and building a case from an archived round
 - [skill/SKILL.md](skill/SKILL.md): the Claude Code skill behind `/revali`, the
   Developer's side of the workflow; [templates/CLAUDE-snippet.md](templates/CLAUDE-snippet.md)

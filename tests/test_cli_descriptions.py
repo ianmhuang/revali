@@ -21,6 +21,7 @@ COMMANDS = (
     "merge",
     "archive",  # feature/archive-outside-merge
     "init",  # feature/init
+    "release",  # feature/release
     "stats",
     "version",
 )
@@ -94,11 +95,13 @@ class SubcommandHelp(unittest.TestCase):
             "merge": pipeline.cmd_merge,
             "archive": pipeline.cmd_archive,
             "init": cli._cmd_init,
+            "release": cli._cmd_release,
             "stats": cli._cmd_stats,
             "version": pipeline.cmd_version,
         }
         for name, func in expected.items():
-            argv = [name, "x"] if name == "clean" else [name]
+            # feature/release: `release` takes the version, as `clean` takes a branch
+            argv = [name, "x"] if name in ("clean", "release") else [name]
             self.assertIs(self.parser.parse_args(argv).func, func, name)
         args = self.parser.parse_args(
             ["--verbose", "run", "--foreground", "--dry-run", "--base", "dev"]

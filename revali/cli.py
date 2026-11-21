@@ -115,6 +115,19 @@ def build_parser() -> argparse.ArgumentParser:
         "write the project's setup files from revali's templates (never overwrites)",
         _cmd_init,
     )
+    p_release = _command(
+        sub,
+        "release",
+        "tag the pushed tip of the base branch, push the tag and publish its GitHub Release",
+        _cmd_release,
+    )
+    p_release.add_argument("version", help="X.Y.Z or vX.Y.Z; the tag is vX.Y.Z")
+    p_release.add_argument(
+        "--notes", default="", help="a lead line above the generated notes, also in the tag"
+    )
+    p_release.add_argument(
+        "--dry-run", action="store_true", help="run the checks, print the commands, change nothing"
+    )
     _command(sub, "stats", "summarise the run history", _cmd_stats)
     _command(sub, "version", "print the version", pipeline.cmd_version)
     return parser
@@ -124,6 +137,12 @@ def _cmd_init(args) -> int:
     from revali.project_init import cmd_init
 
     return cmd_init(args)
+
+
+def _cmd_release(args) -> int:
+    from revali.release import cmd_release
+
+    return cmd_release(args)
 
 
 def _cmd_stats(args) -> int:

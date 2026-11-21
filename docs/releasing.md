@@ -99,21 +99,33 @@ auto fallback ([docs/configuration.md](configuration.md)).
      PR numbers its section must name to that test's list; nothing forces this, as the
      test checks only the tail of the list.
 5. After the merge, and only on the maintainer's word: an annotated tag on the merge commit,
-   pushed to origin. The section's heading carries the tag's date; when the tag is made on
-   another day than step 4 planned, a change that corrects the heading comes first, and the
-   tag goes on that change's merge commit.
+   pushed to origin, and the GitHub Release for it. The section's heading carries the tag's
+   date; when the tag is made on another day than step 4 planned, a change that corrects the
+   heading comes first, and the tag goes on that change's merge commit. With the base branch
+   checked out and pulled to that commit, `revali release` does all three:
+
+   ```
+   python <revali dir>/revali.py release <version> --notes "<lead line>"
+   ```
+
+   It first checks, and on a failed check exits 2 having created nothing: the version is
+   `X.Y.Z` (a leading `v` is accepted; the tag is `v<version>`); HEAD is on the base branch
+   (`[project] base_branch`, else the repository's default branch), the working tree is
+   clean, and HEAD is `origin/<base>` after a fetch; `.github/release.yml` is in HEAD; the
+   tag does not exist here or on origin on another commit; and every GitHub check run on
+   HEAD has passed (one still running is a refusal, not a wait). Then it makes the tag, its
+   message `<repository name> <version>: <lead line>`, pushes it, and publishes the Release.
+   GitHub generates the list of merged PRs since the previous tag, grouped by their release
+   labels through [.github/release.yml](../.github/release.yml); `--notes` puts one lead
+   line above it, saying why the version exists (the first sentence of its changelog section
+   will do). When a step fails (exit 1), run the same command again: a tag already on HEAD
+   is kept, and only the steps still missing run; with the Release already there it prints
+   its URL and exits 0. `--dry-run` runs the checks and prints the commands it would run.
+   By hand, the same three steps are:
 
    ```
    git tag -a v<version> -m "revali <version>: <what it brings>" <merge commit>
    git push origin v<version>
-   ```
-
-   Then the maintainer publishes the GitHub Release for that tag. GitHub generates the list
-   of merged PRs since the previous tag, grouped by their release labels through
-   [.github/release.yml](../.github/release.yml); `--notes` puts one lead line above it,
-   saying why the version exists (the first sentence of its changelog section will do):
-
-   ```
    gh release create v<version> --verify-tag --generate-notes --notes "<lead line>"
    ```
 

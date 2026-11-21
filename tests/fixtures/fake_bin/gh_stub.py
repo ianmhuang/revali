@@ -48,6 +48,14 @@ DEFAULT = {
     "issue_list_exit": 0,
     "issue_list_raw": None,
     "issue_comment_exit": 0,
+    # `api repos/{owner}/{repo}/commits/<sha>/check-runs`: the runs ({"name", "status",
+    # "conclusion"}) reported for any commit
+    "commit_checks": [],
+    "commit_checks_exit": 0,
+    # `release view <tag>`: tag -> URL of the Releases that exist; any other tag is not found
+    "releases": {},
+    "release_view_exit": 0,  # a failure other than not found
+    "release_create_exit": 0,
 }
 
 
@@ -95,6 +103,28 @@ def main(argv):
             print("gh: Not Found (HTTP 404)", file=sys.stderr)
             return 1
         print(json.dumps({"name": name}))
+        return 0
+    if argv[:1] == ["api"] and len(argv) > 1 and "/check-runs" in argv[1]:
+        if int(sc["commit_checks_exit"]):
+            print("gh_stub: check-runs failed (HTTP 502)", file=sys.stderr)
+            return int(sc["commit_checks_exit"])
+        runs = sc["commit_checks"]
+        print(json.dumps({"total_count": len(runs), "check_runs": runs}))
+        return 0
+    if argv[:2] == ["release", "view"]:
+        if int(sc["release_view_exit"]):
+            print("gh_stub: release view failed (HTTP 502)", file=sys.stderr)
+            return int(sc["release_view_exit"])
+        if argv[2] not in sc["releases"]:
+            print("release not found", file=sys.stderr)
+            return 1
+        print(sc["releases"][argv[2]])
+        return 0
+    if argv[:2] == ["release", "create"]:
+        if int(sc["release_create_exit"]):
+            print("gh_stub: release create failed (HTTP 502)", file=sys.stderr)
+            return int(sc["release_create_exit"])
+        print("%s/releases/tag/%s" % (sc["url"], argv[2]))
         return 0
     if argv[:2] == ["repo", "view"]:
         print(
