@@ -21,7 +21,8 @@ Developer); the engine seam is where a second vendor would plug in
 (only `claude` exists today). Fresh context removes the author's bias toward
 its own change; it does not remove blind spots the models share, which is
 why `revali stats` tracks the first-try pass rate (branches that reached
-`ready_to_merge` with no fix cycle).
+`ready_to_merge` with no fix cycle). A branch counts once per PR, by its last recorded
+stop: `ready_to_merge` or `merged`.
 
 ## Workflow
 

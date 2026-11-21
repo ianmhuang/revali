@@ -111,7 +111,7 @@ everything between them is automatic. Exit codes: `0` done / ready to merge,
 `1` pipeline error (not a verdict), `2` the Developer must act (fix, rebase,
 answer a question), `3` a human must decide, `4` (`wait` only) still running.
 
-Status: package version 0.4.0; [CHANGELOG.md](CHANGELOG.md) lists what each release
+Status: package version 0.5.0; [CHANGELOG.md](CHANGELOG.md) lists what each release
 contains. Verified end to end on a private GitHub repository with real Reviewer sessions
 and real WSL and ssh sandboxes ([docs/sandbox.md](docs/sandbox.md) has the record);
 revali reviews its own changes on this public one.
@@ -133,7 +133,7 @@ revali reviews its own changes on this public one.
 ## Usage
 
 ```
-python <revali dir>/revali.py init                     # once per project: write revali.toml, CONVENTIONS.md, CLAUDE.md, .github/release.yml that are missing
+python <revali dir>/revali.py init                     # once per project: write the missing revali.toml, CONVENTIONS.md, .github/release.yml, add the CLAUDE.md block, ignore the state directory in .gitignore
 python <revali dir>/revali.py preflight [--base <b>]   # checks only (no lint, no baseline); fetches the base, commits and pushes nothing
 python <revali dir>/revali.py run [--base <b>] [--reviewer-model <m>]   # detached (<m>: this run's reviewer); then:
 python <revali dir>/revali.py wait --timeout 9m        # repeat until it returns other than 4; --branch <b> for another branch's run

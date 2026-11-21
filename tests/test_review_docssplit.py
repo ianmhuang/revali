@@ -306,19 +306,19 @@ class VersionIs020(unittest.TestCase):
     """AC-5"""
 
     def test_constant(self):
-        self.assertEqual(VERSION, "0.4.0")
+        self.assertEqual(VERSION, "0.5.0")
 
     def test_version_command(self):
         code, out = run_cli(["version"])
         self.assertEqual(code, EXIT_OK)
-        self.assertEqual(out.strip(), "revali 0.4.0")
+        self.assertEqual(out.strip(), "revali 0.5.0")
 
     def test_status_line_names_the_new_version_only(self):
         text = read("README.md")
         status = [line for line in text.splitlines() if line.startswith("Status:")]
         self.assertEqual(len(status), 1, status)
         para = unwrap(text[text.index(status[0]) :].split("\n\n", 1)[0])
-        self.assertIn("0.4.0", para)
+        self.assertIn("0.5.0", para)
         self.assertNotIn("0.1.0", text)
 
 
