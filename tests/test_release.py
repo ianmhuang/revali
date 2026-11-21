@@ -74,20 +74,17 @@ class Releases(Case):
         message = git(["tag", "-l", "--format=%(contents)", "v7.8.9"], self.repo).strip()
         self.assertEqual(message, "sample 7.8.9: init and config file fixes")
         self.assertEqual(self.origin_tag(), head)
+        # M3.38: the notes are built by revali and passed as a file; the fake gh records
+        # their text (tests/test_release_notes.py has the body itself)
+        creates = [c for c in self.fake_calls("gh") if c["argv"][:2] == ["release", "create"]]
+        self.assertEqual(len(creates), 1, creates)
+        argv = creates[0]["argv"]
         self.assertEqual(
-            self.gh_release_calls("create"),
-            [
-                [
-                    "release",
-                    "create",
-                    "v7.8.9",
-                    "--verify-tag",
-                    "--generate-notes",
-                    "--notes",
-                    "init and config file fixes",
-                ]
-            ],
+            argv[:6], ["release", "create", "v7.8.9", "--verify-tag", "--title", "v7.8.9"]
         )
+        self.assertEqual(argv[6], "--notes-file")
+        self.assertEqual(len(argv), 8, argv)  # the file is the last argument, nothing after it
+        self.assertTrue(creates[0]["body"].startswith("init and config file fixes\n\n"))
         url = "https://github.example/me/sample/releases/tag/v7.8.9"
         self.assertIn("RELEASED: v7.8.9 on %s: %s" % (head[:12], url), out.splitlines())
 
@@ -97,10 +94,13 @@ class Releases(Case):
         self.assertEqual(self.tag_commit(), self.head())
         message = git(["tag", "-l", "--format=%(contents)", "v7.8.9"], self.repo).strip()
         self.assertEqual(message, "sample 7.8.9")
+        creates = [c for c in self.fake_calls("gh") if c["argv"][:2] == ["release", "create"]]
         self.assertEqual(
-            self.gh_release_calls("create"),
-            [["release", "create", "v7.8.9", "--verify-tag", "--generate-notes"]],
+            creates[0]["argv"][:7],
+            ["release", "create", "v7.8.9", "--verify-tag", "--title", "v7.8.9", "--notes-file"],
         )
+        # no lead line (M3.38): the body is the generated notes alone
+        self.assertTrue(creates[0]["body"].startswith("## What's Changed"), creates[0])
 
     def test_a_commit_with_no_check_runs_is_released(self):
         self.scenario({"commit_checks": []})
@@ -408,11 +408,14 @@ class DryRun(Case):
             lines,
         )
         self.assertIn("dry run: would run git push origin refs/tags/v7.8.9", lines)
+        # M3.38: the notes come from a file, printed after the commands
         self.assertIn(
-            "dry run: would run gh release create v7.8.9 --verify-tag --generate-notes"
-            ' --notes "two words"',
+            "dry run: would run gh release create v7.8.9 --verify-tag --title v7.8.9"
+            ' --notes-file "<the notes below>"',
             lines,
         )
+        self.assertIn("dry run: the release notes:", lines)
+        self.assertEqual(lines[lines.index("dry run: the release notes:") + 1], "two words")
         self.assertEqual(self.local_tag(), "")
         self.assertEqual(self.origin_tag(), "")
         self.assertEqual(self.gh_release_calls("create"), [])

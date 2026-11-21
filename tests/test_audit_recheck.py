@@ -148,10 +148,13 @@ class Releasing(unittest.TestCase):
     def test_dry_run_exit(self):
         self.assertIn("or a `--dry-run` that wrote its prompts", flat("docs", "releasing.md"))
 
-    def test_five_default_labels(self):
+    def test_the_default_labels(self):
+        # M3.38 added `internal` to the default list
         text = flat("docs", "releasing.md")
-        self.assertIn("(`major`, `minor`, `patch`, `docs` or `skip-changelog` by default)", text)
-        self.assertIn("`major` and `skip-changelog` come from `release:` only", text)
+        self.assertIn(
+            "(`major`, `minor`, `patch`, `docs`, `internal` or `skip-changelog` by default)", text
+        )
+        self.assertIn("`major`, `internal` and `skip-changelog` come from `release:` only", text)
 
 
 class Files(unittest.TestCase):

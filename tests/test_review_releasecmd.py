@@ -91,6 +91,14 @@ class ReleaseCase(RepoCase):
     def creates(self):
         return [c["argv"] for c in self.fake_calls("gh") if c["argv"][:2] == ["release", "create"]]
 
+    def create_bodies(self):
+        # M3.38: the notes go in a file (`--notes-file`); the fake gh records its text
+        return [
+            c.get("body", "")
+            for c in self.fake_calls("gh")
+            if c["argv"][:2] == ["release", "create"]
+        ]
+
     def tag_by_hand(self, commit="HEAD", push=False, keep_local=True):
         git(["tag", "-a", TAG, "-m", "made by hand", commit], self.repo)
         if push:
@@ -135,15 +143,15 @@ class TagsPushesAndPublishes(ReleaseCase):
         refs = self.origin_tags()
         self.assertEqual(refs.get(REF), self.local_tag_object())
         self.assertEqual(refs.get(REF + "^{}"), head)
-        # one `gh release create v1.2.3 --verify-tag --generate-notes --notes <text>`
+        # one `gh release create v1.2.3 --verify-tag ... --notes-file <file>` (M3.38: the
+        # notes are GitHub's generated ones, built by revali, with the text as lead line)
         creates = self.creates()
         self.assertEqual(len(creates), 1, creates)
         argv = creates[0]
         self.assertEqual(argv[:3], ["release", "create", TAG])
         self.assertIn("--verify-tag", argv)
-        self.assertIn("--generate-notes", argv)
-        self.assertIn("--notes", argv)
-        self.assertEqual(argv[argv.index("--notes") + 1], "faster cold start")
+        self.assertIn("--notes-file", argv)
+        self.assertTrue(self.create_bodies()[0].startswith("faster cold start\n\n"))
         # the tagged commit and the Release URL are printed
         self.assertIn(head[:7], out)
         self.assertIn(URL, out)
@@ -158,8 +166,10 @@ class TagsPushesAndPublishes(ReleaseCase):
         self.assertEqual(len(creates), 1, creates)
         self.assertEqual(creates[0][:3], ["release", "create", TAG])
         self.assertIn("--verify-tag", creates[0])
-        self.assertIn("--generate-notes", creates[0])
+        self.assertIn("--notes-file", creates[0])  # M3.38
         self.assertNotIn("--notes", creates[0])
+        # no lead line: the body is the generated notes alone
+        self.assertFalse(self.create_bodies()[0].startswith("\n"))
         self.assertIn(URL, out)
 
     def test_the_configured_base_branch_wins_over_the_default_branch(self):
@@ -330,7 +340,7 @@ class FinishesAHalfDoneRelease(ReleaseCase):
         creates = self.creates()
         self.assertEqual(len(creates), 1, creates)
         self.assertEqual(creates[0][:3], ["release", "create", TAG])
-        self.assertEqual(creates[0][creates[0].index("--notes") + 1], "second try")
+        self.assertTrue(self.create_bodies()[0].startswith("second try\n\n"))  # M3.38
         self.assertIn(URL, out)
 
     def test_with_the_release_there_too_it_prints_the_url_and_exits_0(self):
@@ -485,7 +495,7 @@ class DryRun(ReleaseCase):
         self.assertIn("gh release create", out)
         self.assertIn(TAG, out)
         self.assertIn("--verify-tag", out)
-        self.assertIn("--generate-notes", out)
+        self.assertIn("--notes-file", out)  # M3.38: and the notes it would publish
         self.assertIn("faster cold start", out)
         self.assert_nothing_made()
 

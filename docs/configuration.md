@@ -246,7 +246,7 @@ did the work, recorded as `model_actual` and checked for a fallback, is
 picked among the other rows.
 
 Release labels: `[pr] release_labels`, by default
-`["major", "minor", "patch", "docs", "skip-changelog"]`, are the PR labels
+`["major", "minor", "patch", "docs", "internal", "skip-changelog"]`, are the PR labels
 revali keeps in step, and `[pr] kind_labels`, by default
 `{ feature = "minor", fix = "patch", docs = "docs" }`, maps a change.md
 kind (`feature`, `fix`, `docs`) to one of them. A PR carries the label
@@ -268,7 +268,12 @@ ends with `; label <name>`. If change.md is edited after the run to such a
 value, `revali merge` warns and leaves the PR's labels as they are.
 `release_labels = []` turns it off: no label is
 added or removed, and `kind_labels` is not checked. [templates/release.yml](../templates/release.yml) groups the release
-notes GitHub generates by these labels ([docs/releasing.md](releasing.md)). With the
+notes GitHub generates by these labels ([docs/releasing.md](releasing.md)), and `[pr]
+collapse_headings`, by default `["Internal Changes"]`, names the sections of those notes
+that `revali release` publishes folded into a `<details>` block, closed until a reader
+opens it (`[]` folds none). A heading is the exact title of a release.yml category,
+case included, written without its `###` and without surrounding spaces; anything else is
+a configuration error, and a title that is not in the notes folds nothing. With the
 defaults:
 
 | change.md says | The PR's label | Its heading in the release notes |
@@ -277,6 +282,7 @@ defaults:
 | `kind: fix` | `patch` | Patch Changes |
 | `kind: docs` | `docs` | Docs |
 | `release: major` (any kind) | `major` | Major Changes |
+| `release: internal` | `internal` | Internal Changes, after Other Changes; collapsed by `revali release` |
 | `release: skip-changelog` | `skip-changelog` | left out of the notes |
 | (a PR revali did not open) | none of these | Other Changes |
 

@@ -20,3 +20,7 @@ confidential material as item 3 describes, in which case they are `security`.
    Neither the description nor any documentation in the diff (README, docs,
    comments) claims behaviour the diff does not implement or work that was
    not verified.
+9. The PR's release label (change.md's `release:`, else the label its kind
+   maps to) fits the diff: `internal` or `skip-changelog` on a change a user
+   of the project can notice (a behaviour, an interface, a document a user
+   reads) is a finding.
