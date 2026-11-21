@@ -409,10 +409,16 @@ def _pr_problems(pr: PrCfg) -> List[str]:
         else:
             seen.add(name.lower())
     for heading in pr.collapse_headings:
-        if not isinstance(heading, str) or not heading.strip() or "\n" in heading:
+        if (
+            not isinstance(heading, str)
+            or not heading.strip()
+            or "\n" in heading
+            or heading != heading.strip()
+            or heading.startswith("#")
+        ):
             problems.append(
-                "pr.collapse_headings must list section headings, each one non-empty line "
-                "(got %r)" % (heading,)
+                "pr.collapse_headings must list category titles of release.yml, each one "
+                "non-empty line without a leading '#' or surrounding spaces (got %r)" % (heading,)
             )
     if not pr.release_labels:
         return problems

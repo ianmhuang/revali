@@ -10,6 +10,7 @@ The notes are GitHub's generated notes (`releases/generate-notes`, grouped by
 `[pr] collapse_headings` folded into a `<details>` block.
 """
 
+import html
 import json
 import os
 import re
@@ -229,7 +230,10 @@ def collapse_sections(body: str, headings: List[str]) -> str:
                 j += 1
             entries = lines[i + 1 : j]
             if entries:
-                summary = "<details><summary>%s (%d)</summary>" % (title, len(entries))
+                summary = "<details><summary>%s (%d)</summary>" % (
+                    html.escape(title, quote=False),
+                    len(entries),
+                )
                 out += ["", summary, ""] + entries + ["", "</details>", ""]
                 i = j
                 continue
@@ -327,36 +331,62 @@ def _step(what: str, call):
     return res
 
 
-def execute(plan: Plan, root: str, report) -> str:
-    """Make, push and publish what the plan lacks; returns the Release URL."""
-    if plan.make_tag:
-        _step(
-            "git tag %s" % plan.tag,
-            lambda: _git(["tag", "-a", plan.tag, "-m", plan.tag_message(), plan.head], root),
-        )
-        report("tagged %s on %s" % (plan.tag, plan.head[:12]))
-    if plan.push_tag:
-        _step(
-            "git push origin %s" % plan.tag,
-            lambda: run_retry(
-                resolve("git") + ["push", "origin", "refs/tags/%s" % plan.tag],
-                cwd=root,
-                timeout=300,
-            ),
-        )
-        report("pushed %s to origin" % plan.tag)
-    if plan.release_url:
-        return plan.release_url
-    fd, notes_file = tempfile.mkstemp(prefix="revali-release-", suffix=".md")
+def _write_notes(body: str) -> str:
+    """The Release body in a new temporary file (LF); an OSError is a `Failed`."""
+    path = ""
     try:
+        fd, path = tempfile.mkstemp(prefix="revali-release-", suffix=".md")
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(plan.body)
+            fh.write(body)
+    except OSError as exc:
+        if path:
+            _remove_notes(path, lambda _line: None)
+        raise Failed(
+            "could not write the release notes to a temporary file: %s; %s"
+            % (one_line(str(exc)), RERUN)
+        ) from exc
+    return path
+
+
+def _remove_notes(path: str, report) -> None:
+    """Remove the temporary notes file; a failure is reported, not raised, since what
+    the file was for is done (or has its own error)."""
+    try:
+        os.remove(path)
+    except OSError as exc:
+        report("warning: could not remove %s: %s" % (path, one_line(str(exc))))
+
+
+def execute(plan: Plan, root: str, report) -> str:
+    """Make, push and publish what the plan lacks; returns the Release URL. The notes
+    file is written first, so a failure to write it leaves nothing made."""
+    notes_file = "" if plan.release_url else _write_notes(plan.body)
+    try:
+        if plan.make_tag:
+            _step(
+                "git tag %s" % plan.tag,
+                lambda: _git(["tag", "-a", plan.tag, "-m", plan.tag_message(), plan.head], root),
+            )
+            report("tagged %s on %s" % (plan.tag, plan.head[:12]))
+        if plan.push_tag:
+            _step(
+                "git push origin %s" % plan.tag,
+                lambda: run_retry(
+                    resolve("git") + ["push", "origin", "refs/tags/%s" % plan.tag],
+                    cwd=root,
+                    timeout=300,
+                ),
+            )
+            report("pushed %s to origin" % plan.tag)
+        if plan.release_url:
+            return plan.release_url
         res = _step(
             "gh release create %s" % plan.tag,
             lambda: _gh(plan.release_create_args(notes_file)[1:], root),
         )
     finally:
-        os.remove(notes_file)
+        if notes_file:
+            _remove_notes(notes_file, report)
     report("published the GitHub Release %s" % plan.tag)
     return gitops.first_line(res.stdout)
 

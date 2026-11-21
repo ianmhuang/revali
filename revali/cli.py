@@ -126,7 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--notes", default="", help="a lead line above the generated notes, also in the tag"
     )
     p_release.add_argument(
-        "--dry-run", action="store_true", help="run the checks, print the commands, change nothing"
+        "--dry-run",
+        action="store_true",
+        help="run the checks, print the commands and the release notes, change nothing",
     )
     _command(sub, "stats", "summarise the run history", _cmd_stats)
     _command(sub, "version", "print the version", pipeline.cmd_version)

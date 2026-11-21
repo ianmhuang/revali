@@ -271,7 +271,9 @@ added or removed, and `kind_labels` is not checked. [templates/release.yml](../t
 notes GitHub generates by these labels ([docs/releasing.md](releasing.md)), and `[pr]
 collapse_headings`, by default `["Internal Changes"]`, names the sections of those notes
 that `revali release` publishes folded into a `<details>` block, closed until a reader
-opens it (`[]` folds none; a heading must be one non-empty line). With the
+opens it (`[]` folds none). A heading is the exact title of a release.yml category,
+case included, written without its `###` and without surrounding spaces; anything else is
+a configuration error, and a title that is not in the notes folds nothing. With the
 defaults:
 
 | change.md says | The PR's label | Its heading in the release notes |

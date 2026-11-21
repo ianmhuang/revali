@@ -83,6 +83,7 @@ class Releases(Case):
             argv[:6], ["release", "create", "v7.8.9", "--verify-tag", "--title", "v7.8.9"]
         )
         self.assertEqual(argv[6], "--notes-file")
+        self.assertEqual(len(argv), 8, argv)  # the file is the last argument, nothing after it
         self.assertTrue(creates[0]["body"].startswith("init and config file fixes\n\n"))
         url = "https://github.example/me/sample/releases/tag/v7.8.9"
         self.assertIn("RELEASED: v7.8.9 on %s: %s" % (head[:12], url), out.splitlines())

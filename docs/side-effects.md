@@ -245,8 +245,9 @@ stated.
   POST repos/{owner}/{repo}/releases/generate-notes` for the notes (GitHub stores nothing
   for it); when every check passes, an annotated tag `v<version>` on HEAD (`git tag -a`),
   `git push origin refs/tags/v<version>`, and a GitHub Release for it (`gh release create
-  --verify-tag --title <title> --notes-file <file>`, the file a temporary one removed
-  afterwards). A tag
+  --verify-tag --title <title> --notes-file <file>`, the file a temporary one written
+  before the tag is made and removed afterwards; a file that cannot be removed is named
+  in a warning). A tag
   already on HEAD, here or on origin, is neither made nor pushed again, and an existing
   Release is left alone. A failed check, or `--dry-run`, creates and pushes nothing; no
   branch, commit or file is touched ([releasing.md](releasing.md))

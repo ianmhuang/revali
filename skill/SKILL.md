@@ -29,7 +29,10 @@ project's CLAUDE.md says so; see `templates/CLAUDE-snippet.md`).
    - `release` (optional): the PR's release label when the kind's label
      (`[pr] kind_labels`: feature minor, fix patch, docs docs) is wrong for
      it, e.g. `release: minor` for a fix that adds a flag, `release: major`
-     for a change users must prepare for.
+     for a change users must prepare for, `release: internal` for one no
+     user of the project can notice (tests, CI, internal tooling; listed
+     collapsed), `release: skip-changelog` only for what needs no line at
+     all, such as a release's own version bump. The Reviewer checks it.
    - `Request`: the user's instruction to you, verbatim, original language.
    - `Goal`: what must be true when this is merged.
    - `Acceptance criteria` as `- AC-n: ...`, each an observable behaviour

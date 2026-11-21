@@ -8,6 +8,7 @@ Real git with a bare `origin`; the fake gh answers `repo view`, the check runs,
 
 import os
 import unittest
+from unittest import mock
 
 from revali import EXIT_ERROR, EXIT_OK
 from revali.config import parse_project_config, release_label
@@ -117,7 +118,8 @@ class InternalLabel(RepoCase):
         self.assertEqual(release_label(cfg, Doc()), "internal")
 
     def test_collapse_headings_must_be_names(self):
-        for value in ('[""]', '["a\\nb"]', "[1]"):
+        # round 1 F3: a heading with surrounding spaces or written with its `#` never matches
+        for value in ('[""]', '["a\\nb"]', "[1]", '[" Internal Changes"]', '["### Internal"]'):
             with self.subTest(value=value):
                 with self.assertRaises(Exception) as ctx:
                     parse_project_config(
@@ -154,6 +156,12 @@ class Collapse(unittest.TestCase):
     def test_a_heading_with_no_entries_is_left_alone(self):
         body = "## What's Changed\n### Internal Changes\n\n**Full Changelog**: x"
         self.assertEqual(collapse_sections(body, ["Internal Changes"]), body)
+
+    def test_the_summary_escapes_the_title(self):
+        # round 1 F3: a category title is HTML inside <summary>
+        body = GENERATED.replace("### Internal Changes", "### CI & <tests>")
+        out = collapse_sections(body, ["CI & <tests>"])
+        self.assertIn("<details><summary>CI &amp; &lt;tests&gt; (2)</summary>\n", out)
 
 
 class Publishes(Case):
@@ -253,6 +261,52 @@ class DryRunAndFailures(Case):
         self.assertEqual(len([ln for ln in out.splitlines() if ln.startswith("ERROR")]), 1, out)
         self.assertEqual(self.creates(), [])
 
+    def test_the_dry_run_help_names_the_notes(self):
+        # round 1 F2
+        code, out = run_cli(["release", "-h"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("print the commands and the release notes", " ".join(out.split()))
+
+
+class NotesFile(Case):
+    """Round 1 F1: the temporary notes file is written before the tag is made, and a
+    failure around it ends in one ERROR line, not a traceback."""
+
+    def test_a_notes_file_that_cannot_be_written(self):
+        with mock.patch("revali.release.tempfile.mkstemp", side_effect=OSError("disk full")):
+            code, out = run_cli(["release", "7.8.9"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        errors = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
+        self.assertEqual(len(errors), 1, out)
+        self.assertIn("temporary file", errors[0])
+        self.assertIn("disk full", errors[0])
+        self.assertIn("run the same command again to finish", errors[0])
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(git(["tag", "-l", "v7.8.9"], self.repo).strip(), "")
+        self.assertEqual(self.creates(), [])
+
+    def test_a_notes_file_that_cannot_be_removed(self):
+        real_remove = os.remove
+        kept = []
+
+        def remove(path):
+            if os.path.basename(path).startswith("revali-release-"):
+                kept.append(path)
+                raise OSError("held open")
+            real_remove(path)
+
+        with mock.patch("revali.release.os.remove", side_effect=remove):
+            code, out = run_cli(["release", "7.8.9"])
+        for path in kept:
+            real_remove(path)
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(len(self.creates()), 1)
+        self.assertIn("published the GitHub Release v7.8.9", out)
+        warnings = [ln for ln in out.splitlines() if "could not remove" in ln]
+        self.assertEqual(len(warnings), 1, out)
+        self.assertIn(kept[0], warnings[0])
+        self.assertNotIn("ERROR", out)
+
 
 class Files(unittest.TestCase):
     """AC-2, AC-5 to AC-7"""
@@ -294,6 +348,7 @@ class Files(unittest.TestCase):
         config = flat("docs", "configuration.md")
         self.assertIn("| `release: internal` | `internal` |", config)
         self.assertIn("collapse_headings", config)
+        self.assertIn("the exact title of a release.yml category", config)  # round 1 F3
         self.assertIn("releases/generate-notes", flat("docs", "side-effects.md"))
         self.assertIn("collapse_headings", read("defaults.toml"))
         self.assertIn("collapse_headings", read("templates", "revali.toml"))
