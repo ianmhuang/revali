@@ -7,10 +7,12 @@ Real git with a bare `origin`; the fake gh answers `repo view`, the commit's che
 
 import os
 import unittest
+from unittest import mock
 
-from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK
+from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, release
+from revali.procs import ProcTimeout
 from tests.helpers import RepoCase, git
-from tests.test_config_not_utf8 import run
+from tests.helpers import run_cli as run  # review round 1 follow-up 1
 
 GREEN = [{"name": "test", "status": "completed", "conclusion": "success"}]
 RELEASE_YML = "changelog:\n  categories:\n    - title: Fixes\n      labels: [patch]\n"
@@ -104,7 +106,7 @@ class Releases(Case):
         self.scenario({"commit_checks": []})
         code, out = run(["release", "0.5.0"])
         self.assertEqual(code, EXIT_OK, out)
-        self.assertIn("no CI checks on HEAD", out)
+        self.assertIn("no CI check runs on HEAD", out)
 
     def test_skipped_and_neutral_runs_count_as_passed(self):
         self.scenario(
@@ -124,9 +126,45 @@ class Refuses(Case):
     """AC-2: exit 2, one ERROR line, no tag here or on origin, no Release."""
 
     def test_a_version_that_is_not_x_y_z(self):
-        for version in ("0.5", "1.2.3-rc1", "va.b.c", "0.5.0.1"):
-            with self.subTest(version=version):
+        # review round 1 F4: ASCII digits only, and no leading zeros
+        full_width = ".".join(chr(0xFF10 + d) for d in (0, 5, 0))
+        arabic_indic = ".".join(chr(0x0660 + d) for d in (0, 5, 0))
+        for version in (
+            "0.5",
+            "1.2.3-rc1",
+            "va.b.c",
+            "0.5.0.1",
+            "01.2.3",
+            "1.02.3",
+            full_width,
+            arabic_indic,
+        ):
+            with self.subTest(version=ascii(version)):
                 self.assert_refused(["release", version], "X.Y.Z")
+
+    def test_zero_parts_are_plain_numbers(self):
+        code, out = run(["release", "0.0.0", "--dry-run"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn("refs/tags/v0.0.0", out)
+
+    def test_the_state_directory_does_not_count_as_dirty(self):
+        # review round 1 F3: revali's own records, even where git does not ignore them
+        kept = [ln for ln in self.read(".gitignore").splitlines() if ln.strip(" /") != ".revali"]
+        self.write(".gitignore", "".join(ln + "\n" for ln in kept))
+        self.commit_all("stop ignoring the state directory")
+        git(["push", "-q", "origin", "main"], self.repo)
+        self.write(".revali/main/state.json", "{}\n")
+        code, out = run(["release", "0.5.0"])
+        self.assertEqual(code, EXIT_OK, out)
+
+    def test_a_tag_that_is_not_a_commit(self):
+        # review round 1 follow-up 2: a refusal, not a failed `git tag`
+        tree = git(["rev-parse", "HEAD^{tree}"], self.repo).strip()
+        git(["tag", "v0.5.0", tree], self.repo)
+        code, out = run(["release", "0.5.0"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assertIn("does not point at a commit", self.error_lines(out)[0])
+        self.assertEqual(self.gh_release_calls("create"), [])
 
     def test_not_on_the_base_branch(self):
         git(["checkout", "-q", "-b", "topic"], self.repo)
@@ -265,6 +303,79 @@ class Resumes(Case):
         self.assertEqual(code, EXIT_OK, out)
         self.assertEqual(self.origin_tag(), self.head())
         self.assertEqual(len(self.gh_release_calls("create")), 1)
+
+    def test_ci_started_by_the_tag_push_does_not_block_the_rerun(self):
+        # review round 1 F1: a workflow `on: push` also runs for the pushed tag, on the same
+        # commit; the rerun after a failed `release create` must not wait for it
+        self.scenario({"release_create_exit": 1})
+        code, out = run(["release", "0.5.0"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        for state, conclusion in (("in_progress", None), ("completed", "failure")):
+            with self.subTest(state=state):
+                self.scenario(
+                    {
+                        "release_create_exit": 0,
+                        "commit_checks": GREEN
+                        + [{"name": "tag push", "status": state, "conclusion": conclusion}],
+                        "releases": {},
+                    }
+                )
+                code, out = run(["release", "0.5.0"])
+                self.assertEqual(code, EXIT_OK, out)
+                self.assertIn("CI is not checked again", out)
+
+    def test_a_finished_release_with_ci_running_on_the_tag(self):
+        url = "https://github.example/me/sample/releases/tag/v0.5.0"
+        git(["tag", "-a", "v0.5.0", "-m", "made by hand", "HEAD"], self.repo)
+        git(["push", "-q", "origin", "v0.5.0"], self.repo)
+        self.scenario(
+            {
+                "releases": {"v0.5.0": url},
+                "commit_checks": [{"name": "t", "status": "queued", "conclusion": None}],
+            }
+        )
+        code, out = run(["release", "0.5.0"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertIn(url, out)
+
+    def test_a_local_tag_only_still_checks_ci(self):
+        # the tag never reached origin, so no push started anything: CI is checked as before
+        git(["tag", "-a", "v0.5.0", "-m", "made by hand", "HEAD"], self.repo)
+        self.scenario({"commit_checks": [{"name": "t", "status": "queued", "conclusion": None}]})
+        code, out = run(["release", "0.5.0"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assertIn("still running", out)
+        self.assertEqual(self.origin_tag(), "")
+
+
+class Failures(Case):
+    """Review round 1 F2: a git or gh call that cannot run or times out is one ERROR line."""
+
+    def test_a_gh_that_cannot_be_started(self):
+        os.environ["REVALI_GH_CMD"] = os.path.join(self.tmp, "no-such-gh")
+        code, out = run(["release", "0.5.0"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        self.assertEqual(len(self.error_lines(out)), 1, out)
+        self.assertEqual(self.local_tag(), "")
+
+    def test_a_release_create_that_times_out_after_the_push(self):
+        real = release._gh
+
+        def gh(args, root, retries=0):
+            if args[:2] == ["release", "create"]:
+                raise ProcTimeout("gh release create: timed out after 120 s")
+            return real(args, root, retries)
+
+        with mock.patch.object(release, "_gh", gh):
+            code, out = run(["release", "0.5.0"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        errors = self.error_lines(out)
+        self.assertEqual(len(errors), 1, out)
+        self.assertIn("timed out", errors[0])
+        self.assertIn("run the same command again to finish", errors[0])
+        self.assertEqual(self.origin_tag(), self.head())
+        code, out = run(["release", "0.5.0"])  # and the rerun finishes it
+        self.assertEqual(code, EXIT_OK, out)
 
 
 class DryRun(Case):

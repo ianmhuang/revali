@@ -104,12 +104,16 @@ def main(argv):
             return 1
         print(json.dumps({"name": name}))
         return 0
-    if argv[:1] == ["api"] and len(argv) > 1 and "/check-runs" in argv[1]:
+    if argv[:1] == ["api"] and any("/check-runs" in a for a in argv):
         if int(sc["commit_checks_exit"]):
             print("gh_stub: check-runs failed (HTTP 502)", file=sys.stderr)
             return int(sc["commit_checks_exit"])
         runs = sc["commit_checks"]
-        print(json.dumps({"total_count": len(runs), "check_runs": runs}))
+        if "--jq" in argv:  # `.check_runs[] | {...}`: one compact object per line, every page
+            for item in runs:
+                print(json.dumps({k: item.get(k) for k in ("name", "status", "conclusion")}))
+        else:
+            print(json.dumps({"total_count": len(runs), "check_runs": runs}))
         return 0
     if argv[:2] == ["release", "view"]:
         if int(sc["release_view_exit"]):

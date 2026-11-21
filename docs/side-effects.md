@@ -240,13 +240,13 @@ stated.
   existing file is overwritten, nothing is committed or pushed, and gh is not called;
   the only git calls find the repository root and ask `git check-ignore`
 - on `revali release <version>` (human-started, on the base branch): `git fetch origin
-  <base>`, `git ls-remote origin` for the tag, and the `gh api` read of HEAD's check runs
-  and `gh release view`; when every check passes, an annotated tag `v<version>` on HEAD
-  (`git tag -a`), `git push origin refs/tags/v<version>`, and a GitHub Release for it
-  (`gh release create --verify-tag --generate-notes`). A tag already on HEAD, here or on
-  origin, is neither made nor pushed again, and an existing Release is left alone. A
-  failed check, or `--dry-run`, creates and pushes nothing; no branch, commit or file is
-  touched ([releasing.md](releasing.md))
+  <base>`, `git ls-remote origin` for the tag, and the reads `gh repo view`, `gh api` of
+  HEAD's check runs and `gh release view`; when every check passes, an annotated tag
+  `v<version>` on HEAD (`git tag -a`), `git push origin refs/tags/v<version>`, and a
+  GitHub Release for it (`gh release create --verify-tag --generate-notes`). A tag
+  already on HEAD, here or on origin, is neither made nor pushed again, and an existing
+  Release is left alone. A failed check, or `--dry-run`, creates and pushes nothing; no
+  branch, commit or file is touched ([releasing.md](releasing.md))
 - after a review round that stops before its tests are committed (a failed
   or timed-out Reviewer session, unusable output, a smoke run that fails
   twice), deletes the untracked files matching `test_file_pattern` under

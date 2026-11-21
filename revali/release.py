@@ -14,10 +14,12 @@ from typing import List
 
 from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops
 from revali.config import load_project_config
-from revali.procs import ExeNotFound, one_line, resolve, run, run_retry
+from revali.procs import ExeNotFound, ProcError, one_line, resolve, run, run_retry
 
-VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+# ASCII digits only (`\d` takes any Unicode digit), no leading zeros, as semantic versioning
+VERSION_RE = re.compile(r"^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 RELEASE_YML = ".github/release.yml"
+RERUN = "run the same command again to finish"
 
 
 class Refused(Exception):
@@ -33,7 +35,6 @@ class Plan:
     tag: str
     version: str
     head: str
-    base: str
     repo_name: str
     make_tag: bool
     push_tag: bool
@@ -66,7 +67,10 @@ def tag_name(version: str) -> str:
     """`v<X.Y.Z>` for `X.Y.Z` or `vX.Y.Z`; Refused for anything else."""
     m = VERSION_RE.match(version.strip())
     if not m:
-        raise Refused("the version must be X.Y.Z or vX.Y.Z (got %r)" % version)
+        raise Refused(
+            "the version must be X.Y.Z or vX.Y.Z, plain numbers without leading zeros (got %r)"
+            % version
+        )
     return "v%s.%s.%s" % m.groups()
 
 
@@ -79,9 +83,15 @@ def _gh(args: List[str], root: str, retries: int = 0):
 
 
 def local_tag_commit(tag: str, root: str) -> str:
-    """The commit the local tag points at, "" when there is no such tag."""
-    res = _git(["rev-parse", "-q", "--verify", "refs/tags/%s^{commit}" % tag], root)
-    return res.stdout.strip() if res.ok else ""
+    """The commit the local tag points at, "" when there is no such tag; Refused for a tag
+    that points at something else (a tree or a blob)."""
+    ref = "refs/tags/%s" % tag
+    if not _git(["rev-parse", "-q", "--verify", ref], root).ok:
+        return ""
+    res = _git(["rev-parse", "-q", "--verify", ref + "^{commit}"], root)
+    if not res.ok:
+        raise Refused("tag %s already exists and does not point at a commit" % tag)
+    return res.stdout.strip()
 
 
 def remote_tag_commit(tag: str, root: str) -> str:
@@ -100,24 +110,39 @@ def remote_tag_commit(tag: str, root: str) -> str:
 
 
 def commit_checks(sha: str, root: str) -> List[dict]:
-    """The check runs GitHub has for the commit (GitHub Actions and other apps; the older
-    commit statuses are not read), up to 100."""
-    res = _gh(["api", "repos/{owner}/{repo}/commits/%s/check-runs?per_page=100" % sha], root, 1)
+    """Every check run GitHub has for the commit (GitHub Actions and other apps; the older
+    commit statuses are not read), one JSON object per line through every page."""
+    res = _gh(
+        [
+            "api",
+            "--paginate",
+            "repos/{owner}/{repo}/commits/%s/check-runs?per_page=100" % sha,
+            "--jq",
+            ".check_runs[] | {name, status, conclusion}",
+        ],
+        root,
+        1,
+    )
     if not res.ok:
         raise Failed("gh api check-runs failed: %s" % one_line(res.text))
-    try:
-        data = json.loads(res.stdout or "{}")
-    except ValueError as exc:
-        raise Failed("gh api check-runs returned invalid JSON: %s" % exc) from exc
-    runs = data.get("check_runs") if isinstance(data, dict) else None
-    return [r for r in runs if isinstance(r, dict)] if isinstance(runs, list) else []
+    runs = []
+    for line in res.stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError as exc:
+            raise Failed("gh api check-runs returned invalid JSON: %s" % exc) from exc
+        if isinstance(item, dict):
+            runs.append(item)
+    return runs
 
 
 def check_ci(sha: str, root: str) -> str:
     """Refused unless every check run of the commit passed; returns a note for the output."""
     checks = commit_checks(sha, root)
     if not checks:
-        return "no CI checks on HEAD"
+        return "no CI check runs on HEAD"
     pending = [str(c.get("name", "?")) for c in checks if c.get("status") != "completed"]
     failed = [
         str(c.get("name", "?"))
@@ -163,7 +188,8 @@ def plan_release(root: str, version: str, notes: str, report) -> Plan:
     branch = gitops.current_branch(root)
     if branch != base:
         raise Refused("on %s, not the base branch %s; check out %s first" % (branch, base, base))
-    dirty = gitops.dirty_paths(root, ())
+    # revali's own state directory does not count, as for preflight and merge
+    dirty = gitops.dirty_paths(root, (cfg.paths.state_dir.rstrip("/") + "/",))
     if dirty:
         raise Refused("the working tree is not clean: %s" % ", ".join(dirty[:5]))
     res = gitops.fetch("origin", base, root)
@@ -190,51 +216,62 @@ def plan_release(root: str, version: str, notes: str, report) -> Plan:
             "tag %s already exists on origin on %s, not on HEAD %s"
             % (tag, on_origin[:12], head[:12])
         )
-    report(check_ci(head, root))
-    plan = Plan(
+    if on_origin:
+        # the release passed this check before it pushed the tag, and the push itself may
+        # have started new check runs on HEAD (a workflow `on: push` fires for tags too)
+        report("tag %s already on origin on HEAD; CI is not checked again" % tag)
+    else:
+        report(check_ci(head, root))
+        if local:
+            report("tag %s already on HEAD here, not on origin yet" % tag)
+    return Plan(
         tag=tag,
         version=tag[1:],
         head=head,
-        base=base,
         repo_name=info.name or os.path.basename(root),
         make_tag=not local and not on_origin,
         push_tag=not on_origin,
         release_url=release_url(tag, root),
         notes=notes,
     )
-    if local or on_origin:
-        report("tag %s already on HEAD (%s)" % (tag, "on origin" if on_origin else "local only"))
-    return plan
+
+
+def _step(what: str, call):
+    """Run one step of `execute`; a failure, a timeout included, says how to finish."""
+    try:
+        res = call()
+    except ProcError as exc:
+        raise Failed("%s failed: %s; %s" % (what, one_line(str(exc)), RERUN)) from exc
+    if not res.ok:
+        raise Failed("%s failed: %s; %s" % (what, one_line(res.text), RERUN))
+    return res
 
 
 def execute(plan: Plan, root: str, report) -> str:
     """Make, push and publish what the plan lacks; returns the Release URL."""
     if plan.make_tag:
-        res = _git(["tag", "-a", plan.tag, "-m", plan.tag_message(), plan.head], root)
-        if not res.ok:
-            raise Failed("git tag %s failed: %s" % (plan.tag, one_line(res.text)))
+        _step(
+            "git tag %s" % plan.tag,
+            lambda: _git(["tag", "-a", plan.tag, "-m", plan.tag_message(), plan.head], root),
+        )
         report("tagged %s on %s" % (plan.tag, plan.head[:12]))
     if plan.push_tag:
-        res = run_retry(
-            resolve("git") + ["push", "origin", "refs/tags/%s" % plan.tag], cwd=root, timeout=300
+        _step(
+            "git push origin %s" % plan.tag,
+            lambda: run_retry(
+                resolve("git") + ["push", "origin", "refs/tags/%s" % plan.tag],
+                cwd=root,
+                timeout=300,
+            ),
         )
-        if not res.ok:
-            raise Failed(
-                "git push origin %s failed: %s; run the same command again to finish"
-                % (plan.tag, one_line(res.text))
-            )
         report("pushed %s to origin" % plan.tag)
     if plan.release_url:
         return plan.release_url
-    res = _gh(plan.release_create_args()[1:], root)
-    if not res.ok:
-        raise Failed(
-            "gh release create %s failed: %s; run the same command again to finish"
-            % (plan.tag, one_line(res.text))
-        )
-    url = gitops.first_line(res.stdout)
+    res = _step(
+        "gh release create %s" % plan.tag, lambda: _gh(plan.release_create_args()[1:], root)
+    )
     report("published the GitHub Release %s" % plan.tag)
-    return url
+    return gitops.first_line(res.stdout)
 
 
 def cmd_release(args) -> int:
@@ -262,8 +299,8 @@ def cmd_release(args) -> int:
     except Refused as exc:
         print("ERROR: %s" % exc)
         return EXIT_ACTION
-    except (Failed, gitops.GitError) as exc:
-        print("ERROR: %s" % exc)
+    except (Failed, gitops.GitError, ProcError) as exc:
+        print("ERROR: %s" % one_line(str(exc), 400))
         return EXIT_ERROR
     print("RELEASED: %s on %s: %s" % (plan.tag, plan.head[:12], url))
     return EXIT_OK
