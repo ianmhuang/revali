@@ -17,6 +17,7 @@ from revali.procs import ExeNotFound, ProcCancelled, ProcTimeout, resolve, run
 from revali.state import RunLog, write_text
 
 READ_ONLY_TOOLS = "Read,Grep,Glob"
+EFFORTS = ("low", "medium", "high", "xhigh", "max")  # what `claude --effort` takes
 BUDGET_SUBTYPE = "error_max_budget_usd"
 USAGE_LIMIT = "usage_limit_reached"  # the result's `api_error` when the model's limit is reached
 OVERLOADED_STATUS = "529"  # the API's "overloaded" status in `api_error_status`, number or text

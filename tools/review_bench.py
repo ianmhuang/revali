@@ -12,9 +12,9 @@ are not run, and the clone is removed afterwards; the prompt, the raw answer and
 answer stay under the output directory.
 
     python tools/review_bench.py --budget-usd 15 [--cases DIR ...] [--model M]
-                                 [--session-budget-usd N] [--line-margin N] [--out DIR]
-                                 [case ...]
-    python tools/review_bench.py --dry-run [--cases DIR ...] [case ...]
+                                 [--effort LEVEL] [--session-budget-usd N]
+                                 [--line-margin N] [--out DIR] [case ...]
+    python tools/review_bench.py --dry-run [--cases DIR ...] [--effort LEVEL] [case ...]
     python tools/review_bench.py --resume DIR --budget-usd TOTAL [case ...]
 
 Exit 0 when every case was scored (caught or missed), 1 when a case was malformed, failed,
@@ -42,6 +42,7 @@ sys.path.insert(0, ROOT)
 
 from revali import PROMPT_VERSION, VERSION, gitops  # noqa: E402
 from revali.engines.base import ModelUnavailable, loop_advice, loop_stopped  # noqa: E402
+from revali.engines.claude import EFFORTS  # noqa: E402
 from revali.preflight import Stop, locate, review_left_out  # noqa: E402
 from revali.review import CHANGES_REQUESTED, build_prompt, spawn_reviewer  # noqa: E402
 from revali.state import State, safe_branch, write_json_atomic  # noqa: E402
@@ -91,6 +92,7 @@ class Result:
     severity: str = ""
     verdict: str = ""
     model: str = ""
+    effort: str = ""  # the reviewer effort the session ran at (M4.4.1); "" before its config
     cost: float = 0.0  # what the session reported; 0 when it failed without saying
     charged: float = 0.0  # what counts against --budget-usd: the cap when the cost is unknown
     duration_s: float = 0.0
@@ -299,15 +301,25 @@ def isolate(clone: str, branch: str, base_branch: str, base: str) -> None:
     _git(["reflog", "expire", "--expire=now", "--all"], clone)
 
 
-def run_case(case: Case, args, spent: float, out_dir: str, on_session=None) -> Tuple[Result, str]:
-    """One case and why the cases after it are not run ("" when they are). `on_session(cap)`
-    is called just before the session starts."""
+def run_case(
+    case: Case, args, spent: float, out_dir: str, on_session=None, known=None
+) -> Tuple[Result, str]:
+    """One case and why the cases after it are not run ("" when they are). `on_session(cap,
+    effort)` is called just before the session starts; `known["effort"]` is set once the
+    case's configuration is read, so a caller that is interrupted still has it (PR #115
+    round 2 F5)."""
     started = time.monotonic()
     tmp = tempfile.mkdtemp(prefix="revali bench ")
+    if known is None:
+        known = {}
+    known.setdefault("effort", "")
     try:
-        result, stop_reason = _run_in(case, args, spent, out_dir, tmp, on_session)
+        result, stop_reason = _run_in(case, args, spent, out_dir, tmp, on_session, known)
     finally:
         _rmtree(tmp)
+    # every result after the configuration was read, a failed session's included (PR #115
+    # round 1 F1)
+    result.effort = result.effort or known["effort"]
     result.duration_s = time.monotonic() - started
     if os.path.exists(tmp):
         result.message = "; ".join(m for m in (result.message, "clone left at " + tmp) if m)
@@ -315,8 +327,9 @@ def run_case(case: Case, args, spent: float, out_dir: str, on_session=None) -> T
 
 
 def _run_in(
-    case: Case, args, spent: float, out_dir: str, tmp: str, on_session=None
+    case: Case, args, spent: float, out_dir: str, tmp: str, on_session=None, known=None
 ) -> Tuple[Result, str]:
+    known = {} if known is None else known
     cap = args.session_budget_usd
     if not args.dry_run and cap and spent + cap > args.budget_usd:  # known before the clone
         return _not_run(case, spent, cap, args), ""
@@ -328,6 +341,9 @@ def _run_in(
         ctx = locate_case(case, clone, default)
         if args.model:
             ctx.cfg.review.model = args.model
+        if args.effort:  # replaces the case's own, as --model does
+            ctx.cfg.review.effort = args.effort
+        effort = known["effort"] = ctx.cfg.review.effort
         if cap:
             ctx.cfg.review.budget_usd = cap
         cap = ctx.cfg.review.budget_usd
@@ -336,12 +352,10 @@ def _run_in(
         prompt = build_prompt(ctx, State(), ctx.rdir, 1)
         _write(os.path.join(case_out, "prompt.md"), prompt)
         if args.dry_run:  # everything a session needs is in place; nothing is spent
-            return (
-                Result(case.name, READY, message="prompt.md %d lines" % prompt.count("\n")),
-                "",
-            )
+            ready = Result(case.name, READY, message="prompt.md %d lines" % prompt.count("\n"))
+            return ready, ""
         if on_session:
-            on_session(cap)
+            on_session(cap, effort)
         session = True
         try:
             rr = spawn_reviewer(
@@ -535,6 +549,10 @@ def _prior_results(path: str):
             for c in entries
         )
         and isinstance(prior.get("model") or "", str)
+        # absent before M4.4.1: none given. A case's record only says what its
+        # configuration chose, which revali does not check (PR #115 round 2 F4)
+        and isinstance(prior.get("effort", ""), str)
+        and all(isinstance(c.get("effort", ""), str) for c in entries)
         and isinstance(prior.get("session_budget_usd") or 0.0, (int, float))
         and isinstance(prior.get("line_margin", DEFAULT_MARGIN), int)
         and not any(isinstance(prior.get(k), bool) for k in ("session_budget_usd", "line_margin"))
@@ -543,6 +561,13 @@ def _prior_results(path: str):
         return None, "%s is not a benchmark results.json" % path
     if prior.get("dry_run"):
         return None, "%s is from a dry run; nothing to resume" % path
+    effort = prior.get("effort", "")
+    if effort and effort not in EFFORTS:  # a resume passes it to every session (round 1 F3)
+        return None, "%s records effort %r, which the claude engine does not take (%s)" % (
+            path,
+            effort,
+            ", ".join(EFFORTS),
+        )
     results = {}
     for c in entries:
         results[c["case"]] = Result(**{k: v for k, v in c.items() if k in known})
@@ -567,12 +592,14 @@ def resume_from(args):
         )
     recorded = {
         "model": prior.get("model") or "",
+        "effort": prior.get("effort") or "",
         "session_budget_usd": prior.get("session_budget_usd") or 0.0,
         "line_margin": prior.get("line_margin", DEFAULT_MARGIN),
         "cases_dir": prior["cases_dirs"],
     }
     labels = {
         "model": "model",
+        "effort": "effort",
         "session_budget_usd": "session cap",
         "line_margin": "line margin",
         "cases_dir": "case directories",
@@ -614,6 +641,11 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--model", help="reviewer model (default: the case's config)")
     parser.add_argument(
+        "--effort",
+        choices=EFFORTS,
+        help="reviewer effort for every case (default: the case's config)",
+    )
+    parser.add_argument(
         "--session-budget-usd",
         type=float,
         help="each session's cap (default: the case's [review] budget_usd)",
@@ -649,6 +681,7 @@ def main(argv=None) -> int:
             return 1
     args.cases_dir = args.cases_dir or [CASES_DIR]
     args.model = args.model or ""
+    args.effort = args.effort or ""
     args.session_budget_usd = args.session_budget_usd or 0.0
     args.line_margin = DEFAULT_MARGIN if args.line_margin is None else args.line_margin
     missing = [d for d in args.cases_dir if not os.path.isdir(d)]
@@ -708,12 +741,16 @@ def main(argv=None) -> int:
         carried = earlier.charged if earlier is not None else 0.0  # already in `spent`
         carried_cost = earlier.cost if earlier is not None else 0.0  # what it reported
         stop_reason = ""
-        session = {"cap": 0.0}
+        session = {"cap": 0.0, "effort": ""}
 
-        def on_session(cap, name=name, carried=carried, carried_cost=carried_cost, session=session):
+        def on_session(
+            cap, effort, name=name, carried=carried, carried_cost=carried_cost, session=session
+        ):
             session["cap"] = cap
             # the earlier known spend stays in `cost` while this session runs (PR #99 round 4 F1)
-            save(Result(name, "started", cost=carried_cost, charged=cap + carried, message=STARTED))
+            started = Result(name, "started", effort=effort, cost=carried_cost)
+            started.charged, started.message = cap + carried, STARTED
+            save(started)
 
         try:
             case = load_case(path)
@@ -724,9 +761,12 @@ def main(argv=None) -> int:
                 result = Result(name, "not-run", message=stopped)
             else:
                 try:
-                    result, stop_reason = run_case(case, args, spent, out_dir, on_session)
+                    result, stop_reason = run_case(
+                        case, args, spent, out_dir, on_session, known=session
+                    )
                 except KeyboardInterrupt:
                     result = _interrupted(name, session["cap"])
+                    result.effort = session["effort"]
                     stopped = "the run was interrupted"
         if carried:
             result.charged += carried
@@ -791,7 +831,7 @@ def _interrupted(name: str, cap: float) -> Result:
 def _print_case(r: Result, kept: bool = False) -> None:
     message = "; ".join(m for m in (r.message, "kept from the earlier run" if kept else "") if m)
     print(
-        "%-32s %-13s %-4s %-6s %-17s %-22s $%6.2f %6.0fs %s"
+        "%-32s %-13s %-4s %-6s %-17s %-22s %-6s $%6.2f %6.0fs %s"
         % (
             r.case,
             r.outcome,
@@ -799,6 +839,7 @@ def _print_case(r: Result, kept: bool = False) -> None:
             r.severity or "-",
             r.verdict or "-",
             r.model or "-",
+            r.effort or "-",
             r.cost,
             r.duration_s,
             message,
@@ -817,6 +858,7 @@ def _write_results(out_dir: str, args, results: List[Result]) -> None:
             "revali": VERSION,
             "prompt_version": PROMPT_VERSION,
             "model": args.model,
+            "effort": args.effort,
             "dry_run": args.dry_run,
             "cases_dirs": args.cases_dir,
             "budget_usd": args.budget_usd,
