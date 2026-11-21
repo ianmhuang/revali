@@ -25,8 +25,8 @@ Upgrading from 0.4.0:
 
 Setup and releases:
 - Installing revali at a release tag, and moving it at each release, is documented (#101).
-- `revali init` (#103), its config reads (#109, #110, #111) and `revali release` (#112),
-  as above.
+- `revali init` (#103), the config file reads of every command (#109, #110), `init` on a
+  config file that is not valid TOML (#111) and `revali release` (#112), as above.
 
 CI and the suite:
 - The Windows CI leg runs as six shards (#104), balanced by the recorded time of each test

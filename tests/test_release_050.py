@@ -21,7 +21,8 @@ PREAMBLE = (
     "written when the\nrelease is made ([docs/releasing.md](docs/releasing.md)); changes "
     "merged since the newest\nsection are not listed until then.\n\n"
 )
-# sha256 of CHANGELOG.md from the 0.4.0 heading to the end, as released
+# sha256 of CHANGELOG.md from the 0.4.0 heading to the end, as released. A deliberate edit
+# of the preamble or of a released section updates PREAMBLE or this hash.
 RELEASED_SHA256 = "66b21d0f7edd30344f8cc84bc811bd0c7dfb6b78d967e24ceae0e50bb6eb08e4"
 
 
@@ -57,7 +58,8 @@ class Changelog(unittest.TestCase):
 
     def test_the_preamble_and_the_released_sections_are_unchanged(self):
         text = raw("CHANGELOG.md")
-        self.assertTrue(text.startswith(PREAMBLE + NEW + "\n"), text[: len(PREAMBLE) + 40])
+        # up to the first section, whichever it is (review round 1 F1)
+        self.assertEqual(text.split("\n## ", 1)[0] + "\n", PREAMBLE)
         released = text[text.index(PREVIOUS) :]
         self.assertEqual(hashlib.sha256(released.encode("utf-8")).hexdigest(), RELEASED_SHA256)
 
@@ -109,7 +111,9 @@ class ChangelogTestsLookHeadingsUp(unittest.TestCase):
             flat("docs", "releasing.md"),
         )
 
-    def test_no_changelog_test_takes_the_first_headings(self):
+    def test_no_changelog_test_slices_the_first_headings(self):
+        # one spelling only (review round 1 F2); tests/test_review_release050.py runs the
+        # changelog tests against a changelog with a newer section on top
         tests = os.path.join(ROOT, "tests")
         for name in sorted(os.listdir(tests)):
             if not (name.startswith("test_") and name.endswith(".py")):
