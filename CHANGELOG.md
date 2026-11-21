@@ -4,6 +4,43 @@ One section per release, newest first, dated by its tag. A section is written wh
 release is made ([docs/releasing.md](docs/releasing.md)); changes merged since the newest
 section are not listed until then.
 
+## 0.5.0 - 2026-11-21
+
+Two commands, `revali init` to set a project up and `revali release` to tag and publish a
+version, and config files that are not UTF-8 reported in one line instead of a traceback
+(PR #101 to #112).
+
+Upgrading from 0.4.0:
+- New commands: `revali init` (#103) writes the missing `revali.toml`, `CONVENTIONS.md`
+  and `.github/release.yml`, appends the CLAUDE.md block and has git ignore the state
+  directory; `revali release` (#112) checks that HEAD is the pushed tip of the base branch
+  with green CI, then tags it, pushes the tag and publishes the GitHub Release, and a rerun
+  finishes a release that stopped half-way.
+- A config file that is not UTF-8 stops the command with one ERROR line naming the file and
+  the line of the bad byte, instead of a traceback (#109); a leading BOM is read (#110);
+  `init` stops on a config file that is not valid TOML instead of going on with the default
+  state directory (#111).
+- Unchanged: PROMPT_VERSION (16), `defaults.toml`, `templates/` and the layout of
+  `state.json`.
+
+Setup and releases:
+- Installing revali at a release tag, and moving it at each release, is documented (#101).
+- `revali init` (#103), the config file reads of every command (#109, #110), `init` on a
+  config file that is not valid TOML (#111) and `revali release` (#112), as above.
+
+CI and the suite:
+- The Windows CI leg runs as six shards (#104), balanced by the recorded time of each test
+  class; the suite also runs on macOS (#106), in three shards (#107), and each Ubuntu leg
+  in two (#108).
+- Tests copy a fixture repository built once per process instead of building it for every
+  test (#105), and concurrent writers of the test call log no longer tear its lines on
+  Windows (#102).
+
+Known issues:
+- The released 0.2.0 section's "every command names its repository and branch" is broader
+  than the code: `version` and `stats` name neither, and `init` and `release` name only the
+  repository. Released sections are not rewritten.
+
 ## 0.4.0 - 2026-11-19
 
 Validation on Windows as well as Linux, a Reviewer that is shown the documents a change

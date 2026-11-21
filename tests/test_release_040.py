@@ -43,9 +43,13 @@ class Changelog(unittest.TestCase):
     def test_the_new_section_sits_above_0_3_0_and_the_rest_is_kept(self):
         text = raw("CHANGELOG.md")
         headings = [line for line in text.split("\n") if line.startswith("## ")]
-        self.assertEqual(headings[:2], ["## 0.4.0 - 2026-11-19", "## 0.3.0 - 2026-09-07"])
-        # the preamble ends where the new section starts
-        preamble = text.split("\n## 0.4.0 - ", 1)[0]
+        # looked up, not taken as the first two, so a newer section does not break it
+        # (release/0.5.0 AC-6, the 0.5.0 audit's medium finding)
+        self.assertEqual(headings.count("## 0.4.0 - 2026-11-19"), 1)
+        after = headings[headings.index("## 0.4.0 - 2026-11-19") + 1]
+        self.assertEqual(after, "## 0.3.0 - 2026-09-07")
+        # the preamble ends where the newest section starts
+        preamble = text.split("\n## ", 1)[0]
         self.assertTrue(preamble.startswith("# Changelog\n"))
         self.assertIn(
             "changes merged since the newest section are not listed", " ".join(preamble.split())

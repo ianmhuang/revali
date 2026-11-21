@@ -62,7 +62,8 @@ Things a linter cannot check; formatting is not listed.
   `config.toml`, ...) stay in code.
 - Files revali writes are read with `newline=""` and written with `newline="\n"` (LF);
   the exceptions are `logs/run.log`, the detached run's standard output, which takes the
-  platform's line ending (CRLF on Windows), and the
+  platform's line ending (CRLF on Windows), the block `revali init` appends to an existing
+  CLAUDE.md, which takes that file's line ending (CRLF when the file has it), and the
   reads of the wsl retries record and of what the sandbox writes to `logs/` (step logs,
   `<label>.results`, `<label>-script.log`), which run in text mode, so a CRLF the sandbox
   wrote reads as LF, and strip line endings where they split lines.

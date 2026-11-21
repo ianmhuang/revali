@@ -68,9 +68,9 @@ empty: while the run goes on, `revali wait` adds the number of retries so far
 and the latest one under its `still running` line, and once the run has
 ended it names the file before the result. The sandbox script is not run again once it has started (its
 first line creates the results file). When the last attempt fails too, the
-run stops with exit 1 as before, and the message adds that `wsl --shutdown`
-restarts WSL and stops every running distro, other projects' included;
-revali never runs it. With `wsl_retries = 0` there is one attempt and the
+run stops with exit 1 as before, and the message adds "the WSL service did not
+answer; `wsl --shutdown` restarts WSL, which stops every running distro, then run revali
+again" (other projects' distros included); revali never runs it. With `wsl_retries = 0` there is one attempt and the
 same message.
 A wsl or ssh sandbox session counts only when its results file has a row
 for every step it was given, in order, up to the last one or up to the

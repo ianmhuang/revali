@@ -94,7 +94,9 @@ auto fallback ([docs/configuration.md](configuration.md)).
      [tests/test_changelog.py](../tests/test_changelog.py) fails when the newest changelog
      section is not `VERSION`, and when a test that pins the version is not named here. It
      sees a pin written as a string literal inside an `assert...()` call or an `assert`
-     statement; a version held in a variable and compared later is not seen.
+     statement; a version held in a variable and compared later is not seen. A test that
+     checks a changelog section looks its heading up instead of taking it by position, so
+     the next release's section does not break it; the pin detector does not see a heading.
    - adds the new version and its date to `RELEASED` in tests/test_changelog.py, and the
      PR numbers its section must name to that test's list; nothing forces this, as the
      test checks only the tail of the list.
@@ -146,9 +148,10 @@ auto fallback ([docs/configuration.md](configuration.md)).
 Every PR revali opens carries one release label (`major`, `minor`, `patch`, `docs` or
 `skip-changelog` by default) taken from its change.md: the `release:` field when it has one,
 else the label `[pr] kind_labels` gives its kind (`minor`, `patch` or `docs`); `major` and
-`skip-changelog` come from `release:` only ([docs/configuration.md](configuration.md)). Copy
-[templates/release.yml](../templates/release.yml) to `.github/release.yml` in the project,
-and `gh release create v<version> --verify-tag --generate-notes --notes "<lead line>"` after
+`skip-changelog` come from `release:` only ([docs/configuration.md](configuration.md)).
+`revali init` writes `.github/release.yml` from [templates/release.yml](../templates/release.yml)
+when the project has none; a project set up without `init` copies it there by hand. With
+it, `gh release create v<version> --verify-tag --generate-notes --notes "<lead line>"` after
 each tag gives the same grouped notes: Major, Minor, Patch and Docs changes, the rest under
 Other, a PR labelled `skip-changelog` (`release: skip-changelog` in change.md) left out. A project that labels PRs another way sets
 `[pr] release_labels = []`, and revali leaves its labels alone.

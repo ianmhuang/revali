@@ -48,11 +48,14 @@ preflight's probe checks; revali does not check the remote system itself,
 and has not been run against such a host. A `linux` table takes any
 runner, `local` on a Windows host included. Preflight probes the runner of
 every listed platform in list order (a dry run probes none) and stops at
-the first that cannot start, naming it. The baseline and every validation
+the first that cannot start, naming it (`validate.<name>: ...`) when more
+than one platform is listed. The baseline and every validation
 run on every listed platform, one after another in list order: the
 baseline stops at the first platform that fails, validation runs them all
 and FAILs when any of them does, each failing platform with its own base
-rerun and diagnosis. The diagnosis prompt names the platform and runner
+rerun and diagnosis. A `setup` or `build` step that fails on any platform
+stops validation at once with exit 1 (an environment problem, not a
+verdict): no diagnosis, and the platforms after it are not run. The diagnosis prompt names the platform and runner
 that failed, with one platform listed too, and with more than one lists
 how the other platforms of the same validation went (PASS, FAIL at a
 step, or not run and why); the issue body for a pre-existing bug names
@@ -229,7 +232,8 @@ time and recorded in the review and diagnosis headers.
 for that run only (`fallback_model` is unaffected: none with `auto`, or the
 model the user named);
 the reason then reads `--reviewer-model, ` and where the model stands against
-the author's tier (above, the same tier as, below), and a non-private
+the author's tier (above, the same tier as, below; or `<model> is not on the ladder`,
+`author model not given`, or `author <model> is not on the ladder`), and a non-private
 repository's PR comment carries it too. revali never lowers the Reviewer's tier
 on its own: a session that hits its model's usage limit, or whose model is
 overloaded, stops the run instead
