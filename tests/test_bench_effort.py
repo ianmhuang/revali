@@ -8,7 +8,9 @@ import io
 import json
 import os
 import unittest
+from unittest import mock
 
+from revali.config import parse_project_config
 from revali.engines.claude import EFFORTS
 from tests.helpers import ROOT, claude_entry
 from tests.test_bench_tool import BenchCase, answer, bench, finding
@@ -38,6 +40,13 @@ class Effort(BenchCase):
         self.assertEqual(len(lines), 1, out)
         return lines[0]
 
+    def default_effort(self):
+        """The fixture's effort without a case's own (round 1 follow-up: read, not written
+        out, so a new default in defaults.toml does not break these tests)."""
+        effort = parse_project_config(self.read("revali.toml"), repo_root=self.repo).review.effort
+        self.assertNotEqual(effort, "low")
+        return effort
+
     def test_without_effort_the_case_config_chooses(self):
         """AC-1"""
         self.make_case("a-default")
@@ -45,8 +54,9 @@ class Effort(BenchCase):
         self.claude(claude_entry(answer(finding())))
         code, out, cases, results = self.run_bench()
         self.assertEqual(code, 0, out)
-        self.assertEqual(self.efforts_passed(), ["high", "low"])  # defaults.toml, the case's
-        self.assertEqual(cases["a-default"]["effort"], "high")
+        default = self.default_effort()
+        self.assertEqual(self.efforts_passed(), [default, "low"])  # defaults.toml, the case's
+        self.assertEqual(cases["a-default"]["effort"], default)
         self.assertEqual(cases["b-own"]["effort"], "low")
         self.assertEqual(results["effort"], "")
 
@@ -62,6 +72,39 @@ class Effort(BenchCase):
         self.assertEqual(results["effort"], "medium")
         for name in ("a-default", "b-own"):
             self.assertIn(" medium ", self.line_of(out, name))
+
+    def test_a_failed_session_records_its_effort(self):
+        """AC-3 (round 1 F1): a session that ran and failed ran at an effort too"""
+        self.make_case("a-fails")
+        self.case_with_own_effort("b-fails", "low")
+        failing = claude_entry(is_error=True, cost=0.25, write_tests=False)
+        for extra, expected in (
+            ((), [self.default_effort(), "low"]),
+            (("--effort", "medium"), ["medium"] * 2),
+        ):
+            with self.subTest(extra=extra):
+                self.claude(failing)
+                code, out, cases, _ = self.run_bench(*extra)
+                self.assertEqual(code, 1, out)
+                self.assertEqual([c["outcome"] for c in cases.values()], ["error", "error"])
+                self.assertEqual([c["effort"] for c in cases.values()], expected)
+                for name, effort in zip(("a-fails", "b-fails"), expected, strict=True):
+                    self.assertIn(" %s " % effort, self.line_of(out, name))
+
+    def test_a_session_in_progress_records_its_effort(self):
+        """AC-3 (round 1 F1): the `started` entry written before the session"""
+        self.make_case("a-one")
+        self.claude(claude_entry(answer(finding())))
+        real, seen = bench.spawn_reviewer, []
+
+        def spawn(*a, **kw):
+            with open(os.path.join(self.out, "results.json"), encoding="utf-8") as fh:
+                seen.append(json.load(fh)["cases"][0])
+            return real(*a, **kw)
+
+        with mock.patch.object(bench, "spawn_reviewer", spawn):
+            self.run_bench("--effort", "medium")
+        self.assertEqual((seen[0]["outcome"], seen[0]["effort"]), ("started", "medium"))
 
     def test_a_level_the_engine_does_not_take(self):
         """AC-2: a usage error before anything runs"""
@@ -100,7 +143,7 @@ class Effort(BenchCase):
         code, out, cases, _ = self.run_bench("--dry-run")
         self.assertEqual(code, 0, out)
         self.assertEqual(self.fake_calls("claude"), [])
-        self.assertEqual(cases["a-default"]["effort"], "high")
+        self.assertEqual(cases["a-default"]["effort"], self.default_effort())
         self.assertEqual(cases["b-own"]["effort"], "xhigh")
         self.assertIn(" xhigh ", self.line_of(out, "b-own"))
         self.assertTrue(os.path.isfile(os.path.join(self.out, "b-own", "prompt.md")))
@@ -178,12 +221,20 @@ class EffortResume(BenchCase):
         path = os.path.join(self.out, "results.json")
         with open(path, encoding="utf-8") as fh:
             results = json.load(fh)
-        results["effort"] = 3
+        original = dict(results)
+        for value in (3, 0, False, [], "hgih"):
+            with self.subTest(value=value):
+                results = dict(original, effort=value)
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(results, fh)
+                code, out, err = self.resume()
+                self.assertEqual(code, 1, out + err)
+                self.assertIn("not a benchmark results.json", err)
+        cases = [dict(c, effort="hgih") for c in original["cases"]]  # a case's own
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(results, fh)
+            json.dump(dict(original, cases=cases), fh)
         code, out, err = self.resume()
         self.assertEqual(code, 1, out + err)
-        self.assertIn("not a benchmark results.json", err)
 
 
 class Readme(unittest.TestCase):

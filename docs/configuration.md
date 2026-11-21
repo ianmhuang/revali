@@ -239,7 +239,9 @@ on its own: a session that hits its model's usage limit, or whose model is
 overloaded, stops the run instead
 ([docs/workflow.md](workflow.md)).
 `[review] effort` and `[validate] effort` (default `high` for both) are the
-effort level the Reviewer and the diagnosis session run at.
+effort level the Reviewer and the diagnosis session run at: `low`, `medium`, `high`,
+`xhigh` or `max` with the claude engine (`claude --effort`; revali passes the value on
+as written and does not check it).
 `[engines.claude] helper_prefix` (default `claude-haiku`) tells which rows
 of a session's model usage are the CLI's own helper calls: the model that
 did the work, recorded as `model_actual` and checked for a fallback, is

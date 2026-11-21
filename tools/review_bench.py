@@ -12,9 +12,9 @@ are not run, and the clone is removed afterwards; the prompt, the raw answer and
 answer stay under the output directory.
 
     python tools/review_bench.py --budget-usd 15 [--cases DIR ...] [--model M]
-                                 [--session-budget-usd N] [--line-margin N] [--out DIR]
-                                 [case ...]
-    python tools/review_bench.py --dry-run [--cases DIR ...] [case ...]
+                                 [--effort LEVEL] [--session-budget-usd N]
+                                 [--line-margin N] [--out DIR] [case ...]
+    python tools/review_bench.py --dry-run [--cases DIR ...] [--effort LEVEL] [case ...]
     python tools/review_bench.py --resume DIR --budget-usd TOTAL [case ...]
 
 Exit 0 when every case was scored (caught or missed), 1 when a case was malformed, failed,
@@ -302,14 +302,18 @@ def isolate(clone: str, branch: str, base_branch: str, base: str) -> None:
 
 
 def run_case(case: Case, args, spent: float, out_dir: str, on_session=None) -> Tuple[Result, str]:
-    """One case and why the cases after it are not run ("" when they are). `on_session(cap)`
-    is called just before the session starts."""
+    """One case and why the cases after it are not run ("" when they are). `on_session(cap,
+    effort)` is called just before the session starts."""
     started = time.monotonic()
     tmp = tempfile.mkdtemp(prefix="revali bench ")
+    known = {"effort": ""}  # filled in once the case's configuration is read
     try:
-        result, stop_reason = _run_in(case, args, spent, out_dir, tmp, on_session)
+        result, stop_reason = _run_in(case, args, spent, out_dir, tmp, on_session, known)
     finally:
         _rmtree(tmp)
+    # every result after the configuration was read, a failed session's included (PR #115
+    # round 1 F1)
+    result.effort = result.effort or known["effort"]
     result.duration_s = time.monotonic() - started
     if os.path.exists(tmp):
         result.message = "; ".join(m for m in (result.message, "clone left at " + tmp) if m)
@@ -317,8 +321,9 @@ def run_case(case: Case, args, spent: float, out_dir: str, on_session=None) -> T
 
 
 def _run_in(
-    case: Case, args, spent: float, out_dir: str, tmp: str, on_session=None
+    case: Case, args, spent: float, out_dir: str, tmp: str, on_session=None, known=None
 ) -> Tuple[Result, str]:
+    known = {} if known is None else known
     cap = args.session_budget_usd
     if not args.dry_run and cap and spent + cap > args.budget_usd:  # known before the clone
         return _not_run(case, spent, cap, args), ""
@@ -332,7 +337,7 @@ def _run_in(
             ctx.cfg.review.model = args.model
         if args.effort:  # replaces the case's own, as --model does
             ctx.cfg.review.effort = args.effort
-        effort = ctx.cfg.review.effort
+        effort = known["effort"] = ctx.cfg.review.effort
         if cap:
             ctx.cfg.review.budget_usd = cap
         cap = ctx.cfg.review.budget_usd
@@ -341,11 +346,10 @@ def _run_in(
         prompt = build_prompt(ctx, State(), ctx.rdir, 1)
         _write(os.path.join(case_out, "prompt.md"), prompt)
         if args.dry_run:  # everything a session needs is in place; nothing is spent
-            ready = Result(case.name, READY, effort=effort)
-            ready.message = "prompt.md %d lines" % prompt.count("\n")
+            ready = Result(case.name, READY, message="prompt.md %d lines" % prompt.count("\n"))
             return ready, ""
         if on_session:
-            on_session(cap)
+            on_session(cap, effort)
         session = True
         try:
             rr = spawn_reviewer(
@@ -357,7 +361,6 @@ def _run_in(
         _write(os.path.join(case_out, "answer.json"), json.dumps(rr.data, indent=1))
         result = score(case, rr.data, args.line_margin)
         result.model = rr.model_actual or rr.model_requested
-        result.effort = effort
         result.cost = result.charged = rr.cost
         return result, ""
     except ModelUnavailable as exc:  # its usage limit, or overloaded (PR #99 round 6)
@@ -512,6 +515,10 @@ def _same_dirs(a: List[str], b: List[str]) -> bool:
     return norm(a) == norm(b)
 
 
+def _effort_ok(value) -> bool:
+    return isinstance(value, str) and (value == "" or value in EFFORTS)
+
+
 def _prior_results(path: str):
     """The cases of an earlier run's results.json as Results, in their order; (None, reason)
     when the file cannot be resumed."""
@@ -540,8 +547,10 @@ def _prior_results(path: str):
             for c in entries
         )
         and isinstance(prior.get("model") or "", str)
-        and isinstance(prior.get("effort") or "", str)  # absent before M4.4.1: none given
-        and all(isinstance(c.get("effort") or "", str) for c in entries)
+        # absent before M4.4.1: none given; otherwise a level the engine takes (PR #115 round
+        # 1 F3: a resume passes it to every session without the command line's check)
+        and _effort_ok(prior.get("effort", ""))
+        and all(_effort_ok(c.get("effort", "")) for c in entries)
         and isinstance(prior.get("session_budget_usd") or 0.0, (int, float))
         and isinstance(prior.get("line_margin", DEFAULT_MARGIN), int)
         and not any(isinstance(prior.get(k), bool) for k in ("session_budget_usd", "line_margin"))
@@ -723,12 +732,16 @@ def main(argv=None) -> int:
         carried = earlier.charged if earlier is not None else 0.0  # already in `spent`
         carried_cost = earlier.cost if earlier is not None else 0.0  # what it reported
         stop_reason = ""
-        session = {"cap": 0.0}
+        session = {"cap": 0.0, "effort": ""}
 
-        def on_session(cap, name=name, carried=carried, carried_cost=carried_cost, session=session):
-            session["cap"] = cap
+        def on_session(
+            cap, effort, name=name, carried=carried, carried_cost=carried_cost, session=session
+        ):
+            session["cap"], session["effort"] = cap, effort
             # the earlier known spend stays in `cost` while this session runs (PR #99 round 4 F1)
-            save(Result(name, "started", cost=carried_cost, charged=cap + carried, message=STARTED))
+            started = Result(name, "started", effort=effort, cost=carried_cost)
+            started.charged, started.message = cap + carried, STARTED
+            save(started)
 
         try:
             case = load_case(path)
@@ -742,6 +755,7 @@ def main(argv=None) -> int:
                     result, stop_reason = run_case(case, args, spent, out_dir, on_session)
                 except KeyboardInterrupt:
                     result = _interrupted(name, session["cap"])
+                    result.effort = session["effort"]
                     stopped = "the run was interrupted"
         if carried:
             result.charged += carried
