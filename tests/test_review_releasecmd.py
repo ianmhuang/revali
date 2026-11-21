@@ -8,10 +8,15 @@ AC-1: every check passes -> annotated tag on HEAD, pushed, `gh release create`, 
 AC-2: a failed check -> exit 2, one ERROR line, nothing created or pushed.
 AC-3: a tag already on HEAD (here or on origin) is kept and only the missing steps run.
 AC-4: `--dry-run` checks, prints the commands, changes nothing.
+
+Round 2: a rerun whose tag is already on origin on HEAD finishes whatever the check runs say
+by then (the tag push may have started new ones); a tag that never left this repository still
+needs green CI; a gh that cannot be started is one ERROR line and exit 1.
 """
 
 import contextlib
 import io
+import os
 import unittest
 
 from tests.helpers import RepoCase, git
@@ -191,6 +196,27 @@ class RefusesAndCreatesNothing(ReleaseCase):
                 self.assertEqual(git(["tag", "-l"], self.repo).strip(), "")
                 self.assertEqual(self.origin_tags(), {})
 
+    def test_a_version_whose_parts_are_not_plain_numbers(self):
+        # digits of another script, and numbers with a leading zero, are not X.Y.Z
+        full_width = ".".join(chr(0xFF10 + d) for d in (1, 2, 3))
+        arabic_indic = ".".join(chr(0x0660 + d) for d in (1, 2, 3))
+        for version in (full_width, arabic_indic, "01.2.3", "1.02.3", "1.2.03"):
+            with self.subTest(version=ascii(version)):
+                self.assert_refused(["release", version])
+                self.assertEqual(git(["tag", "-l"], self.repo).strip(), "")
+                self.assertEqual(self.origin_tags(), {})
+
+    def test_zero_is_a_plain_number(self):
+        self.assert_released(["release", "0.10.0"])
+        self.assertEqual(git(["tag", "-l"], self.repo).split(), ["v0.10.0"])
+
+    def test_the_tag_here_on_something_that_is_not_a_commit(self):
+        tree = git(["rev-parse", "HEAD^{tree}"], self.repo).strip()
+        git(["tag", TAG, tree], self.repo)
+        self.assert_refused(["release", "1.2.3"], TAG)
+        self.assertEqual(self.local_tag_object(), tree)  # not moved
+        self.assertEqual(self.origin_tags(), {})  # not pushed
+
     def test_another_branch_checked_out(self):
         git(["checkout", "-q", "-b", "topic"], self.repo)
         self.assert_refused(["release", "1.2.3"], "main")
@@ -330,6 +356,72 @@ class FinishesAHalfDoneRelease(ReleaseCase):
         self.assertEqual(self.origin_tags().get(REF), tag_object)
         self.assertEqual(len(self.creates()), 2)  # the failed one and the rerun's
         self.assertIn(URL, out)
+
+    def test_check_runs_started_by_the_tag_push_do_not_stop_the_rerun(self):
+        # the tag is on origin on HEAD: what is missing is the Release, whatever the check
+        # runs on that commit say by now
+        later = (
+            {"name": "tag-suite", "status": "in_progress", "conclusion": None},
+            {"name": "tag-suite", "status": "queued", "conclusion": None},
+            {"name": "tag-suite", "status": "completed", "conclusion": "failure"},
+        )
+        self.scenario({"release_create_exit": 1})
+        code, out = run(["release", "1.2.3"])
+        self.assertEqual(code, 1, out)
+        tag_object = self.local_tag_object()
+        before = self.origin_tags()
+        self.assertEqual(before.get(REF), tag_object)
+        self.scenario({"release_create_exit": 0})
+        for count, check in enumerate(later, start=2):
+            with self.subTest(status=check["status"], conclusion=check["conclusion"]):
+                self.scenario({"commit_checks": PASSED + [check]})
+                out = self.assert_released(["release", "1.2.3"])
+                self.assertIn(URL, out)
+                self.assertEqual(len(self.creates()), count)
+                self.assertEqual(self.local_tag_object(), tag_object)
+                self.assertEqual(self.origin_tags(), before)
+
+    def test_a_published_release_prints_its_url_whatever_the_checks_say_now(self):
+        self.tag_by_hand(push=True)
+        before = self.origin_tags()
+        running = {"name": "tag-suite", "status": "in_progress", "conclusion": None}
+        failed = {"name": "tag-suite", "status": "completed", "conclusion": "failure"}
+        for check in (running, failed):
+            with self.subTest(status=check["status"]):
+                self.scenario({"releases": {TAG: URL}, "commit_checks": PASSED + [check]})
+                out = self.assert_released(["release", "1.2.3"])
+                self.assertIn(URL, out)
+                self.assertEqual(self.creates(), [])
+                self.assertEqual(self.origin_tags(), before)
+
+    def test_a_tag_that_never_left_this_repository_still_needs_green_ci(self):
+        # nothing was pushed, so no push started a run: AC-2's refusal stands
+        self.tag_by_hand()
+        tag_object = self.local_tag_object()
+        for check in (
+            {"name": "macos-suite", "status": "in_progress", "conclusion": None},
+            {"name": "macos-suite", "status": "completed", "conclusion": "failure"},
+        ):
+            with self.subTest(status=check["status"]):
+                self.scenario({"commit_checks": PASSED + [check]})
+                self.assert_refused(["release", "1.2.3"], "macos-suite")
+                self.assertEqual(self.local_tag_object(), tag_object)
+                self.assertEqual(self.origin_tags(), {})
+
+
+class StopsOnACommandThatCannotRun(ReleaseCase):
+    """A gh that cannot be started: exit 1 and one ERROR line, not a traceback (an exception
+    that escaped `main` would end this in-process run as a test error)."""
+
+    def test_a_gh_that_cannot_be_started(self):
+        os.environ["REVALI_GH_CMD"] = '"%s"' % os.path.join(self.tmp, "missing", "gh")
+        code, out = run(["release", "1.2.3"])
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("Traceback", out)
+        errors = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
+        self.assertEqual(len(errors), 1, out)
+        self.assertFalse(self.has_local_tag())
+        self.assertEqual(self.origin_tags(), {})
 
 
 class DryRun(ReleaseCase):
