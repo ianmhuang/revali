@@ -27,6 +27,7 @@ COMMANDS = (
     "merge",
     "archive",  # feature/archive-outside-merge
     "init",  # feature/init
+    "release",  # feature/release
     "stats",
     "version",
 )
@@ -100,6 +101,7 @@ class EveryArgumentHasAHelpText(unittest.TestCase):
         "merge": set(),
         "archive": {"branch"},  # feature/archive-outside-merge
         "init": set(),  # feature/init
+        "release": {"version", "notes", "dry_run"},  # feature/release
         "stats": set(),
         "version": set(),
     }
@@ -305,13 +307,15 @@ class ParsingAndDispatchAreUnchanged(unittest.TestCase):
             "merge": pipeline.cmd_merge,
             "archive": pipeline.cmd_archive,
             "init": cli._cmd_init,
+            "release": cli._cmd_release,
             "stats": cli._cmd_stats,
             "version": pipeline.cmd_version,
         }
         self.assertEqual(set(expected), set(COMMANDS))
         for name, func in expected.items():
             with self.subTest(command=name):
-                argv = [name, "feature__x"] if name == "clean" else [name]
+                # feature/release: `release` takes the version, as `clean` takes a branch
+                argv = [name, "feature__x"] if name in ("clean", "release") else [name]
                 args = self.parser.parse_args(argv)
                 self.assertIs(args.func, func)  # AC-5
                 self.assertEqual(args.command, name)
