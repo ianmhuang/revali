@@ -12,6 +12,9 @@ AC-4: `--dry-run` checks, prints the commands, changes nothing.
 Round 2: a rerun whose tag is already on origin on HEAD finishes whatever the check runs say
 by then (the tag push may have started new ones); a tag that never left this repository still
 needs green CI; a gh that cannot be started is one ERROR line and exit 1.
+
+Round 3: a `gh release view` that fails for another reason than a missing Release does not
+say the Release is absent: exit 1, one ERROR line, nothing made, pushed or published.
 """
 
 import contextlib
@@ -422,6 +425,53 @@ class StopsOnACommandThatCannotRun(ReleaseCase):
         self.assertEqual(len(errors), 1, out)
         self.assertFalse(self.has_local_tag())
         self.assertEqual(self.origin_tags(), {})
+
+
+class StopsWhenItCannotTellWhetherTheReleaseExists(ReleaseCase):
+    """AC-3 creates the Release "if it does not exist": a `gh release view` that fails for
+    another reason (the repository not found, a server error) has not said so."""
+
+    FAILURES = (
+        "HTTP 404: Not Found (https://api.github.com/repos/me/sample)",
+        "HTTP 502: Bad Gateway (https://api.github.com/repos/me/sample/releases/tags/v1.2.3)",
+    )
+
+    def assert_stopped(self, argv):
+        code, out = run(argv)
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("Traceback", out)
+        errors = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
+        self.assertEqual(len(errors), 1, out)
+        self.assertEqual(self.creates(), [], out)
+        return errors[0]
+
+    def test_nothing_is_made_pushed_or_published(self):
+        for text in self.FAILURES:
+            with self.subTest(failure=text[:8]):
+                self.scenario({"release_view_exit": 1, "release_view_error": text})
+                error = self.assert_stopped(["release", "1.2.3"])
+                self.assertIn(text[:8], error)  # the line carries what gh said
+                self.assert_nothing_made()
+
+    def test_a_half_done_release_is_not_published_blind(self):
+        self.tag_by_hand(push=True)
+        tag_object = self.local_tag_object()
+        before = self.origin_tags()
+        self.scenario({"release_view_exit": 1, "release_view_error": self.FAILURES[0]})
+        self.assert_stopped(["release", "1.2.3"])
+        self.assertEqual(self.local_tag_object(), tag_object)
+        self.assertEqual(self.origin_tags(), before)
+        # once gh answers again (no Release for the tag), the same command finishes it
+        self.scenario({"release_view_exit": 0, "release_view_error": None})
+        out = self.assert_released(["release", "1.2.3"])
+        self.assertIn(URL, out)
+        self.assertEqual(len(self.creates()), 1)
+        self.assertEqual(self.origin_tags(), before)
+
+    def test_the_dry_run_stops_the_same_way(self):
+        self.scenario({"release_view_exit": 1, "release_view_error": self.FAILURES[0]})
+        self.assert_stopped(["release", "1.2.3", "--dry-run"])
+        self.assert_nothing_made()
 
 
 class DryRun(ReleaseCase):
