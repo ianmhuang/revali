@@ -10,6 +10,11 @@ AC-4: `--dry-run` prints those notes after the commands, asks generate-notes onc
       creates nothing; a failed generate-notes call is exit 1 with one ERROR line and the
       rerun hint, with no `gh release create`, and the rerun finishes the release.
 
+Round 2 (what the fixes of round 1 changed): the heading is HTML-escaped inside
+`<summary>`; a notes file that cannot be written stops the release with one ERROR line
+before the tag is made; a `collapse_headings` entry that can never be a category title is a
+configuration error that names the key.
+
 Black box: the command line in-process on a RepoCase repository on `main` with a bare
 `origin` (real git); the fake gh answers generate-notes from the scenario and records the
 text of the `--notes-file` it is given.
@@ -17,7 +22,9 @@ text of the `--notes-file` it is given.
 
 import json
 import os
+import tempfile
 import unittest
+from unittest import mock
 
 from tests.helpers import RepoCase, git, run_cli
 
@@ -241,6 +248,59 @@ class PublishedNotes(NotesCase):
         self.assertEqual(body.count("<details>"), 2, body)
         self.assert_in_order(body, ["### Internal Changes"] + INTERNAL + [FOOTER])
 
+    def test_the_heading_is_escaped_inside_the_summary(self):
+        # a category title is text; inside <summary> it is HTML
+        title = "CI & <tests>"
+        self.config("[pr]\ncollapse_headings = ['%s']\n" % title)
+        generated = notes(("Minor Changes", MINOR), (title, INTERNAL))
+        self.scenario({"generated_notes": generated})
+        body = self.released_body()
+        self.assert_collapsed(body, "CI &amp; &lt;tests&gt;", INTERNAL)
+        lines = body.split("\n")
+        self.assertNotIn("### " + title, lines)
+        self.assertNotIn("<details><summary>%s (%d)</summary>" % (title, len(INTERNAL)), lines)
+        self.assertIn("### Minor Changes", lines)
+
+
+class HeadingsConfig(NotesCase):
+    """docs/configuration.md: a heading is the title of a release.yml category, written
+    without its `###` and without surrounding spaces; anything else is a configuration
+    error. Such a value could never match a section, so it is refused, not ignored."""
+
+    BAD = (
+        '[" Internal Changes"]',
+        '["Internal Changes "]',
+        '["### Internal Changes"]',
+        '[""]',
+        '["Internal\\nChanges"]',
+        "[7]",
+        '"Internal Changes"',
+    )
+
+    def test_a_value_that_cannot_be_a_title_is_a_configuration_error(self):
+        base = self.read("revali.toml")
+        for number, value in enumerate(self.BAD):
+            with self.subTest(value=value):
+                self.write("revali.toml", base + "\n[pr]\ncollapse_headings = %s\n" % value)
+                self.commit_all("pr config %d" % number)
+                git(["push", "-q", "origin", "main"], self.repo)
+                code, out = run_cli(["release", "1.2.3"])
+                self.assertNotEqual(code, 0, out)
+                self.assertNotIn("Traceback", out)
+                errors = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
+                self.assertTrue(errors, out)
+                self.assertTrue(any("collapse_headings" in ln for ln in errors), out)
+                self.assertEqual(self.generates(), [])
+                self.assertEqual(self.creates(), [])
+                self.assertFalse(self.has_local_tag())
+                self.assertEqual(self.origin_tag_commit(), "")
+
+    def test_a_plain_title_is_accepted(self):
+        # the other side: a title with inner spaces and punctuation is a valid entry
+        self.config('[pr]\ncollapse_headings = ["Patch Changes", "Tests, CI: tooling"]\n')
+        body = self.released_body()
+        self.assert_collapsed(body, "Patch Changes", PATCH)
+
 
 class DryRunAndFailure(NotesCase):
     """AC-4."""
@@ -306,6 +366,24 @@ class DryRunAndFailure(NotesCase):
         self.assertEqual(code, 1, out)
         self.assertEqual(len([ln for ln in out.splitlines() if ln.startswith("ERROR")]), 1, out)
         self.assert_nothing_made()
+
+    def test_a_notes_file_that_cannot_be_written_stops_before_the_tag(self):
+        # docs/side-effects.md: the notes go in a temporary file written before the tag is
+        # made. With no usable temporary directory the release ends in one ERROR line with
+        # the rerun hint and has made nothing; the rerun, with one, finishes it.
+        missing = os.path.join(self.tmp, "no", "such", "directory")
+        with mock.patch.object(tempfile, "tempdir", missing):
+            code, out = run_cli(["release", "1.2.3", "--notes", "Faster cold start."])
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("Traceback", out)
+        errors = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
+        self.assertEqual(len(errors), 1, out)
+        self.assertIn("run the same command again", errors[0])
+        self.assertNotIn("RELEASED", out)
+        self.assert_nothing_made()
+        body = self.released_body(("release", "1.2.3", "--notes", "Faster cold start."))
+        self.assertEqual(body.split("\n")[0], "Faster cold start.")
+        self.assertEqual(self.origin_tag_commit(), self.head())
 
 
 if __name__ == "__main__":
