@@ -11,6 +11,7 @@ import contextlib
 import io
 import json
 import os
+from unittest import mock
 
 from tests.helpers import claude_entry, git
 from tests.test_bench_tool import BenchCase, answer, bench, finding
@@ -153,6 +154,50 @@ class EffortOption(EffortCase):
         self.assertEqual(self.fake_calls("claude"), [])
 
 
+class EffortOfASessionThatDidNotScore(EffortCase):
+    """AC-3: a session that failed, is in progress or was interrupted ran at an effort too."""
+
+    def test_a_failed_session_records_its_effort(self):
+        self.two_cases()
+        failing = claude_entry(is_error=True, cost=0.25, write_tests=False)
+        self.claude(failing)
+        code, out, cases, results = self.run_bench()
+        self.assertEqual(code, 1, out)
+        self.assertEqual([cases[n]["outcome"] for n in ("a-repo", "b-own")], ["error", "error"])
+        self.assertEqual(self.efforts_passed(), [REPO_EFFORT, OWN_EFFORT])
+        self.assertEqual(cases["a-repo"]["effort"], REPO_EFFORT)
+        self.assertEqual(cases["b-own"]["effort"], OWN_EFFORT)
+        self.assertEqual(results["effort"], "")
+        self.assertIn(REPO_EFFORT, self.words_of_line(out, "a-repo"))
+
+        self.claude(failing)
+        code, out, cases, results = self.run_bench("--effort", "medium")
+        self.assertEqual(code, 1, out)
+        self.assertEqual([cases[n]["outcome"] for n in ("a-repo", "b-own")], ["error", "error"])
+        self.assertEqual(self.efforts_passed()[-2:], ["medium", "medium"])
+        for name in ("a-repo", "b-own"):
+            self.assertEqual(cases[name]["effort"], "medium")
+            self.assertIn("medium", self.words_of_line(out, name))
+
+    def test_a_started_and_an_interrupted_session_record_the_effort(self):
+        self.make_case("a-repo")
+        self.claude(claude_entry(answer(finding())))
+        seen = []
+
+        def interrupted(*args, **kwargs):
+            seen.append(self.results_file()["cases"][0])  # what a kill here would leave
+            raise KeyboardInterrupt
+
+        with mock.patch.object(bench, "spawn_reviewer", interrupted):
+            code, out, cases, _ = self.run_bench()
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual((seen[0]["outcome"], seen[0]["effort"]), ("started", REPO_EFFORT))
+        self.assertEqual(cases["a-repo"]["outcome"], "interrupted")
+        self.assertEqual(cases["a-repo"]["effort"], REPO_EFFORT)
+        self.assertIn(REPO_EFFORT, self.words_of_line(out, "a-repo"))
+
+
 class EffortResume(EffortCase):
     """AC-4"""
 
@@ -191,6 +236,18 @@ class EffortResume(EffortCase):
         self.assertIn("effort", err)
         self.assertEqual(len(self.fake_calls("claude")), 1)
         self.assertEqual(self.results_file(), before)
+
+    def test_a_recorded_level_the_engine_does_not_take_starts_no_session(self):
+        """AC-2, AC-4: the recorded effort goes to every session a resume starts"""
+        self.stop_after_first("--effort", "medium")
+        edited = self.results_file()
+        edited["effort"] = "hgih"
+        with open(os.path.join(self.out, "results.json"), "w", encoding="utf-8") as fh:
+            json.dump(edited, fh)
+        code, out, err = self.resume()
+        self.assertNotEqual(code, 0, out + err)
+        self.assertEqual(len(self.fake_calls("claude")), 1)
+        self.assertEqual(self.results_file(), edited)
 
     def strip_effort(self):
         """results.json as a revali before `--effort` wrote it."""
