@@ -4,11 +4,16 @@ publish the GitHub Release (docs/releasing.md, step 5).
 Every check runs before anything is created; a failed check exits 2 and changes nothing. A
 release that stopped half-way (the tag made or pushed, the Release not created) finishes on a
 rerun: a tag already on HEAD is kept, and only the missing steps run.
+
+The notes are GitHub's generated notes (`releases/generate-notes`, grouped by
+.github/release.yml), with the `--notes` line above them and each section named in
+`[pr] collapse_headings` folded into a `<details>` block.
 """
 
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from typing import List
 
@@ -20,6 +25,8 @@ from revali.procs import ExeNotFound, ProcError, one_line, resolve, run, run_ret
 VERSION_RE = re.compile(r"^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 RELEASE_YML = ".github/release.yml"
 RERUN = "run the same command again to finish"
+GENERATE_NOTES = "repos/{owner}/{repo}/releases/generate-notes"
+NOTES_BELOW = "<the notes below>"  # the notes file, as a dry run names it
 
 
 class Refused(Exception):
@@ -40,6 +47,8 @@ class Plan:
     push_tag: bool
     release_url: str  # "" when the Release does not exist yet
     notes: str = ""
+    title: str = ""  # the Release's title and body, when it does not exist yet
+    body: str = ""
 
     def tag_message(self) -> str:
         message = "%s %s" % (self.repo_name, self.version)
@@ -56,11 +65,18 @@ class Plan:
             cmds.append(self.release_create_args())
         return cmds
 
-    def release_create_args(self) -> List[str]:
-        args = ["gh", "release", "create", self.tag, "--verify-tag", "--generate-notes"]
-        if self.notes:
-            args += ["--notes", self.notes]
-        return args
+    def release_create_args(self, notes_file: str = NOTES_BELOW) -> List[str]:
+        return [
+            "gh",
+            "release",
+            "create",
+            self.tag,
+            "--verify-tag",
+            "--title",
+            self.title,
+            "--notes-file",
+            notes_file,
+        ]
 
 
 def tag_name(version: str) -> str:
@@ -170,6 +186,64 @@ def release_url(tag: str, root: str) -> str:
     raise Failed("gh release view %s failed: %s" % (tag, one_line(res.text)))
 
 
+def generated_notes(tag: str, head: str, root: str):
+    """(title, body) GitHub generates for the tag on HEAD, grouped by the release.yml of
+    HEAD; the request stores nothing. Failed when it fails or answers something else."""
+    what = "gh api %s" % GENERATE_NOTES
+    args = ["api", "-X", "POST", GENERATE_NOTES]
+    args += ["-f", "tag_name=%s" % tag, "-f", "target_commitish=%s" % head]
+    try:
+        res = _gh(args, root, retries=2)
+    except ProcError as exc:
+        raise Failed("%s failed: %s; %s" % (what, one_line(str(exc)), RERUN)) from exc
+    if not res.ok:
+        raise Failed("%s failed: %s; %s" % (what, one_line(res.text), RERUN))
+    try:
+        data = json.loads(res.stdout)
+        title, body = data["name"], data["body"]
+    except (ValueError, KeyError, TypeError):
+        title = body = None
+    if not isinstance(title, str) or not isinstance(body, str):
+        raise Failed(
+            "%s answered something other than the notes: %s; %s"
+            % (what, one_line(res.stdout), RERUN)
+        )
+    return title or tag, body
+
+
+def collapse_sections(body: str, headings: List[str]) -> str:
+    """The generated notes with each `### <heading>` section of `headings` and its
+    `* ` entries folded into `<details><summary><heading> (<n>)</summary>`; a heading with
+    no entries, and every other line, stays as it is. The blank lines around the block
+    end it as an HTML block, so the list inside and the heading after it render."""
+    wanted = set(headings)
+    lines = body.split("\n")
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        title = line[4:].strip() if line.startswith("### ") else None
+        if title in wanted:
+            j = i + 1
+            while j < len(lines) and lines[j].startswith("* "):
+                j += 1
+            entries = lines[i + 1 : j]
+            if entries:
+                summary = "<details><summary>%s (%d)</summary>" % (title, len(entries))
+                out += ["", summary, ""] + entries + ["", "</details>", ""]
+                i = j
+                continue
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
+def release_notes(notes: str, body: str, headings: List[str]) -> str:
+    """The Release's body: the `--notes` line, a blank line, the collapsed notes."""
+    body = collapse_sections(body, headings)
+    return "%s\n\n%s" % (notes, body) if notes else body
+
+
 def plan_release(root: str, version: str, notes: str, report) -> Plan:
     """Run every check in order; Refused or Failed on the first that does not pass."""
     tag = tag_name(version)
@@ -224,7 +298,7 @@ def plan_release(root: str, version: str, notes: str, report) -> Plan:
         report(check_ci(head, root))
         if local:
             report("tag %s already on HEAD here, not on origin yet" % tag)
-    return Plan(
+    plan = Plan(
         tag=tag,
         version=tag[1:],
         head=head,
@@ -234,6 +308,12 @@ def plan_release(root: str, version: str, notes: str, report) -> Plan:
         release_url=release_url(tag, root),
         notes=notes,
     )
+    if not plan.release_url:
+        # asked before anything is made, so a failure here leaves nothing half-done
+        title, body = generated_notes(tag, head, root)
+        plan.title = title
+        plan.body = release_notes(notes, body, cfg.pr.collapse_headings)
+    return plan
 
 
 def _step(what: str, call):
@@ -267,9 +347,16 @@ def execute(plan: Plan, root: str, report) -> str:
         report("pushed %s to origin" % plan.tag)
     if plan.release_url:
         return plan.release_url
-    res = _step(
-        "gh release create %s" % plan.tag, lambda: _gh(plan.release_create_args()[1:], root)
-    )
+    fd, notes_file = tempfile.mkstemp(prefix="revali-release-", suffix=".md")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(plan.body)
+        res = _step(
+            "gh release create %s" % plan.tag,
+            lambda: _gh(plan.release_create_args(notes_file)[1:], root),
+        )
+    finally:
+        os.remove(notes_file)
     report("published the GitHub Release %s" % plan.tag)
     return gitops.first_line(res.stdout)
 
@@ -291,6 +378,9 @@ def cmd_release(args) -> int:
                 print("dry run: %s is already released: %s" % (plan.tag, plan.release_url))
             for cmd in cmds:
                 print("dry run: would run %s" % " ".join(_quoted(a) for a in cmd))
+            if plan.body:
+                print("dry run: the release notes:")
+                print(plan.body)
             return EXIT_OK
         if not plan.commands():
             print("%s is already released on %s: %s" % (plan.tag, plan.head[:12], plan.release_url))
@@ -307,4 +397,5 @@ def cmd_release(args) -> int:
 
 
 def _quoted(arg: str) -> str:
-    return '"%s"' % arg if (not arg or any(ch.isspace() for ch in arg)) else arg
+    plain = arg and not any(ch.isspace() or ch in "<>" for ch in arg)
+    return arg if plain else '"%s"' % arg

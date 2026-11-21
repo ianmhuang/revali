@@ -22,3 +22,10 @@ changelog:
     - title: Other Changes
       labels:
         - "*"
+      exclude:
+        labels:
+          - internal
+    # last: `revali release` publishes it collapsed ([pr] collapse_headings)
+    - title: Internal Changes
+      labels:
+        - internal

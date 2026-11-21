@@ -17,7 +17,8 @@ from revali.preflight import Stop, preflight
 from tests.helpers import ROOT, RepoCase
 
 CHANGE_MD = ".revali/feature__mul/change.md"
-RELEASE_LABELS = ("major", "minor", "patch", "docs", "skip-changelog")
+# M3.38 added `internal`
+RELEASE_LABELS = ("major", "minor", "patch", "docs", "internal", "skip-changelog")
 
 
 class _StageLog:
@@ -175,21 +176,28 @@ class ErrorTests(ConfigCase):
 
 def _parse_release_yml(text):
     """(excluded labels, [(category title, [labels])]) of a GitHub release.yml as plain as
-    the one revali ships: block lists, one scalar per line."""
+    the one revali ships: block lists, one scalar per line. A category's own `exclude:`
+    (M3.38: Other Changes leaves `internal` to the category after it) is skipped: its
+    labels are neither the global exclusions nor the category's labels."""
     excluded, categories = [], []
     section, target = "", None
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
-        if line in ("exclude:", "categories:"):
+        if line == "exclude:" and categories:
+            section, target = "category-exclude", None
+        elif line in ("exclude:", "categories:"):
             section, target = line[:-1], None
         elif line.startswith("- title:"):
+            section = "categories"
             categories.append((line.split(":", 1)[1].strip().strip("\"'"), []))
             target = categories[-1][1]
         elif line == "labels:":
             if section == "exclude":
                 target = excluded
+            elif section == "category-exclude":
+                target = []
         elif line.startswith("- ") and target is not None:
             target.append(line[2:].strip().strip("\"'"))
     return excluded, categories
@@ -209,12 +217,12 @@ class ReleaseYmlTests(unittest.TestCase):
         self.assertEqual(excluded, ["skip-changelog"])
         self.assertEqual(
             [labels for _, labels in categories],
-            [["major"], ["minor"], ["patch"], ["docs"], ["*"]],
+            [["major"], ["minor"], ["patch"], ["docs"], ["*"], ["internal"]],  # M3.38
         )
         titles = [title.lower() for title, _ in categories]
         for title, word in zip(titles, ("major", "minor", "patch", "docs"), strict=False):
             self.assertIn(word, title)
-        self.assertEqual(len(set(titles)), 5, titles)
+        self.assertEqual(len(set(titles)), 6, titles)
 
     def test_revalis_own_file_is_the_template(self):
         self.assertEqual(self.read(".github", "release.yml"), self.read("templates", "release.yml"))

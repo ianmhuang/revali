@@ -151,6 +151,8 @@ class PrCfg:
     # empty = revali leaves labels alone
     release_labels: List[str] = field(default_factory=list)
     kind_labels: dict = field(default_factory=dict)  # change.md kind -> one of release_labels
+    # the release notes sections `revali release` folds into a <details> block
+    collapse_headings: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -406,6 +408,12 @@ def _pr_problems(pr: PrCfg) -> List[str]:
             )
         else:
             seen.add(name.lower())
+    for heading in pr.collapse_headings:
+        if not isinstance(heading, str) or not heading.strip() or "\n" in heading:
+            problems.append(
+                "pr.collapse_headings must list section headings, each one non-empty line "
+                "(got %r)" % (heading,)
+            )
     if not pr.release_labels:
         return problems
     for kind, label in pr.kind_labels.items():

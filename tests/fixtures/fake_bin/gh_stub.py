@@ -57,6 +57,12 @@ DEFAULT = {
     "release_view_exit": 0,  # a failure other than not found
     "release_view_error": None,  # what that failure prints, when not the default
     "release_create_exit": 0,
+    # `api -X POST repos/{owner}/{repo}/releases/generate-notes -f tag_name=<tag> ...`:
+    # {"name": <tag>, "body": generated_notes} (a body naming the tag when None);
+    # `generate_notes_raw` replaces the whole answer when not None
+    "generated_notes": None,
+    "generate_notes_exit": 0,
+    "generate_notes_raw": None,
 }
 
 
@@ -74,10 +80,12 @@ def log(argv):
     if not path:
         return
     entry = {"exe": "gh", "argv": argv}
-    if "--body-file" in argv:
+    for flag in ("--body-file", "--notes-file"):
+        if flag not in argv:
+            continue
         # recorded here because the caller may remove the file afterwards
         # (`merge` deletes the record directory once the PR is merged)
-        body_path = argv[argv.index("--body-file") + 1]
+        body_path = argv[argv.index(flag) + 1]
         if os.path.isfile(body_path):
             with open(body_path, "r", encoding="utf-8") as fh:
                 entry["body"] = fh.read()
@@ -104,6 +112,20 @@ def main(argv):
             print("gh: Not Found (HTTP 404)", file=sys.stderr)
             return 1
         print(json.dumps({"name": name}))
+        return 0
+    if argv[:1] == ["api"] and any("releases/generate-notes" in a for a in argv):
+        if int(sc["generate_notes_exit"]):
+            print("gh_stub: generate-notes failed (HTTP 502)", file=sys.stderr)
+            return int(sc["generate_notes_exit"])
+        if sc["generate_notes_raw"] is not None:
+            print(sc["generate_notes_raw"])
+            return 0
+        fields = dict(a.split("=", 1) for a in argv if "=" in a and not a.startswith("-"))
+        tag = fields.get("tag_name", "")
+        body = sc["generated_notes"]
+        if body is None:
+            body = "## What's Changed\n* a change for %s\n" % tag
+        print(json.dumps({"name": tag, "body": body}))
         return 0
     if argv[:1] == ["api"] and any("/check-runs" in a for a in argv):
         if int(sc["commit_checks_exit"]):

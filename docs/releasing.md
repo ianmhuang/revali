@@ -118,19 +118,25 @@ auto fallback ([docs/configuration.md](configuration.md)).
    HEAD has passed (one still running is a refusal, not a wait). Only check runs are read
    (GitHub Actions and other apps; the older commit statuses are not), every page of them;
    a commit with none passes with a note, which is also what GitHub reports in the first
-   seconds after a push, before a workflow has registered its runs. Then it makes the tag,
-   its message `<repository name> <version>: <lead line>`, pushes it, and publishes the
-   Release.
-   GitHub generates the list of merged PRs since the previous tag, grouped by their release
-   labels through [.github/release.yml](../.github/release.yml); `--notes` puts one lead
-   line above it, saying why the version exists (the first sentence of its changelog section
-   will do). When a step fails (exit 1), run the same command again: a tag already on HEAD
+   seconds after a push, before a workflow has registered its runs. Then it asks GitHub for
+   the notes it generates for the tag on HEAD (`gh api -X POST
+   repos/{owner}/{repo}/releases/generate-notes`, which stores nothing): the merged PRs
+   since the previous tag, grouped by their release labels through
+   [.github/release.yml](../.github/release.yml). `--notes` puts one lead line above them,
+   saying why the version exists (the first sentence of its changelog section will do), and
+   each section whose heading `[pr] collapse_headings` lists (by default `Internal
+   Changes`) is folded into a `<details>` block: the Release shows it closed, with its
+   number of entries, and a click opens it. Then it makes the tag, its message
+   `<repository name> <version>: <lead line>`, pushes it, and publishes the Release with
+   those notes (`gh release create --verify-tag --title <title> --notes-file <file>`). When a step fails (exit 1), run the same command again: a tag already on HEAD
    is kept, and only the steps still missing run; with the Release already there it prints
    its URL and exits 0. Once the tag is on origin on HEAD the rerun does not check CI again:
    when `revali release` pushed it, the check ran before the push, and a workflow that runs
    on every push runs for the tag too, on the same commit; a tag pushed by hand is taken as
    it is, with no CI check. `--dry-run` runs the checks and prints the commands it would
-   run. By hand, the same three steps are:
+   run and the notes it would publish. By hand, the same three steps are below; GitHub's
+   `--generate-notes` lists the Internal Changes section open, as release.yml has no way to
+   fold a section:
 
    ```
    git tag -a v<version> -m "revali <version>: <what it brings>" <merge commit>
@@ -145,16 +151,25 @@ auto fallback ([docs/configuration.md](configuration.md)).
 
 ## Release notes for a project that uses revali
 
-Every PR revali opens carries one release label (`major`, `minor`, `patch`, `docs` or
-`skip-changelog` by default) taken from its change.md: the `release:` field when it has one,
-else the label `[pr] kind_labels` gives its kind (`minor`, `patch` or `docs`); `major` and
-`skip-changelog` come from `release:` only ([docs/configuration.md](configuration.md)).
+Every PR revali opens carries one release label (`major`, `minor`, `patch`, `docs`,
+`internal` or `skip-changelog` by default) taken from its change.md: the `release:` field
+when it has one, else the label `[pr] kind_labels` gives its kind (`minor`, `patch` or
+`docs`); `major`, `internal` and `skip-changelog` come from `release:` only
+([docs/configuration.md](configuration.md)). `internal` is for a change no user of the
+project can notice (tests, CI, internal tooling): it is still listed, under Internal
+Changes, which `revali release` publishes collapsed, so a label put on the wrong change
+hides nothing. `skip-changelog` leaves a PR out of the notes; keep it for what needs no line
+at all, such as a release's own version bump. The Reviewer checks the label against the
+diff ([checklists/default.md](../checklists/default.md)).
 `revali init` writes `.github/release.yml` from [templates/release.yml](../templates/release.yml)
 when the project has none; a project set up without `init` copies it there by hand. With
 it, `gh release create v<version> --verify-tag --generate-notes --notes "<lead line>"` after
 each tag gives the same grouped notes: Major, Minor, Patch and Docs changes, the rest under
-Other, a PR labelled `skip-changelog` (`release: skip-changelog` in change.md) left out. A project that labels PRs another way sets
-`[pr] release_labels = []`, and revali leaves its labels alone.
+Other, then Internal Changes, a PR labelled `skip-changelog` (`release: skip-changelog` in change.md) left out. A project that labels PRs another way sets
+`[pr] release_labels = []`, and revali leaves its labels alone. A project whose
+`.github/release.yml` was copied from an earlier template has no Internal Changes category
+until it takes the current one: an `internal` PR then falls under Other Changes, still
+listed, and is not collapsed.
 
 GitHub reads `.github/release.yml` from the tagged commit, so commit the file before the
 tag: a release whose tag predates the file lists its PRs ungrouped under "What's Changed",

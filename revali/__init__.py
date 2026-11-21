@@ -4,7 +4,7 @@ NAME = "revali"
 VERSION = "0.5.0"
 CONFIG_VERSION = 1
 STATE_VERSION = 11  # 11: `validated_sha`; 10: stage `closed`, `merged_outside`
-PROMPT_VERSION = "16"  # bumped when prompts/, schemas/ or checklists/ change
+PROMPT_VERSION = "17"  # bumped when prompts/, schemas/ or checklists/ change
 
 # Exit codes shared by every subcommand.
 EXIT_OK = 0  # done / ready to merge

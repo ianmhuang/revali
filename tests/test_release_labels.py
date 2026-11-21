@@ -99,7 +99,9 @@ class ConfigKeys(LabelCase):
     def test_the_defaults(self):
         cfg = self.parse("")
         self.assertEqual(
-            cfg.pr.release_labels, ["major", "minor", "patch", "docs", "skip-changelog"]
+            # M3.38 added `internal`
+            cfg.pr.release_labels,
+            ["major", "minor", "patch", "docs", "internal", "skip-changelog"],
         )
         self.assertEqual(cfg.pr.kind_labels, {"feature": "minor", "fix": "patch", "docs": "docs"})
 
@@ -417,10 +419,11 @@ class Files(LabelCase):
     def test_release_yml_groups_by_the_labels(self):
         text = self.text("templates", "release.yml")
         order = [
-            text.index("- title: %s" % t) for t in ("Major", "Minor", "Patch", "Docs", "Other")
+            text.index("- title: %s" % t)
+            for t in ("Major", "Minor", "Patch", "Docs", "Other", "Internal")  # M3.38
         ]
         self.assertEqual(order, sorted(order))
-        for label in ("major", "minor", "patch", "docs"):
+        for label in ("major", "minor", "patch", "docs", "internal"):
             self.assertIn("- %s\n" % label, text)
         exclude = text[text.index("exclude:") : text.index("categories:")]
         self.assertIn("skip-changelog", exclude)
