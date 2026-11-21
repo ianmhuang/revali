@@ -55,6 +55,7 @@ DEFAULT = {
     # `release view <tag>`: tag -> URL of the Releases that exist; any other tag is not found
     "releases": {},
     "release_view_exit": 0,  # a failure other than not found
+    "release_view_error": None,  # what that failure prints, when not the default
     "release_create_exit": 0,
 }
 
@@ -117,7 +118,8 @@ def main(argv):
         return 0
     if argv[:2] == ["release", "view"]:
         if int(sc["release_view_exit"]):
-            print("gh_stub: release view failed (HTTP 502)", file=sys.stderr)
+            err = sc["release_view_error"] or "gh_stub: release view failed (HTTP 502)"
+            print(err, file=sys.stderr)
             return int(sc["release_view_exit"])
         if argv[2] not in sc["releases"]:
             print("release not found", file=sys.stderr)

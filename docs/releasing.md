@@ -124,10 +124,11 @@ auto fallback ([docs/configuration.md](configuration.md)).
    line above it, saying why the version exists (the first sentence of its changelog section
    will do). When a step fails (exit 1), run the same command again: a tag already on HEAD
    is kept, and only the steps still missing run; with the Release already there it prints
-   its URL and exits 0. Once the tag is on origin the rerun does not check CI again: the
-   check ran before the push, and a workflow that runs on every push runs for the tag too,
-   on the same commit. `--dry-run` runs the checks and prints the commands it would run.
-   By hand, the same three steps are:
+   its URL and exits 0. Once the tag is on origin on HEAD the rerun does not check CI again:
+   when `revali release` pushed it, the check ran before the push, and a workflow that runs
+   on every push runs for the tag too, on the same commit; a tag pushed by hand is taken as
+   it is, with no CI check. `--dry-run` runs the checks and prints the commands it would
+   run. By hand, the same three steps are:
 
    ```
    git tag -a v<version> -m "revali <version>: <what it brings>" <merge commit>

@@ -165,7 +165,7 @@ def release_url(tag: str, root: str) -> str:
     res = _gh(["release", "view", tag, "--json", "url", "--jq", ".url"], root)
     if res.ok:
         return res.stdout.strip()
-    if "not found" in res.text.lower():
+    if "release not found" in res.text.lower():  # not a repository-level 404
         return ""
     raise Failed("gh release view %s failed: %s" % (tag, one_line(res.text)))
 

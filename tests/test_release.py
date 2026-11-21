@@ -358,6 +358,24 @@ class Failures(Case):
         self.assertEqual(len(self.error_lines(out)), 1, out)
         self.assertEqual(self.local_tag(), "")
 
+    def test_a_repository_not_found_is_not_a_missing_release(self):
+        # review round 2 follow-up 3: only "release not found" means there is no Release
+        self.scenario(
+            {
+                "release_view_exit": 1,
+                "release_view_error": "HTTP 404: Not Found (https://api.github.com/repos/me/sample)",
+            }
+        )
+        code, out = run(["release", "0.5.0"])
+        self.assertEqual(code, EXIT_ERROR, out)
+        errors = self.error_lines(out)
+        self.assertEqual(len(errors), 1, out)
+        self.assertIn("gh release view v0.5.0 failed", errors[0])
+        self.assertIn("HTTP 404", errors[0])
+        self.assertEqual(self.local_tag(), "")
+        self.assertEqual(self.origin_tag(), "")
+        self.assertEqual(self.gh_release_calls("create"), [])
+
     def test_a_release_create_that_times_out_after_the_push(self):
         real = release._gh
 
