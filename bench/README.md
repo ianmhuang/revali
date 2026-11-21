@@ -72,7 +72,8 @@ directory.
 `--budget-usd` is the total of every invocation: what `results.json` already charges counts
 against it before the first new session. The model, effort, session cap, line margin and case
 directories come from `results.json` (a file written before `--effort` existed resumes as
-one that gave none); given on the command line they must match it, and so
+one that gave none, and a recorded `--effort` the claude engine does not take is refused,
+since a resume passes it to every session); given on the command line they must match it, and so
 must `PROMPT_VERSION`, or the run is refused before anything starts (a set measured with two
 settings has no single rate). `--out` and `--dry-run` cannot go with `--resume`. The case
 directories are recorded as absolute paths, so a resume may start from any directory. Case

@@ -301,12 +301,18 @@ def isolate(clone: str, branch: str, base_branch: str, base: str) -> None:
     _git(["reflog", "expire", "--expire=now", "--all"], clone)
 
 
-def run_case(case: Case, args, spent: float, out_dir: str, on_session=None) -> Tuple[Result, str]:
+def run_case(
+    case: Case, args, spent: float, out_dir: str, on_session=None, known=None
+) -> Tuple[Result, str]:
     """One case and why the cases after it are not run ("" when they are). `on_session(cap,
-    effort)` is called just before the session starts."""
+    effort)` is called just before the session starts; `known["effort"]` is set once the
+    case's configuration is read, so a caller that is interrupted still has it (PR #115
+    round 2 F5)."""
     started = time.monotonic()
     tmp = tempfile.mkdtemp(prefix="revali bench ")
-    known = {"effort": ""}  # filled in once the case's configuration is read
+    if known is None:
+        known = {}
+    known.setdefault("effort", "")
     try:
         result, stop_reason = _run_in(case, args, spent, out_dir, tmp, on_session, known)
     finally:
@@ -515,10 +521,6 @@ def _same_dirs(a: List[str], b: List[str]) -> bool:
     return norm(a) == norm(b)
 
 
-def _effort_ok(value) -> bool:
-    return isinstance(value, str) and (value == "" or value in EFFORTS)
-
-
 def _prior_results(path: str):
     """The cases of an earlier run's results.json as Results, in their order; (None, reason)
     when the file cannot be resumed."""
@@ -547,10 +549,10 @@ def _prior_results(path: str):
             for c in entries
         )
         and isinstance(prior.get("model") or "", str)
-        # absent before M4.4.1: none given; otherwise a level the engine takes (PR #115 round
-        # 1 F3: a resume passes it to every session without the command line's check)
-        and _effort_ok(prior.get("effort", ""))
-        and all(_effort_ok(c.get("effort", "")) for c in entries)
+        # absent before M4.4.1: none given. A case's record only says what its
+        # configuration chose, which revali does not check (PR #115 round 2 F4)
+        and isinstance(prior.get("effort", ""), str)
+        and all(isinstance(c.get("effort", ""), str) for c in entries)
         and isinstance(prior.get("session_budget_usd") or 0.0, (int, float))
         and isinstance(prior.get("line_margin", DEFAULT_MARGIN), int)
         and not any(isinstance(prior.get(k), bool) for k in ("session_budget_usd", "line_margin"))
@@ -559,6 +561,13 @@ def _prior_results(path: str):
         return None, "%s is not a benchmark results.json" % path
     if prior.get("dry_run"):
         return None, "%s is from a dry run; nothing to resume" % path
+    effort = prior.get("effort", "")
+    if effort and effort not in EFFORTS:  # a resume passes it to every session (round 1 F3)
+        return None, "%s records effort %r, which the claude engine does not take (%s)" % (
+            path,
+            effort,
+            ", ".join(EFFORTS),
+        )
     results = {}
     for c in entries:
         results[c["case"]] = Result(**{k: v for k, v in c.items() if k in known})
@@ -737,7 +746,7 @@ def main(argv=None) -> int:
         def on_session(
             cap, effort, name=name, carried=carried, carried_cost=carried_cost, session=session
         ):
-            session["cap"], session["effort"] = cap, effort
+            session["cap"] = cap
             # the earlier known spend stays in `cost` while this session runs (PR #99 round 4 F1)
             started = Result(name, "started", effort=effort, cost=carried_cost)
             started.charged, started.message = cap + carried, STARTED
@@ -752,7 +761,9 @@ def main(argv=None) -> int:
                 result = Result(name, "not-run", message=stopped)
             else:
                 try:
-                    result, stop_reason = run_case(case, args, spent, out_dir, on_session)
+                    result, stop_reason = run_case(
+                        case, args, spent, out_dir, on_session, known=session
+                    )
                 except KeyboardInterrupt:
                     result = _interrupted(name, session["cap"])
                     result.effort = session["effort"]

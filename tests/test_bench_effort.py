@@ -106,6 +106,17 @@ class Effort(BenchCase):
             self.run_bench("--effort", "medium")
         self.assertEqual((seen[0]["outcome"], seen[0]["effort"]), ("started", "medium"))
 
+    def test_an_interrupt_before_the_session_records_the_effort(self):
+        """AC-3 (round 2 F5): the configuration was read, the session never started"""
+        self.make_case("a-one")
+        with mock.patch.object(bench, "build_prompt", side_effect=KeyboardInterrupt):
+            code, out, cases, _ = self.run_bench("--effort", "medium")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(cases["a-one"]["outcome"], "interrupted")
+        self.assertEqual(cases["a-one"]["charged"], 0)
+        self.assertEqual(cases["a-one"]["effort"], "medium")
+        self.assertEqual(self.fake_calls("claude"), [])
+
     def test_a_level_the_engine_does_not_take(self):
         """AC-2: a usage error before anything runs"""
         self.make_case("a-default")
@@ -222,7 +233,7 @@ class EffortResume(BenchCase):
         with open(path, encoding="utf-8") as fh:
             results = json.load(fh)
         original = dict(results)
-        for value in (3, 0, False, [], "hgih"):
+        for value in (3, 0, False, []):
             with self.subTest(value=value):
                 results = dict(original, effort=value)
                 with open(path, "w", encoding="utf-8") as fh:
@@ -230,11 +241,38 @@ class EffortResume(BenchCase):
                 code, out, err = self.resume()
                 self.assertEqual(code, 1, out + err)
                 self.assertIn("not a benchmark results.json", err)
-        cases = [dict(c, effort="hgih") for c in original["cases"]]  # a case's own
+        # PR #115 round 2 follow-up: a level the engine does not take is named
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(dict(original, effort="hgih"), fh)
+        code, out, err = self.resume()
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("effort 'hgih'", err)
+        self.assertIn("medium", err)  # the levels it takes
+        # a case's own record need only be a string (round 2 F4)
+        cases = [dict(c, effort=3) for c in original["cases"]]
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(dict(original, cases=cases), fh)
         code, out, err = self.resume()
         self.assertEqual(code, 1, out + err)
+        self.assertIn("not a benchmark results.json", err)
+
+    def test_a_case_config_with_a_level_the_engine_does_not_take_resumes(self):
+        """Round 2 F4: without --effort the case's configuration chooses, and revali does
+        not check it; the results.json the run wrote resumes."""
+        for name in ("a-one", "b-two"):
+            path = self.make_case(name)
+            config = self.read("revali.toml").replace(
+                "budget_usd = 1.0\n", 'budget_usd = 1.0\neffort = "turbo"\n', 1
+            )
+            with open(os.path.join(path, "revali.toml"), "w", encoding="utf-8", newline="") as fh:
+                fh.write(config)
+        self.claude(claude_entry(answer(finding())))
+        code, out, cases, _ = self.run_bench(budget="1.2")
+        self.assertEqual(cases["a-one"]["effort"], "turbo", out)
+        self.assertEqual(cases["b-two"]["outcome"], "not-run", out)
+        code, out, err = self.resume()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(effort_of(self.fake_calls("claude")[-1]["argv"]), "turbo")
 
 
 class Readme(unittest.TestCase):
