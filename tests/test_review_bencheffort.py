@@ -38,9 +38,12 @@ class EffortCase(BenchCase):
     def two_cases(self):
         """`a-repo` takes the repository's configuration, `b-own` carries its own."""
         self.make_case("a-repo")
-        path = self.make_case("b-own")
+        self.case_with_own_effort("b-own", OWN_EFFORT)
+
+    def case_with_own_effort(self, name, effort):
+        path = self.make_case(name)
         with open(os.path.join(path, "revali.toml"), "w", encoding="utf-8", newline="") as fh:
-            fh.write(with_effort(self.plain_config, OWN_EFFORT))
+            fh.write(with_effort(self.plain_config, effort))
 
     def efforts_passed(self):
         passed = []
@@ -248,6 +251,27 @@ class EffortResume(EffortCase):
         self.assertNotEqual(code, 0, out + err)
         self.assertEqual(len(self.fake_calls("claude")), 1)
         self.assertEqual(self.results_file(), edited)
+
+    def test_a_run_whose_cases_chose_another_level_resumes(self):
+        """AC-1, AC-4: without the option the case's configuration chooses, and revali does
+        not check that value, so the results.json such a run wrote still resumes."""
+        for name in ("a-one", "b-two"):
+            self.case_with_own_effort(name, "turbo")
+        self.claude(claude_entry(answer(finding())))
+        code, out, cases, results = self.run_bench(budget="1.2")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(cases["a-one"]["outcome"], "caught-strict", out)
+        self.assertEqual(cases["a-one"]["effort"], "turbo")
+        self.assertEqual(cases["b-two"]["outcome"], "not-run", out)
+        self.assertEqual(results["effort"], "")
+        self.assertEqual(self.efforts_passed(), ["turbo"])
+        code, out, err = self.resume()
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self.efforts_passed(), ["turbo", "turbo"])
+        results = self.results_file()
+        self.assertEqual(results["effort"], "")
+        self.assertEqual([c["outcome"] for c in results["cases"]], ["caught-strict"] * 2)
+        self.assertEqual([c["effort"] for c in results["cases"]], ["turbo", "turbo"])
 
     def strip_effort(self):
         """results.json as a revali before `--effort` wrote it."""
