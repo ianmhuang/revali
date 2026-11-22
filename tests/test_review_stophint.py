@@ -1,5 +1,6 @@
 """feature/stop-hint: the hint after a round whose findings are all low and all sit in what
-the previous round's fix changed (AC-1, AC-2, AC-3, AC-6).
+the previous round's fix changed (AC-1, AC-2, AC-3, AC-6). After CHANGES_REQUESTED only a
+round that nothing but the reviewer's own verdict holds back gets it.
 
 The fixture's src/calc.py has 13 lines: `return a + b` is line 5, `return a * b` line 13.
 The fix between round 1 and round 2 rewrites line 5 only, so the lines within the margin
@@ -62,10 +63,11 @@ class StopHintCase(RepoCase):
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
 
-    def two_rounds(self, second, *later, expect=EXIT_OK):
-        """Round 1 asks for a change at line 5 and commits its test file; the author rewrites
-        line 5; round 2 answers `second`."""
-        self.claude(claude_entry(round_one()), claude_entry(second, write_tests=False), *later)
+    def two_rounds(self, second, *later, expect=EXIT_OK, first=None):
+        """Round 1 answers `first` (by default it asks for a change at line 5 and commits its
+        test file); the author rewrites line 5; round 2 answers `second`."""
+        first = first or claude_entry(round_one())
+        self.claude(first, claude_entry(second, write_tests=False), *later)
         self.first_round()
         self.fix_add()
         code, out = run_cli(["run", "--foreground"])
@@ -102,10 +104,13 @@ class ReadyToMerge(StopHintCase):
         out = self.two_rounds(answer([finding("F2", 2), finding("F3", 5), finding("F4", 8)]))
         self.assertIn("READY TO MERGE", out)
         self.assert_hint(out, 3, 2)  # AC-1: 5 - 3, 5, 5 + 3; AC-2
+        self.assertIn("another round", hint_lines(out)[0])  # AC-2: the branch merges as it is
         code, waited = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_OK, waited)
         self.assertIn("hint:", waited)  # AC-2: the stage message, as `wait` prints it
+        self.assertIn("consider stopping", waited)
         state = self.state()  # AC-6: the outcome of an approved, validated second round
+        self.assertIn("consider stopping", state.message)
         self.assertEqual(state.stage, "ready_to_merge")
         self.assertEqual((len(state.rounds), state.fixes), (2, 1))
         self.assertFalse(state.fix_due)
@@ -168,7 +173,12 @@ class ActionNeeded(StopHintCase):
         out = self.two_rounds(second, claude_entry(third, write_tests=False), expect=EXIT_ACTION)
         self.assertIn("ACTION NEEDED", out)
         self.assert_hint(out, 2, 2)  # AC-2
+        # AC-2: another round runs anyway, so the hint is about answering, not about stopping
+        self.assertIn("next round", hint_lines(out)[0])
+        self.assertNotIn("consider stopping", out)
+        self.assertNotIn("consider stopping", self.status())
         state = self.state()  # AC-6: a round that asked for changes, as without the hint
+        self.assertNotIn("consider stopping", state.message)
         self.assertEqual(state.stage, "needs_action")
         self.assertTrue(state.fix_due)
         self.assertEqual(state.fixes, 1)
@@ -206,6 +216,53 @@ class ActionNeeded(StopHintCase):
         )
         self.assertIn("FAILED", out)
         self.assert_no_hint(out)  # AC-3
+
+
+class BlockedForAnotherReason(StopHintCase):
+    """AC-2: after CHANGES_REQUESTED the hint is for a round that only the reviewer's own
+    verdict holds back. Each round here has one low finding inside the fix and something
+    else that blocks, which no wontfix on that finding answers. AC-3: a NEEDS_INFO verdict
+    gets no hint, the second one of a branch (which revali turns into CHANGES_REQUESTED)
+    included."""
+
+    def test_unjustified_test_change(self):
+        change = [{"file": "tests/test_calc.py", "justified": False, "reason": "assert dropped"}]
+        second = answer([finding("F2", 5)], verdict="CHANGES_REQUESTED", test_changes=change)
+        out = self.two_rounds(second, expect=EXIT_ACTION)
+        self.assertIn("tests/test_calc.py", out)
+        self.assert_no_hint(out)
+
+    def test_unjustified_dependency_change(self):
+        # the reviewer approved; revali asks for changes because of the manifest
+        dep = [{"file": "requirements.txt", "justified": False, "reason": "not in change.md"}]
+        second = answer([finding("F2", 5)], dependencies_changed=dep)
+        out = self.two_rounds(second, expect=EXIT_ACTION)
+        self.assertIn("requirements.txt", out)
+        self.assertEqual(self.state().last_verdict, "CHANGES_REQUESTED")
+        self.assert_no_hint(out)
+
+    def test_ac_without_a_test(self):
+        second = answer([finding("F2", 5)], verdict="CHANGES_REQUESTED", tests=[], not_testable=[])
+        out = self.two_rounds(second, expect=EXIT_ACTION)
+        self.assertIn("AC-1", out)
+        self.assertEqual(self.state().last_verdict, "CHANGES_REQUESTED")
+        self.assert_no_hint(out)
+
+    def test_second_needs_info(self):
+        asked = approve_response(verdict="NEEDS_INFO", questions=["Are floats in scope?"], tests=[])
+        again = answer(
+            [finding("F2", 5)],
+            previous=[],
+            verdict="NEEDS_INFO",
+            questions=["And complex numbers?"],
+            tests=[],
+        )
+        out = self.two_rounds(
+            again, expect=EXIT_ACTION, first=claude_entry(asked, write_tests=False)
+        )
+        self.assertIn("And complex numbers?", out)
+        self.assertEqual(self.state().last_verdict, "CHANGES_REQUESTED")
+        self.assert_no_hint(out)
 
 
 class ThirdRound(StopHintCase):
