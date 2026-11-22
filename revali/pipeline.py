@@ -729,26 +729,28 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
         lows = []
         if review.reviewer_only(outcome.data, outcome.gaps):  # a wontfix cannot answer the rest
             lows = stophint.derived_lows(state, ctx.repo_root, log.detail)
+        last = _last_cycle(ctx, state)
         message = "changes requested in round %d (%s)" % (outcome.round_no, counts)
         if lows:
-            message += "; " + stophint.short(lows, ready=False)
-            last = state.fixes >= ctx.cfg.review.max_fixes  # the next run's count goes over
+            message += "; " + stophint.short(lows, ready=False, last_cycle=last)
             others += "\n" + stophint.hint_line(
                 lows, outcome.round_no, rdir, ready=False, last_cycle=last
             )
+        elif last:
+            message += "; " + stophint.LAST_CYCLE
         _stage(state, rdir, log, "needs_action", message, EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION, log)
         print(
             "ACTION NEEDED: changes requested (round %d, fix cycle %d of %d). Full review: %s\n"
-            "Fix what blocks, or answer each finding in %s (fixed / wontfix: <reason>), "
-            "commit, run again.\n%s%s"
+            "Fix what blocks, or answer each finding in %s (fixed / wontfix: <reason>)%s\n%s%s"
             % (
                 outcome.round_no,
                 state.fixes,
                 ctx.cfg.review.max_fixes,
                 outcome.review_path,
                 os.path.join(rdir, "response-%d.md" % outcome.round_no),
+                _then(ctx, state),
                 reasons,
                 others,
             )
@@ -760,12 +762,28 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
     )
 
 
+def _last_cycle(ctx, state: State) -> bool:
+    """The round that owes a fix used the last fix cycle: the next run on a new commit counts
+    one more and stops with exit 3 in `_rerun_bookkeeping` instead of reviewing."""
+    return state.fixes >= ctx.cfg.review.max_fixes
+
+
+def _then(ctx, state: State) -> str:
+    """How an exit 2 message after a CHANGES_REQUESTED round or a failed validation ends."""
+    if not _last_cycle(ctx, state):
+        return ", commit, run again."
+    return (
+        "; fix cycles used up (%d of %d): the next run on a new commit stops for a human to "
+        "decide." % (state.fixes, ctx.cfg.review.max_fixes)
+    )
+
+
 def _validate_and_finish(
     ctx, state: State, rdir: str, log: RunLog, round_no: int, data: dict, review_path: str
 ) -> int:
     """After an APPROVE (this run's, or one a previous run recorded and never validated)."""
     from revali import pr as prstage
-    from revali import review, validate
+    from revali import review, stophint, validate
 
     counts = review.counts_label(data, review_path)
     others = review.non_blocking_note(data, round_no, review_path, rdir)
@@ -781,24 +799,22 @@ def _validate_and_finish(
     if vout.result == validate.FAIL:
         summary = validate.summary_for_author(vout, rdir)
         state.fix_due = True  # saved by _stage
-        _stage(
-            state,
-            rdir,
-            log,
-            "needs_action",
-            "validation %d failed at %s (%s)" % (vout.number, validate.failed_where(vout), counts),
-            EXIT_ACTION,
+        message = "validation %d failed at %s (%s)" % (
+            vout.number,
+            validate.failed_where(vout),
+            counts,
         )
+        if _last_cycle(ctx, state):
+            message += "; " + stophint.LAST_CYCLE
+        _stage(state, rdir, log, "needs_action", message, EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION, log)
         print(
             "ACTION NEEDED: %s\nFix (or correct the test if the diagnosis says the test is wrong, "
-            "and say so in %s), commit, run again.%s"
-            % (summary, os.path.join(rdir, "response-%d.md" % round_no), others)
+            "and say so in %s)%s%s"
+            % (summary, os.path.join(rdir, "response-%d.md" % round_no), _then(ctx, state), others)
         )
         return EXIT_ACTION
-
-    from revali import stophint
 
     lows = stophint.derived_lows(state, ctx.repo_root, log.detail)
     message = "validation %d passed" % vout.number

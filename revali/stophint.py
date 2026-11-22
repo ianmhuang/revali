@@ -10,6 +10,8 @@ from revali.procs import ProcError
 from revali.state import State
 
 MARGIN = 3  # lines around a hunk that still count as the fix
+# the end of the stage message after a round that used the last fix cycle, hint or not
+LAST_CYCLE = "last fix cycle: the next run stops for a human"
 
 Note = Optional[Callable[[str], None]]
 
@@ -81,7 +83,11 @@ def hint_line(
     )
 
 
-def short(findings: List[dict], ready: bool) -> str:
+def short(findings: List[dict], ready: bool, last_cycle: bool = False) -> str:
     """The stage message's form: what `wait` and `status` print."""
     head = "hint: %d low finding(s) in lines the last fix changed, " % len(findings)
-    return head + ("consider stopping" if ready else "consider answering, not changing them")
+    if ready:
+        return head + "consider stopping"
+    if last_cycle:
+        return head + "consider answering; " + LAST_CYCLE
+    return head + "consider answering, not changing them"

@@ -219,6 +219,11 @@ After exit code 2 the author fixes or answers in
 commits, and runs again; a cycle after a CHANGES_REQUESTED round or a failed
 validation counts against `review.max_fixes`, and answering a NEEDS_INFO round
 or fixing a preflight refusal does not.
+After the round that used the last cycle (`fixes` equal to `max_fixes`) the exit 2 message
+ends with "fix cycles used up (<fixes> of <max_fixes>): the next run on a new commit stops
+for a human to decide" instead of "commit, run again", and the stage message, which `wait`
+and `status` print, ends with "last fix cycle: the next run stops for a human": that run
+counts one more cycle and stops with exit 3 without a review.
 The cycle is owed from the moment a CHANGES_REQUESTED round is saved (from
 the exit 2 of a failed validation) until a run passes preflight on a new
 commit and counts it. A run that stops before the review (preflight, the
