@@ -10,7 +10,7 @@ import json
 import os
 import unittest
 
-from revali import EXIT_ACTION, EXIT_OK
+from revali import EXIT_ACTION, EXIT_HUMAN, EXIT_OK
 from revali.state import State
 from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
 from tests.test_validate import diagnosis
@@ -175,6 +175,7 @@ class ActionNeeded(StopHintCase):
         self.assert_hint(out, 2, 2)  # AC-2
         # AC-2: another round runs anyway, so the hint is about answering, not about stopping
         self.assertIn("next round", hint_lines(out)[0])
+        self.assertNotIn("human", hint_lines(out)[0])  # fix cycle 1 of 2: not the last one
         self.assertNotIn("consider stopping", out)
         self.assertNotIn("consider stopping", self.status())
         state = self.state()  # AC-6: a round that asked for changes, as without the hint
@@ -216,6 +217,40 @@ class ActionNeeded(StopHintCase):
         )
         self.assertIn("FAILED", out)
         self.assert_no_hint(out)  # AC-3
+
+
+class LastFixCycle(StopHintCase):
+    """AC-2: after CHANGES_REQUESTED the hint says what the next run does. The fixture's
+    `review.max_fixes` is 2, so round 3 uses the last fix cycle: the run after it stops for
+    a human instead of reviewing, and the hint says that rather than "the next round still
+    runs"."""
+
+    def test_round_three_names_the_stop(self):
+        blocker = finding("F2", 13, sev="high", kind="correctness")
+        second = answer([blocker], verdict="CHANGES_REQUESTED")
+        third = approve_response(
+            verdict="CHANGES_REQUESTED",
+            findings=[finding("F3", 13)],
+            previous_findings=[{"id": "F2", "status": "resolved", "note": "fixed"}],
+        )
+        out = self.two_rounds(second, claude_entry(third, write_tests=False), expect=EXIT_ACTION)
+        self.assertEqual(hint_lines(out), [], out)  # AC-3: round 2 has a high finding
+        self.fix_mul()  # line 13
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_ACTION, out)
+        self.assert_hint(out, 1, 3)
+        hint = hint_lines(out)[0]
+        self.assertIn("human", hint)
+        self.assertNotIn("still runs", hint)
+        state = self.state()  # AC-6: the round's outcome is the one without a hint
+        self.assertEqual(state.stage, "needs_action")
+        self.assertEqual((len(state.rounds), state.fixes), (3, 2))
+        self.assertTrue(state.fix_due)
+        # what the hint announced: the next run on a new commit stops, no fourth round
+        git(["commit", "-q", "--allow-empty", "-m", "answer round 3"], self.repo)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_HUMAN, out)
+        self.assertEqual(len(self.state().rounds), 3)
 
 
 class BlockedForAnotherReason(StopHintCase):
