@@ -1018,7 +1018,8 @@ def _check_reasons(data: dict, gaps: List[str]) -> List[str]:
 
 def reviewer_only(data: dict, gaps: List[str]) -> bool:
     """True when the round asks for changes only because the reviewer's verdict does: no
-    blocking finding, unjustified test or dependency change, AC gap or open question."""
+    blocking finding, unjustified test or dependency change or AC gap. Open questions need
+    no check here: they come with the verdict NEEDS_INFO, which this rules out."""
     return data.get("verdict") == CHANGES_REQUESTED and not _check_reasons(data, gaps)
 
 

@@ -53,9 +53,13 @@ def derived_lows(state: State, repo_root: str, note: Note = None) -> List[dict]:
     return list(findings) if all(_in_fix(f, ranges) for f in findings) else []
 
 
-def hint_line(findings: List[dict], round_no: int, rdir: str, ready: bool) -> str:
+def hint_line(
+    findings: List[dict], round_no: int, rdir: str, ready: bool, last_cycle: bool = False
+) -> str:
     """`ready`: READY TO MERGE, where the branch can merge as it is. After CHANGES_REQUESTED
-    another round runs anyway, so the hint is about how to answer, not whether to stop."""
+    another round is needed to merge, so the hint is about how to answer, not whether to
+    stop; `last_cycle`: that round used the last fix cycle, so the next run stops for a human
+    (`review.max_fixes`) instead of reviewing."""
     response = os.path.join(rdir, "response-%d.md" % round_no)
     head = "hint: the %d low finding(s) of round %d all sit in lines the last fix changed; " % (
         len(findings),
@@ -66,9 +70,14 @@ def hint_line(findings: List[dict], round_no: int, rdir: str, ready: bool) -> st
             "consider answering them in %s (wontfix / follow-up) instead of another round"
             % response
         )
+    then = (
+        "this was the last fix cycle, so the next run stops for a human to decide"
+        if last_cycle
+        else "the next round still runs"
+    )
     return head + (
         "consider answering them in %s (wontfix / follow-up) rather than changing those lines "
-        "again; the next round still runs" % response
+        "again; %s" % (response, then)
     )
 
 

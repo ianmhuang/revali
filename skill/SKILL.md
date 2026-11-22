@@ -104,7 +104,8 @@ Acting on the result:
   changed), answer those findings there as wontfix or follow-up rather than changing the
   lines again, then commit and run again as usual: the branch needs another round to merge,
   and a run needs a new commit, so when the answers are all you changed, commit with
-  `git commit --allow-empty`.
+  `git commit --allow-empty`. When the hint says that was the last fix cycle, the next run
+  stops with exit 3: answer the findings, then tell the user instead of running again.
 - `1` (ERROR): report the message to the user and stop; do not retry blindly.
   When the message says a model "hit its usage limit" or "is overloaded", tell
   the user what it quotes (the reset time for a limit) and the two ways on (run

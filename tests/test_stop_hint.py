@@ -3,7 +3,7 @@ round (feature/stop-hint)."""
 
 import unittest
 
-from revali import EXIT_ACTION, EXIT_OK, gitops, stophint
+from revali import EXIT_ACTION, EXIT_HUMAN, EXIT_OK, gitops, stophint
 from revali.merge import merge_summary
 from revali.state import State, cost_per_round
 from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
@@ -49,6 +49,9 @@ class HintCase(RepoCase):
 
     def message(self):
         return State.load(self.rdir()).message
+
+    def head(self):
+        return git(["rev-parse", "HEAD"], self.repo).strip()
 
 
 class ReadyHint(HintCase):
@@ -141,6 +144,23 @@ class ActionHint(HintCase):
         self.assertEqual(state.stage, "needs_action")  # AC-6
         self.assertTrue(state.fix_due)
 
+    def test_the_last_fix_cycle_names_the_stop(self):
+        """PR round 2 F4: with max_fixes 1, round 2 used the last cycle; the next run stops
+        with exit 3 instead of reviewing, and the hint says so."""
+        self.write(
+            "revali.toml", self.read("revali.toml").replace("max_fixes = 2", "max_fixes = 1")
+        )
+        self.commit_all("limit")
+        answer = second([finding("F2", 15)], verdict="CHANGES_REQUESTED")
+        out = self.two_rounds(answer, expect=EXIT_ACTION)
+        self.assertIn(HINT % (1, 2), out)
+        self.assertIn("this was the last fix cycle, so the next run stops for a human", out)
+        self.assertNotIn("the next round still runs", out)
+        git(["commit", "-q", "--allow-empty", "-m", "answer round 2"], self.repo)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_HUMAN, out)  # what the hint said
+        self.assertIn("a human decides", out)
+
     def test_answering_only_reaches_the_next_round(self):
         """What skill/SKILL.md tells the author after a CHANGES_REQUESTED hint: answer in
         response-2.md, commit nothing but an empty commit, run again."""
@@ -226,9 +246,6 @@ class DerivedLows(HintCase):
         ]
         return state
 
-    def head(self):
-        return git(["rev-parse", "HEAD"], self.repo).strip()
-
     def test_in_the_fix(self):
         old = self.head()
         self.write("src/calc.py", self.read("src/calc.py") + "\n# fix\n")
@@ -289,8 +306,6 @@ class ChangedLineRanges(HintCase):
         ranges = gitops.changed_line_ranges(old, self.head(), self.repo)
         self.assertEqual(set(ranges), {"src/calc.py"})
         self.assertEqual(len(ranges["src/calc.py"]), 2, ranges)
-
-    head = DerivedLows.head
 
 
 class CostPerRound(HintCase):

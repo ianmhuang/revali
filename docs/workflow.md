@@ -244,8 +244,10 @@ round, when it made one, to the head this round reviewed) gets a `hint:` line on
 MERGE and on the exit 2 message of a CHANGES_REQUESTED verdict that only the reviewer's own
 verdict asks for: those findings sit in the last fix. On READY TO MERGE the hint says that
 answering them in `response-<n>.md` (`wontfix` or a follow-up) costs less than another
-round; after CHANGES_REQUESTED, where the next round runs anyway, it suggests answering
-them there rather than changing those lines again. The stage message, which `wait` and
+round; after CHANGES_REQUESTED, where merging needs another round anyway, it suggests
+answering them there rather than changing those lines again, and says that the next round
+still runs or, when that round used the last fix cycle (`review.max_fixes`), that the next
+run stops for a human to decide. The stage message, which `wait` and
 `status` print, ends with a short form of it. The hint changes
 nothing else: the exit code, the stage, `max_fixes` and `merge` are as without it. A
 NEEDS_INFO round, a round that revali blocks for another reason (an unjustified test or

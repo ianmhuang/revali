@@ -732,7 +732,10 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
         message = "changes requested in round %d (%s)" % (outcome.round_no, counts)
         if lows:
             message += "; " + stophint.short(lows, ready=False)
-            others += "\n" + stophint.hint_line(lows, outcome.round_no, rdir, ready=False)
+            last = state.fixes >= ctx.cfg.review.max_fixes  # the next run's count goes over
+            others += "\n" + stophint.hint_line(
+                lows, outcome.round_no, rdir, ready=False, last_cycle=last
+            )
         _stage(state, rdir, log, "needs_action", message, EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION, log)
