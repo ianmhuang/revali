@@ -107,7 +107,9 @@ Acting on the result:
   `git commit --allow-empty`.
   When the message says the fix cycles are used up (`last fix cycle` in the `wait` line),
   with or without a hint, the next run on a new commit stops with exit 3 and reviews
-  nothing: fix or answer the findings, commit, and tell the user before running again.
+  nothing: fix or answer the findings (after a failed validation: fix the failure, or
+  correct the test when the diagnosis says the test is wrong), commit, and tell the user
+  before running again.
 - `1` (ERROR): report the message to the user and stop; do not retry blindly.
   When the message says a model "hit its usage limit" or "is overloaded", tell
   the user what it quotes (the reset time for a limit) and the two ways on (run

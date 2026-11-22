@@ -736,8 +736,8 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
             others += "\n" + stophint.hint_line(
                 lows, outcome.round_no, rdir, ready=False, last_cycle=last
             )
-        elif last:
-            message += "; " + stophint.LAST_CYCLE
+        if last:
+            message += "; " + LAST_CYCLE
         _stage(state, rdir, log, "needs_action", message, EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION, log)
@@ -760,6 +760,10 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
     return _validate_and_finish(
         ctx, state, rdir, log, outcome.round_no, outcome.data, outcome.review_path
     )
+
+
+# the end of the stage message after a round that used the last fix cycle, hint or not
+LAST_CYCLE = "last fix cycle: the next run stops for a human"
 
 
 def _last_cycle(ctx, state: State) -> bool:
@@ -805,7 +809,7 @@ def _validate_and_finish(
             counts,
         )
         if _last_cycle(ctx, state):
-            message += "; " + stophint.LAST_CYCLE
+            message += "; " + LAST_CYCLE
         _stage(state, rdir, log, "needs_action", message, EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION, log)
