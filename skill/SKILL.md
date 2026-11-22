@@ -7,8 +7,10 @@ description: Send the current branch through revali (independent review, accepta
 
 A change goes through three phases. The user opens two of them by typing:
 approval of the acceptance criteria, and `/revali`. Never run revali on your
-own; typing the command is the user's authorization for the git actions it
-performs (push, draft PR, test commits).
+own; typing the command is the user's authorization for the git and GitHub
+actions it performs (push, draft PR and its comments, test commits, marking the PR
+ready, an issue for a failure the base already had; docs/side-effects.md lists
+them all).
 
 ## Phase 1: acceptance criteria, before any code
 

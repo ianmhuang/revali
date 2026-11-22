@@ -256,7 +256,8 @@ round; after CHANGES_REQUESTED, where merging needs another round anyway, it sug
 answering them there rather than changing those lines again, and says that the next round
 still runs or, when that round used the last fix cycle (`review.max_fixes`), that the next
 run stops for a human to decide. The stage message, which `wait` and
-`status` print, ends with a short form of it. The hint changes
+`status` print, carries a short form of it, followed by `; last fix cycle: the
+next run stops for a human` when that round used the last fix cycle. The hint changes
 nothing else: the exit code, the stage, `max_fixes` and `merge` are as without it. A
 NEEDS_INFO round, a round that revali blocks for another reason (an unjustified test or
 dependency change, an AC without a test, a question asked a second time), a failed
@@ -269,10 +270,10 @@ A Reviewer session that stops because its model's usage limit is reached ends
 the run with exit 1 (stage `error`) and one line: `reviewer model <m> hit its
 usage limit: <the engine's text, with the reset time>; nothing is lost: run
 `revali run` again after the reset, or `revali run --reviewer-model <model>`
-for this run only`. What the session spent is counted, and the stop itself
+for this run only; raw output saved to <path>`. What the session spent is counted, and the stop itself
 uses no fix cycle. A Reviewer model that is overloaded (status 529) ends the run
 the same way: `reviewer model <m> is overloaded: ...; nothing is lost: run
-`revali run` again later, or ...`; with the default `fallback_model = "auto"` the
+`revali run` again later, or ...; raw output saved to <path>`; with the default `fallback_model = "auto"` the
 Reviewer has no fallback, so it never runs on another model unasked. revali does not switch to a lower tier by itself, since that would put
 the Reviewer at or below the author's tier; `--reviewer-model` is that choice,
 made by the user for one run ([docs/configuration.md](configuration.md)). A

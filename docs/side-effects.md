@@ -248,7 +248,8 @@ stated.
   --verify-tag --title <title> --notes-file <file>`, the file a temporary one written
   before the tag is made and removed afterwards; a file that cannot be removed is named
   in a warning). A tag
-  already on HEAD, here or on origin, is neither made nor pushed again, and an existing
+  already on HEAD here is not made again, and is pushed when origin lacks it; one
+  already on origin on HEAD is neither made nor pushed, and an existing
   Release is left alone. A failed check, or `--dry-run`, creates and pushes nothing; no
   branch, commit or file is touched ([releasing.md](releasing.md))
 - after a review round that stops before its tests are committed (a failed
@@ -308,3 +309,6 @@ index marks of the lint gate, the local runner's worktree, and what `merge`
 and `archive` do to branches and the checkout. It never
 commits a change to a test file the reviewer did not write,
 never merges on its own, and never runs on a repo you do not own.
+The owner check is preflight's, so it is `run` and `preflight` that refuse such a
+repo; `init`, `archive` and `release` do not check the owner, and `merge` acts
+only on a branch a run has recorded.

@@ -181,7 +181,8 @@ branch has review rounds (a run with the other value stops with exit 2
 before it pushes anything; start a new branch for the other mode). On
 every run the state's list of the reviewer's files is rebuilt from the
 archive directory, so `revali reset` loses none of them; an archived path
-that HEAD tracks is yours and is removed from the archive. `revali status`
+that HEAD tracks is yours and is removed from the archive (`run --dry-run`
+only says so and deletes nothing). `revali status`
 prints the recorded mode (`tests: archive`) once the branch has a round.
 A commit-mode run that finds that directory non-empty (rounds in archive
 mode, then a `reset` and the key switched) logs the files it will never
@@ -266,7 +267,8 @@ outside `release_labels`, or a label with a comma or surrounding spaces, is a
 configuration error; `refactor`, `hotfix` and `small` are kinds this version
 refuses in change.md, so those keys are accepted and never apply. A
 `release:` value outside the list stops preflight; preflight's `ok:` line
-ends with `; label <name>`. If change.md is edited after the run to such a
+names the label inside its parentheses, `ok: <title> (<kind>, <n> AC: <ids>;
+label <name>)`. If change.md is edited after the run to such a
 value, `revali merge` warns and leaves the PR's labels as they are.
 `release_labels = []` turns it off: no label is
 added or removed, and `kind_labels` is not checked. [templates/release.yml](../templates/release.yml) groups the release
