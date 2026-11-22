@@ -139,7 +139,7 @@ python <revali dir>/revali.py run [--base <b>] [--reviewer-model <m>]   # detach
 python <revali dir>/revali.py wait --timeout 9m        # repeat until it returns other than 4; --branch <b> for another branch's run
 python <revali dir>/revali.py merge                    # after READY TO MERGE (docs/files.md, stages); waits for CI
 python <revali dir>/revali.py run --dry-run | --foreground   # what a run would do, sending nothing | run in this process
-python <revali dir>/revali.py status [--branch <b>]    # stage, last message, rounds, fix cycles, cost, PR
+python <revali dir>/revali.py status [--branch <b>]    # stage, last message, rounds, fix cycles, cost (per round too), PR
 python <revali dir>/revali.py stop                     # kill this working tree's run, or record a run that died as stopped
 python <revali dir>/revali.py reset                    # drop the branch's state.json, keep its files
 python <revali dir>/revali.py clean <branch>           # delete a branch's state directory

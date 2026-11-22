@@ -374,6 +374,47 @@ def diff_changed_lines(diff: str) -> Dict[str, List[str]]:
     return found
 
 
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def changed_line_ranges(old: str, new: str, cwd: str) -> Dict[str, List[Tuple[int, int]]]:
+    """file -> the (first, last) lines of `new` that each hunk of `git diff old new` covers,
+    1-based. A hunk that only removes lines covers the line before the removal (git's own
+    start for it). The file is the new name; a deleted file is not listed. Raises GitError."""
+    res = git_ok(
+        [
+            "diff",
+            "-U0",
+            "-M",
+            "--no-color",
+            "--no-ext-diff",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            old,
+            new,
+        ],
+        cwd,
+    )
+    found: Dict[str, List[Tuple[int, int]]] = {}
+    current: Optional[List[Tuple[int, int]]] = None
+    in_header = False  # a `+++ ` line after the first `@@` is an added line, not the name
+    for line in res.stdout.split("\n"):
+        if line.startswith("diff --git "):
+            current, in_header = None, True
+        elif in_header and line.startswith("+++ "):
+            name = _header_name(line[4:])
+            current = None if name == "/dev/null" else found.setdefault(name[2:], [])
+        elif line.startswith("@@"):
+            in_header = False
+            if current is None:
+                continue
+            m = _HUNK.match(line)
+            if m:
+                first, count = int(m.group(1)), int(m.group(2) or 1)
+                current.append((first, first + max(count, 1) - 1))
+    return found
+
+
 def changed_files(base: str, head: str, cwd: str) -> List[str]:
     res = git_ok(["diff", "--name-only", "%s...%s" % (base, head)], cwd)
     return [line.strip() for line in res.stdout.splitlines() if line.strip()]

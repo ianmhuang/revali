@@ -100,6 +100,12 @@ Acting on the result:
   An answer that changes an AC goes back to the user before the rerun.
   Answer each finding you do not fix in
   `.revali/<branch>/response-<n>.md` (`- F1: wontfix: <reason>`).
+  When the message has a `hint:` line (low findings only, all in the lines your last fix
+  changed), answer those findings there as wontfix or follow-up rather than changing the
+  lines again, then commit and run again as usual: the branch needs another round to merge,
+  and a run needs a new commit, so when the answers are all you changed, commit with
+  `git commit --allow-empty`. When the hint says that was the last fix cycle, the next run
+  stops with exit 3: answer the findings, then tell the user instead of running again.
 - `1` (ERROR): report the message to the user and stop; do not retry blindly.
   When the message says a model "hit its usage limit" or "is overloaded", tell
   the user what it quotes (the reset time for a limit) and the two ways on (run
@@ -108,6 +114,9 @@ Acting on the result:
 - `3` (NEEDS A HUMAN): summarise both sides' reasons to the user and stop.
 - `0`: report "ready to merge" with the summary (tests landing or archived, rounds, cost)
   from the end of `.revali/<branch>/logs/run.log`, or from `revali status`.
+  With a `hint:` line, answer the low findings it counts in `response-<n>.md` as wontfix
+  or follow-up, tell the user the branch can be merged as it is, and leave another round
+  to the user.
   Do not merge. The user runs `python "<revali dir>/revali.py" merge` when they
   decide to; if they ask you to run it, run it in the foreground and relay the
   result (it waits for CI checks, so allow up to the configured timeout).
