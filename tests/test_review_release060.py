@@ -4,7 +4,7 @@ AC-1: the package version is the release's or later, `revali --version` and `rev
       print `revali <version>`, README's Status paragraph names it, the two test files
       docs/releasing.md lists pin it, and `RELEASED` in tests/test_changelog.py lists the
       release directly above the previous one.
-AC-2: CHANGELOG.md has the section `## 0.6.0 - 2026-11-22` directly above
+AC-2: CHANGELOG.md has the section `## 0.6.0 - 2026-11-23` directly above
       `## 0.5.0 - 2026-11-21`; the preamble and the released sections are, byte for byte,
       the file as it was before the release.
 AC-3: the section opens with one sentence and names every PR merged between v0.5.0 and this
@@ -30,9 +30,9 @@ from revali import EXIT_OK, NAME, VERSION
 from tests.helpers import ROOT, run_cli
 
 RELEASE = (0, 6, 0)
-NEW = "## 0.6.0 - 2026-11-22"
+NEW = "## 0.6.0 - 2026-11-23"
 PREVIOUS = "## 0.5.0 - 2026-11-21"
-NEW_PAIR = ("0.6.0", "2026-11-22")
+NEW_PAIR = ("0.6.0", "2026-11-23")
 PREVIOUS_PAIR = ("0.5.0", "2026-11-21")
 # `git log --oneline v0.5.0..main`: four merges, #114 to #117
 RELEASE_PRS = [114, 115, 116, 117]

@@ -4,7 +4,7 @@ One section per release, newest first, dated by its tag. A section is written wh
 release is made ([docs/releasing.md](docs/releasing.md)); changes merged since the newest
 section are not listed until then.
 
-## 0.6.0 - 2026-11-22
+## 0.6.0 - 2026-11-23
 
 A hint to stop when a round's only findings are lows in the last fix, the cost of each
 round, and internal changes listed in a collapsed part of the release notes (PR #114 to

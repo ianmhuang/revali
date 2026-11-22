@@ -11,7 +11,7 @@ import unittest
 
 from tests.helpers import ROOT
 
-NEW = "## 0.6.0 - 2026-11-22"
+NEW = "## 0.6.0 - 2026-11-23"
 PREVIOUS = "## 0.5.0 - 2026-11-21"
 # every PR merged between v0.5.0 and this change (`git log --oneline v0.5.0..main`)
 RELEASE_PRS = [114, 115, 116, 117]
