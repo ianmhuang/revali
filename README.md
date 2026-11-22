@@ -27,7 +27,7 @@ the existing suite, and the merge waits for the result. Three roles take part.
 | Sandbox validation of the new tests and the existing suite through WSL, ssh or a local worktree, on each listed platform (`linux`, `windows`) | [docs/sandbox.md](docs/sandbox.md) |
 | A diagnosis of each failure (code, test or environment, from the branch or the base) and a GitHub issue for a bug the base already had | [docs/configuration.md](docs/configuration.md) |
 | A draft PR whose title and release label follow change.md, with each round's review as a comment (a summary when the repository is not private) | [docs/side-effects.md](docs/side-effects.md) |
-| A merge only after READY TO MERGE: it waits for CI, merges by `[merge] method`, comments on the issues the branch fixes and archives the review files | [docs/side-effects.md](docs/side-effects.md) |
+| A merge only after READY TO MERGE: it waits for CI, merges by `[merge] method`, comments on the issues its validations opened or reused that a branch commit says it fixes, and archives the review files | [docs/side-effects.md](docs/side-effects.md) |
 | Release notes grouped by the PRs' release labels | [docs/releasing.md](docs/releasing.md#release-notes-for-a-project-that-uses-revali) |
 | Several agent sessions on one repository, one worktree each | [docs/workflow.md](docs/workflow.md#several-agents-on-one-repository) |
 | Every round, validation and cost on record: `review-<n>.md`, `tests.md`, logs, a history row, `revali stats` | [docs/files.md](docs/files.md) |
@@ -67,8 +67,8 @@ sequenceDiagram
         R->>G: push, draft PR, title and release label from change.md
         R->>B: diff, change.md, related docs, changed earlier reviewer tests, checklist, previous round
         B-->>R: verdict, findings, acceptance tests
-        R->>R: AC coverage, the project's format and lint lines, smoke run of the tests
-        R->>G: commit tests, PR comment (a summary unless the repo is private)
+        R->>R: AC coverage, the project's format and lint lines, smoke run of the tests (feature and fix, not on NEEDS_INFO)
+        R->>G: commit tests, PR comment (a summary unless the repo is private), NEEDS_INFO leaves the tests uncommitted for the next round
         alt APPROVE
             R->>V: sandbox: new tests, plus the existing suite unless the baseline still covers it
             alt PASS
@@ -93,7 +93,7 @@ sequenceDiagram
     U->>D: merge
     D->>R: revali merge
     R->>G: release label check, wait for CI, squash merge (or another [merge] method), delete branch
-    R->>G: comment on the issues a branch commit says it fixes
+    R->>G: comment on the issues revali opened or reused for the branch that a branch commit says it fixes
 ```
 
 The preflight baseline (the existing suite in the sandbox) runs on every `revali run`
@@ -104,14 +104,14 @@ until the first review round is recorded, and not for `kind: docs`. A sandbox `s
 |---|---|---|---|---|
 | Developer | the user | the request, the repo | `change.md`, code, its own tests | whatever the user's session runs; recorded as `author_model` |
 | Reviewer | revali, on `/revali` | diff, `change.md`, the documents related to the diff, the earlier reviewer tests the change modifies, three-layer checklist, the previous round and `response-n.md` | tests in `test_dir` (formatted by the project's `format` line, committed once they pass the project's `lint` line and a smoke run; with `[review] tests = "archive"` kept under `.revali/<branch>/tests/` instead and never committed), and its answer, which revali turns into `review-n.md`, `tests.md`, and a PR comment (a summary when the repository is not private); does not run the tests | `auto`: one tier above the Developer |
-| Validator | revali, after APPROVE | a sandbox clone of the branch; when the Reviewer's tests fail, one of the base tip with them copied in | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers (with `introduced_by`: branch or base) and revali writes `diagnose-n.json` (`diagnose-n-<platform>.json` for each failing platform when several are listed), and opens a GitHub issue for a bug the base already had | the runner needs none; diagnosis `auto`: one tier below the Developer |
+| Validator | revali, after APPROVE | a sandbox clone of the branch; when the Reviewer's tests fail, one of the base tip with them copied in | logs; revali appends the result to `tests.md`; on FAIL only, the diagnosis session answers (with `introduced_by`: branch or base) and revali writes `diagnose-n.json` (`diagnose-n-<platform>.json` for each failing platform when several are listed; n is the validation's number, `Validation <n>` in tests.md, not the review round's), and opens a GitHub issue for a bug the base already had | the runner needs none; diagnosis `auto`: one tier below the Developer |
 
 Three user actions (approve the AC, `/revali`, `revali merge`) are the gates;
 everything between them is automatic. Exit codes: `0` done / ready to merge,
 `1` pipeline error (not a verdict), `2` the Developer must act (fix, rebase,
 answer a question), `3` a human must decide, `4` (`wait` only) still running.
 
-Status: package version 0.5.0; [CHANGELOG.md](CHANGELOG.md) lists what each release
+Status: package version 0.6.0; [CHANGELOG.md](CHANGELOG.md) lists what each release
 contains. Verified end to end on a private GitHub repository with real Reviewer sessions
 and real WSL and ssh sandboxes ([docs/sandbox.md](docs/sandbox.md) has the record);
 revali reviews its own changes on this public one.
@@ -144,7 +144,7 @@ python <revali dir>/revali.py stop                     # kill this working tree'
 python <revali dir>/revali.py reset                    # drop the branch's state.json, keep its files
 python <revali dir>/revali.py clean <branch>           # delete a branch's state directory
 python <revali dir>/revali.py archive [--branch <b>]   # record a PR merged or closed without revali merge, archive its files
-python <revali dir>/revali.py release <v> [--notes <line>] [--dry-run]   # on the pushed base tip with green CI: tag v<v>, push it, publish the GitHub Release
+python <revali dir>/revali.py release <v> [--notes <line>] [--dry-run]   # on the pushed base tip, no check run failed or running (none: released with a note): tag v<v>, push it, publish the GitHub Release
 python <revali dir>/revali.py stats                    # the run history per repository: first-try pass rate, rounds, cost
 python <revali dir>/revali.py version                  # the version; --version prints the same line
 python <revali dir>/revali.py --verbose <command>      # echo every command revali runs to the terminal
@@ -153,7 +153,7 @@ python <revali dir>/revali.py --verbose <command>      # echo every command reva
 What a run does, in order: preflight (ending with the existing suite in the sandbox
 as a baseline, by default running on alongside the next two steps), push + draft PR (its title and release label from change.md),
 reviewer round (`claude -p` with the diff, change.md, the checklist, the documents related to the diff and the earlier reviewer tests it changes; writes tests into `test_dir`; the script
-checks AC coverage, runs the project's `format` and `lint` lines over them, smoke-runs them, commits or archives them), validation
+checks AC coverage, runs the project's `format` and `lint` lines over them, smoke-runs them, commits or archives them; a NEEDS_INFO round neither smoke-runs nor commits them), validation
 (the new tests in the sandbox, plus the existing suite unless nothing but
 the reviewer's test commits changed since the baseline ran it; when the new
 tests fail they run once more on the base tip; on any failure a diagnoser session says whether
@@ -161,7 +161,7 @@ code, test or environment is at fault and whether the branch or the base
 introduced it, and a bug the base already had gets a GitHub issue), then
 READY TO MERGE. Each stage's and each sandbox session's seconds go to the log and the history row. Every result lands in
 `.revali/<branch>/` (`review-<n>.md`, `tests.md`, `diagnose-<n>.json` on a FAIL, or `diagnose-<n>-<platform>.json` per
-failing platform when several are listed, `logs/`) and as PR comments (summaries when the repository is not private).
+failing platform when several are listed, `<n>` there being the validation's number, not the round's; `logs/`) and as PR comments (summaries when the repository is not private).
 
 ## Documentation
 

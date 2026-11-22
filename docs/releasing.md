@@ -44,7 +44,7 @@ revali.toml), so give `--doc-usd` whenever the budget is small.
 | `--budget-usd TOTAL` | required unless `--dry-run`, above 0; a document whose cap would take the spending past it is not started, nor is any later one |
 | `--doc-usd N` | cap per document, above 0; default `[review] budget_usd` |
 | `--model M` | default `[review] model` (`auto` = the top tier, as there is no author); effort and timeout are `[review]`'s |
-| `--only DOC ...` | just these documents (paths as `--dry-run` lists them), audited once each in the list's order; an unknown name stops the command |
+| `--only DOC ...` | just these documents (paths as `--dry-run` lists them), audited once each in the order `--dry-run` lists them, not the order given; an unknown name stops the command |
 | `--out DIR` | output directory; default a new temporary directory, printed at the start; a DIR that already holds a run is refused (continue it with `--resume`), one written by `--dry-run` is not |
 | `--resume DIR` | run again the documents in DIR that are not done, with DIR's selection, model and cap; DIR's earlier spending counts against `--budget-usd`; a `--doc-usd` given here replaces the recorded cap, a `--model` other than the recorded one is refused; refused for a DIR a dry run wrote, another repository, or when the document list has changed; cannot be combined with `--dry-run`, `--out` or `--only` |
 | `--dry-run` | write the prompts, start no session |
@@ -66,8 +66,10 @@ or answers outside the schema, marks its document `error` and the audit goes on 
 next one; a failed session that reported no cost (a timeout) is charged its cap. A session
 stopped by its model's usage limit or by an overloaded model ends its document as `error`,
 charged what it reported, and leaves the documents after it `not-run`; `--resume` after the
-reset, or later, runs them. The auditor runs on its model only: like the Reviewer it has no
-auto fallback ([docs/configuration.md](configuration.md)).
+reset, or later, runs them. The auditor has no auto fallback, like the Reviewer
+([docs/configuration.md](configuration.md)): with the default
+`[review] fallback_model = "auto"` it runs on its model only; a fallback model named
+there is used as written.
 
 ## Making a release
 

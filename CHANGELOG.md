@@ -4,6 +4,53 @@ One section per release, newest first, dated by its tag. A section is written wh
 release is made ([docs/releasing.md](docs/releasing.md)); changes merged since the newest
 section are not listed until then.
 
+## 0.6.0 - 2026-11-22
+
+A hint to stop when a round's only findings are lows in the last fix, the cost of each
+round, and internal changes listed in a collapsed part of the release notes (PR #114 to
+#117).
+
+Upgrading from 0.5.0:
+- PROMPT_VERSION goes from 16 to 17: the checklist has the Reviewer check the PR's release
+  label against the diff (#114). A project that sets `[review] checklist_builtin` compares
+  its file with checklists/default.md.
+- New interface (#114): the label `internal` in the default `[pr] release_labels`, for a
+  change no user can notice, and the key `[pr] collapse_headings` (default `["Internal
+  Changes"]`), the release notes sections `revali release` publishes folded. A project
+  whose `.github/release.yml` came from the 0.5.0 template has no Internal Changes
+  category until it copies the current templates/release.yml; an `internal` PR is still
+  listed, under Other Changes.
+- After a round from the second on whose findings are all low and sit in lines the last
+  fix changed, READY TO MERGE and CHANGES_REQUESTED carry a `hint:` line suggesting an
+  answer in `response-<n>.md` instead of another round (#116); exit codes, stages and the
+  fix counter are as before.
+- Unchanged: `defaults.toml` apart from the `[pr]` keys above, and the layout of
+  `state.json`.
+
+Review and merge:
+- READY TO MERGE lists the round's non-blocking findings, and READY TO MERGE, `status` and
+  the merge summary print the cost of each round (#116).
+- After a round or a failed validation that used the last fix cycle, the exit 2 message
+  and the stage message say that the next run on a new commit stops for a human to decide
+  (#117).
+
+Releases and measurement:
+- `revali release` builds the notes from GitHub's generated ones and folds the
+  `collapse_headings` sections into a closed `<details>` block (#114).
+- tools/review_bench.py `--effort` runs every case at one `[review] effort` (#115).
+
+Documentation (the 0.6.0 audit): README says `merge` comments on the issues revali opened
+or reused for the branch, not on every issue it fixes, that a NEEDS_INFO round neither
+smoke-runs nor commits the tests, and that `diagnose-<n>` counts validations; and the
+wording of the stop hint, the usage-limit line, `run --dry-run` in archive mode, the
+release tag's push, the owner check, the audit's `--only` and fallback, and what
+`/revali` authorizes is corrected (this release).
+
+Known issues:
+- prompts/review.md calls its manifest list "Dependency manifests this diff touches", but
+  a manifest left out by `[review] exclude` is not in it; the next change to the prompt
+  corrects it.
+
 ## 0.5.0 - 2026-11-21
 
 Two commands, `revali init` to set a project up and `revali release` to tag and publish a
