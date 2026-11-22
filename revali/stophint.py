@@ -81,7 +81,12 @@ def hint_line(
     )
 
 
-def short(findings: List[dict], ready: bool) -> str:
-    """The stage message's form: what `wait` and `status` print."""
+def short(findings: List[dict], ready: bool, last_cycle: bool = False) -> str:
+    """The stage message's form: what `wait` and `status` print. At the last fix cycle the
+    caller appends its own note about the stop, so this one stops short of advice on it."""
     head = "hint: %d low finding(s) in lines the last fix changed, " % len(findings)
-    return head + ("consider stopping" if ready else "consider answering, not changing them")
+    if ready:
+        return head + "consider stopping"
+    if last_cycle:
+        return head + "consider answering"
+    return head + "consider answering, not changing them"
