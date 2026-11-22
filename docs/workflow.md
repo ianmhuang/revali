@@ -123,7 +123,10 @@ and `status` report it rather than the previous run's result. After an
 interrupted review round it leaves the check to the run itself, which
 first cleans up what that round left. `status` then prints the stage, the last message,
 the round / fix-cycle / cost counters, the PR, and, once the branch has a
-review round, `tests: commit` or `tests: archive`: the mode its rounds run
+review round, the cost of each round (`cost per round: r1 $4.10, r2 $2.30`, then
+`; diagnosis $x` for the validation diagnoses and `; other $y` for reviewer sessions that
+ended without a round, when there are any; READY TO MERGE and the `merge` summary print
+the same line) and `tests: commit` or `tests: archive`: the mode its rounds run
 in, fixed for the branch (`[review] tests` in
 [docs/configuration.md](configuration.md)).
 
@@ -231,7 +234,20 @@ The exit 2 message lists what blocks and also the findings that did not
 block, with the path of `review-<n>.md` (a detached run writes it to the end
 of `logs/run.log`); the `revali wait` line carries the blocking /
 non-blocking counts and that path, and the findings are read there: a `low` or `medium convention` finding left
-unanswered comes back as unresolved in the next round.
+unanswered comes back as unresolved in the next round. READY TO MERGE lists the
+approving round's non-blocking findings too.
+
+From round 2 on, a round whose findings are all `low`, with none of the previous round's
+findings left `unresolved`, and every one of them at a line inside, or within 3 lines of,
+what the author changed since the previous round (from the reviewer's test commit of that
+round, when it made one, to the head this round reviewed) gets a `hint:` line on READY TO
+MERGE and on the exit 2 message of a CHANGES_REQUESTED verdict: those findings sit in the
+last fix, and answering them in `response-<n>.md` (`wontfix` or a follow-up) costs less
+than another round. The stage message, which `wait`
+and `status` print, ends with a short form of it. The hint changes nothing else: the exit
+code, the stage, `max_fixes` and `merge` are as without it. A NEEDS_INFO round, a failed
+validation, a finding at line 0 or in a file the fix did not touch, and a previous tip that
+is no longer an ancestor of the head (a rebase; revali.log says so) give no hint.
 
 A Reviewer session that stops because its model's usage limit is reached ends
 the run with exit 1 (stage `error`) and one line: `reviewer model <m> hit its

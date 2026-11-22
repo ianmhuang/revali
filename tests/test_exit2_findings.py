@@ -122,7 +122,10 @@ class ValidationFailTests(RepoCase):
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_OK, out)  # AC-7
         self.assertIn("READY TO MERGE", out)
-        self.assertNotIn("non-blocking", out)
+        # feature/stop-hint AC-4 lists the findings on READY TO MERGE too, without the
+        # exit 2 wording that asks for an answer
+        self.assertIn("1 non-blocking finding(s) in", out)
+        self.assertNotIn("fix or answer each", out)
         self.assertEqual(State.load(self.rdir()).message, "validation 1 passed")
 
 

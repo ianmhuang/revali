@@ -34,6 +34,7 @@ from revali.state import (
     acquire_tree_lock,
     append_history,
     clear_wsl_retries,
+    cost_per_round,
     lock_owner_alive,
     read_lock,
     read_tree_lock,
@@ -721,16 +722,16 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
         )
         return EXIT_ACTION
     if outcome.verdict == review.CHANGES_REQUESTED:
+        from revali import stophint
+
         reasons = "\n".join("  - " + r for r in outcome.reasons)
         state.fix_due = True  # owed since review.run_round saved the round; saved by _stage
-        _stage(
-            state,
-            rdir,
-            log,
-            "needs_action",
-            "changes requested in round %d (%s)" % (outcome.round_no, counts),
-            EXIT_ACTION,
-        )
+        lows = stophint.derived_lows(state, ctx.repo_root, log.detail)
+        message = "changes requested in round %d (%s)" % (outcome.round_no, counts)
+        if lows:
+            message += "; " + stophint.short(lows)
+            others += "\n" + stophint.hint_line(lows, outcome.round_no, rdir)
+        _stage(state, rdir, log, "needs_action", message, EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION, log)
         print(
@@ -792,8 +793,14 @@ def _validate_and_finish(
         )
         return EXIT_ACTION
 
+    from revali import stophint
+
+    lows = stophint.derived_lows(state, ctx.repo_root, log.detail)
+    message = "validation %d passed" % vout.number
+    if lows:
+        message += "; " + stophint.short(lows)
     state.validated_sha = state.head_sha  # saved by _stage
-    _stage(state, rdir, log, "ready_to_merge", "validation %d passed" % vout.number, EXIT_OK)
+    _stage(state, rdir, log, "ready_to_merge", message, EXIT_OK)
     prstage.mark_ready(ctx, state, log)
     prstage.update_body(ctx, state, rdir, log)
     _record_history(state, EXIT_OK, log)
@@ -802,10 +809,17 @@ def _validate_and_finish(
         flags.append("a reviewer round ran on a fallback model")
     if not state.test_files and ctx.doc.kind in ("feature", "fix"):
         flags.append("no runnable tests were written")
+    tail = ""
+    listed = review.non_blocking_findings(data)
+    if listed:
+        tail += "\n  %d non-blocking finding(s) in %s:" % (len(listed), review_path)
+        tail += "".join("\n    - " + review.format_finding(f) for f in listed)
+    if lows:
+        tail += "\n  " + stophint.hint_line(lows, round_no, rdir)
     print(
         "READY TO MERGE: %s (PR %s)\n  review rounds: %d, fix cycles: %d, validation: %s%s\n"
-        "  %s: %s\n  cost: $%.2f, models: %s\n  merge with: revali merge; "
-        "the PR is no longer a draft%s"
+        "  %s: %s\n  cost: $%.2f, models: %s\n  %s\n  merge with: revali merge; "
+        "the PR is no longer a draft%s%s"
         % (
             ctx.doc.title,
             state.pr_url or "#%d" % state.pr_number,
@@ -817,7 +831,9 @@ def _validate_and_finish(
             ", ".join(state.test_files) or "none",
             state.cost_usd,
             ", ".join(state.models_used) or "-",
+            cost_per_round(state),
             "\n  note: " + "; ".join(flags) if flags else "",
+            tail,
         )
     )
     return EXIT_OK
@@ -948,6 +964,8 @@ def cmd_status(args) -> int:
         print(
             "round: %d, fixes: %d, cost: $%.2f" % (len(state.rounds), state.fixes, state.cost_usd)
         )
+        if state.rounds:
+            print(cost_per_round(state))
         if state.rounds:  # the mode the first round fixed; a state from before the key: commit
             print("tests: %s" % (state.tests_mode or "commit"))
         if state.pr_url:

@@ -200,6 +200,32 @@ class State:
         self.save(rdir)
 
 
+def _usd(record: dict) -> float:
+    try:
+        return float(record.get("cost_usd") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def cost_per_round(state: State) -> str:
+    """`cost per round: r1 $x, r2 $y` with `; diagnosis $z` when validation diagnoses cost
+    something and `; other $w` for what the run's total holds beyond both (reviewer
+    sessions that ended without a round); "" before the first round."""
+    if not state.rounds:
+        return ""
+    rounds = [_usd(r) for r in state.rounds]
+    diagnosis = sum(_usd(v) for v in state.validations)
+    line = "cost per round: " + ", ".join(
+        "r%d $%.2f" % (i, c) for i, c in enumerate(rounds, start=1)
+    )
+    if diagnosis >= 0.005:
+        line += "; diagnosis $%.2f" % diagnosis
+    other = state.cost_usd - sum(rounds) - diagnosis
+    if other >= 0.005:
+        line += "; other $%.2f" % other
+    return line
+
+
 class StateError(ValueError):
     """state.json holds something State cannot use: not JSON, not an object, or a field whose
     value has the wrong type. The message names the file and the field."""

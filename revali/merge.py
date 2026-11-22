@@ -11,7 +11,7 @@ from revali import EXIT_ACTION, EXIT_ERROR, EXIT_OK, gitops, issues
 from revali.config import ConfigError, load_project_config
 from revali.preflight import Stop
 from revali.procs import RETRY_WAIT_S, ProcError, one_line, resolve, run, run_retry
-from revali.state import RunLog, State, safe_branch
+from revali.state import RunLog, State, cost_per_round, safe_branch
 
 POLL_ENV = "REVALI_POLL_SECONDS"
 
@@ -650,9 +650,10 @@ def _worktree_follow_up(root: str, branch: str, base: str, elsewhere: str, log: 
 
 
 def merge_summary(state: State, base: str) -> str:
+    per_round = cost_per_round(state)
     return (
         "MERGED: PR #%d into %s\n  rounds: %d, fix cycles: %d, validations: %d, cost: $%.2f\n"
-        "  %s: %s"
+        "%s  %s: %s"
         % (
             state.pr_number,
             base,
@@ -660,6 +661,7 @@ def merge_summary(state: State, base: str) -> str:
             state.fixes,
             len(state.validations),
             state.cost_usd,
+            "  %s\n" % per_round if per_round else "",
             "tests archived" if state.tests_mode == "archive" else "tests landed",
             ", ".join(state.test_files) or "none",
         )
