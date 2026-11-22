@@ -1,10 +1,9 @@
 """The stop hint after a round whose low findings all sit in the last fix, and the cost per
 round (feature/stop-hint)."""
 
-import os
 import unittest
 
-from revali import EXIT_ACTION, EXIT_OK, stophint
+from revali import EXIT_ACTION, EXIT_OK, gitops, stophint
 from revali.merge import merge_summary
 from revali.state import State, cost_per_round
 from tests.helpers import RepoCase, approve_response, claude_entry, git, run_cli
@@ -36,10 +35,10 @@ def second(findings, previous=RESOLVED, **kw):
 
 
 class HintCase(RepoCase):
-    def two_rounds(self, answer, *later, expect=EXIT_OK):
-        """Round 1 asks for changes on mul, the author appends two lines to src/calc.py
-        (lines 14 and 15), round 2 answers `answer`."""
-        self.claude(claude_entry(CR), claude_entry(answer, write_tests=False), *later)
+    def two_rounds(self, answer, *later, expect=EXIT_OK, first=None):
+        """Round 1 answers `first` (asks for changes on mul by default), the author appends
+        two lines to src/calc.py (lines 14 and 15), round 2 answers `answer`."""
+        self.claude(first or claude_entry(CR), claude_entry(answer, write_tests=False), *later)
         code, out = run_cli(["run", "--foreground"])
         self.assertEqual(code, EXIT_ACTION, out)
         self.write("src/calc.py", self.read("src/calc.py") + "\n# handles negatives\n")
@@ -51,10 +50,6 @@ class HintCase(RepoCase):
     def message(self):
         return State.load(self.rdir()).message
 
-    def revali_log(self):
-        with open(os.path.join(self.rdir(), "logs", "revali.log"), encoding="utf-8") as fh:
-            return fh.read()
-
 
 class ReadyHint(HintCase):
     def test_low_in_the_fix_gets_the_hint(self):
@@ -62,7 +57,9 @@ class ReadyHint(HintCase):
         self.assertIn("READY TO MERGE", out)  # AC-6: the outcome is the same
         self.assertIn(HINT % (1, 2), out)  # AC-2
         self.assertIn("response-2.md", out)
+        self.assertIn("instead of another round", out)
         self.assertIn(SHORT % 1, self.message())  # AC-2: what wait and status print
+        self.assertIn("consider stopping", self.message())
         code, wait_out = run_cli(["wait", "--timeout", "1s"])
         self.assertEqual(code, EXIT_OK)
         self.assertIn(SHORT % 1, wait_out)
@@ -135,10 +132,28 @@ class ActionHint(HintCase):
         self.assertIn("ACTION NEEDED: changes requested (round 2", out)
         self.assertIn(HINT % (1, 2), out)  # AC-2
         self.assertIn("response-2.md", out)
+        # PR round 1 follow-up 3: another round runs after CHANGES_REQUESTED anyway
+        self.assertIn("rather than changing those lines again; the next round still runs", out)
+        self.assertNotIn("instead of another round", out)
         self.assertIn(SHORT % 1, self.message())
+        self.assertNotIn("consider stopping", self.message())
         state = State.load(self.rdir())
         self.assertEqual(state.stage, "needs_action")  # AC-6
         self.assertTrue(state.fix_due)
+
+    def test_answering_only_reaches_the_next_round(self):
+        """What skill/SKILL.md tells the author after a CHANGES_REQUESTED hint: answer in
+        response-2.md, commit nothing but an empty commit, run again."""
+        answer = second([finding("F2", 15)], verdict="CHANGES_REQUESTED")
+        third = second([], previous=[{"id": "F2", "status": "accepted", "note": "ok"}])
+        self.two_rounds(answer, claude_entry(third, write_tests=False), expect=EXIT_ACTION)
+        self.write(".revali/feature__mul/response-2.md", "- F2: wontfix: cosmetic\n")
+        git(["commit", "-q", "--allow-empty", "-m", "answer round 2"], self.repo)
+        code, out = run_cli(["run", "--foreground"])
+        self.assertEqual(code, EXIT_OK, out)
+        state = State.load(self.rdir())
+        self.assertEqual(len(state.rounds), 3)
+        self.assertEqual(state.fixes, 2)
 
     def test_needs_info_gets_no_hint(self):
         answer = second(
@@ -147,6 +162,34 @@ class ActionHint(HintCase):
         out = self.two_rounds(answer, expect=EXIT_ACTION)
         self.assertIn("Floats too?", out)
         self.assertNotIn("hint:", out)  # AC-3
+        self.assertNotIn("hint:", self.message())
+
+    def test_changes_requested_for_another_reason_gets_no_hint(self):
+        """PR round 1 F1: an unjustified test change blocks the round, which no wontfix on
+        the lows answers."""
+        change = [{"file": "tests/test_calc.py", "justified": False, "reason": "weakened"}]
+        answer = second([finding("F2", 15)], verdict="CHANGES_REQUESTED", test_changes=change)
+        out = self.two_rounds(answer, expect=EXIT_ACTION)
+        self.assertIn("changed without justification", out)
+        self.assertNotIn("hint:", out)  # AC-2: only the reviewer's own request gets it
+        self.assertNotIn("hint:", self.message())
+
+    def test_an_approve_blocked_by_an_ac_gap_gets_no_hint(self):
+        answer = second([finding("F2", 15)], tests=[], not_testable=[])
+        out = self.two_rounds(answer, expect=EXIT_ACTION)
+        self.assertIn("acceptance criteria without a test", out)
+        self.assertNotIn("hint:", out)  # AC-2
+        self.assertNotIn("hint:", self.message())
+
+    def test_a_second_needs_info_gets_no_hint(self):
+        """PR round 1 F1: revali turns a second NEEDS_INFO into CHANGES_REQUESTED; AC-3."""
+        q = approve_response(verdict="NEEDS_INFO", questions=["Floats too?"], tests=[])
+        answer = second(
+            [finding("F2", 15)], previous=[], verdict="NEEDS_INFO", questions=["Ints?"], tests=[]
+        )
+        out = self.two_rounds(answer, expect=EXIT_ACTION, first=claude_entry(q, write_tests=False))
+        self.assertIn("unanswered", out)
+        self.assertNotIn("hint:", out)
         self.assertNotIn("hint:", self.message())
 
     def test_failed_validation_gets_no_hint(self):
@@ -231,6 +274,23 @@ class DerivedLows(HintCase):
             self.state_with(old, self.head(), [finding("F2", 8)]), self.repo, None
         )
         self.assertEqual([f["id"] for f in got], ["F2"])
+
+
+class ChangedLineRanges(HintCase):
+    def test_an_added_line_that_reads_like_a_header(self):
+        """PR round 1 F2: with -U0 an added `++ x` line prints as `+++ x`; the hunks after
+        it stay under the file's own name."""
+        old = self.head()
+        lines = self.read("src/calc.py").split("\n")
+        lines.insert(1, "++ /dev/null")
+        lines.insert(2, "++ b/")
+        self.write("src/calc.py", "\n".join(lines) + "\n# end\n")
+        self.commit_all("plus lines")
+        ranges = gitops.changed_line_ranges(old, self.head(), self.repo)
+        self.assertEqual(set(ranges), {"src/calc.py"})
+        self.assertEqual(len(ranges["src/calc.py"]), 2, ranges)
+
+    head = DerivedLows.head
 
 
 class CostPerRound(HintCase):

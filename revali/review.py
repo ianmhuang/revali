@@ -991,7 +991,8 @@ def non_blocking_note(data: dict, round_no: int, review_path: str, rdir: str) ->
     return "\n" + "\n".join(lines)
 
 
-def compute_verdict(data: dict, gaps: List[str], needs_info_allowed: bool) -> Tuple[str, List[str]]:
+def _check_reasons(data: dict, gaps: List[str]) -> List[str]:
+    """What blocks a round whatever the reviewer's own verdict says."""
     reasons = []
     for f in data.get("findings", []):
         if is_blocking(f):
@@ -1012,6 +1013,17 @@ def compute_verdict(data: dict, gaps: List[str], needs_info_allowed: bool) -> Tu
         reasons.append(
             "acceptance criteria without a test or a not_testable reason: %s" % ", ".join(gaps)
         )
+    return reasons
+
+
+def reviewer_only(data: dict, gaps: List[str]) -> bool:
+    """True when the round asks for changes only because the reviewer's verdict does: no
+    blocking finding, unjustified test or dependency change, AC gap or open question."""
+    return data.get("verdict") == CHANGES_REQUESTED and not _check_reasons(data, gaps)
+
+
+def compute_verdict(data: dict, gaps: List[str], needs_info_allowed: bool) -> Tuple[str, List[str]]:
+    reasons = _check_reasons(data, gaps)
     questions = [q for q in data.get("questions", []) if str(q).strip()]
     if data.get("verdict") == NEEDS_INFO and questions:
         if needs_info_allowed and not reasons:

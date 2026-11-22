@@ -241,13 +241,19 @@ From round 2 on, a round whose findings are all `low`, with none of the previous
 findings left `unresolved`, and every one of them at a line inside, or within 3 lines of,
 what the author changed since the previous round (from the reviewer's test commit of that
 round, when it made one, to the head this round reviewed) gets a `hint:` line on READY TO
-MERGE and on the exit 2 message of a CHANGES_REQUESTED verdict: those findings sit in the
-last fix, and answering them in `response-<n>.md` (`wontfix` or a follow-up) costs less
-than another round. The stage message, which `wait`
-and `status` print, ends with a short form of it. The hint changes nothing else: the exit
-code, the stage, `max_fixes` and `merge` are as without it. A NEEDS_INFO round, a failed
+MERGE and on the exit 2 message of a CHANGES_REQUESTED verdict that only the reviewer's own
+verdict asks for: those findings sit in the last fix. On READY TO MERGE the hint says that
+answering them in `response-<n>.md` (`wontfix` or a follow-up) costs less than another
+round; after CHANGES_REQUESTED, where the next round runs anyway, it suggests answering
+them there rather than changing those lines again. The stage message, which `wait` and
+`status` print, ends with a short form of it. The hint changes
+nothing else: the exit code, the stage, `max_fixes` and `merge` are as without it. A
+NEEDS_INFO round, a round that revali blocks for another reason (an unjustified test or
+dependency change, an AC without a test, a question asked a second time), a failed
 validation, a finding at line 0 or in a file the fix did not touch, and a previous tip that
-is no longer an ancestor of the head (a rebase; revali.log says so) give no hint.
+is no longer an ancestor of the head give no hint; the last case, which revali.log names,
+comes from a rebase in archive mode or after a round that committed no tests (in commit
+mode a rebase that drops the reviewer's test commit starts the review over at round 1).
 
 A Reviewer session that stops because its model's usage limit is reached ends
 the run with exit 1 (stage `error`) and one line: `reviewer model <m> hit its

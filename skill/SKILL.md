@@ -102,7 +102,9 @@ Acting on the result:
   `.revali/<branch>/response-<n>.md` (`- F1: wontfix: <reason>`).
   When the message has a `hint:` line (low findings only, all in the lines your last fix
   changed), answer those findings there as wontfix or follow-up rather than changing the
-  lines again, and ask the user before another round.
+  lines again, then commit and run again as usual: the branch needs another round to merge,
+  and a run needs a new commit, so when the answers are all you changed, commit with
+  `git commit --allow-empty`.
 - `1` (ERROR): report the message to the user and stop; do not retry blindly.
   When the message says a model "hit its usage limit" or "is overloaded", tell
   the user what it quotes (the reset time for a limit) and the two ways on (run

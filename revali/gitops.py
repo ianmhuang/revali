@@ -397,13 +397,17 @@ def changed_line_ranges(old: str, new: str, cwd: str) -> Dict[str, List[Tuple[in
     )
     found: Dict[str, List[Tuple[int, int]]] = {}
     current: Optional[List[Tuple[int, int]]] = None
+    in_header = False  # a `+++ ` line after the first `@@` is an added line, not the name
     for line in res.stdout.split("\n"):
         if line.startswith("diff --git "):
-            current = None
-        elif line.startswith("+++ "):
+            current, in_header = None, True
+        elif in_header and line.startswith("+++ "):
             name = _header_name(line[4:])
             current = None if name == "/dev/null" else found.setdefault(name[2:], [])
-        elif current is not None and line.startswith("@@"):
+        elif line.startswith("@@"):
+            in_header = False
+            if current is None:
+                continue
             m = _HUNK.match(line)
             if m:
                 first, count = int(m.group(1)), int(m.group(2) or 1)

@@ -53,16 +53,26 @@ def derived_lows(state: State, repo_root: str, note: Note = None) -> List[dict]:
     return list(findings) if all(_in_fix(f, ranges) for f in findings) else []
 
 
-def hint_line(findings: List[dict], round_no: int, rdir: str) -> str:
-    return (
-        "hint: the %d low finding(s) of round %d all sit in lines the last fix changed; "
-        "consider answering them in %s (wontfix / follow-up) instead of another round"
-        % (len(findings), round_no, os.path.join(rdir, "response-%d.md" % round_no))
+def hint_line(findings: List[dict], round_no: int, rdir: str, ready: bool) -> str:
+    """`ready`: READY TO MERGE, where the branch can merge as it is. After CHANGES_REQUESTED
+    another round runs anyway, so the hint is about how to answer, not whether to stop."""
+    response = os.path.join(rdir, "response-%d.md" % round_no)
+    head = "hint: the %d low finding(s) of round %d all sit in lines the last fix changed; " % (
+        len(findings),
+        round_no,
+    )
+    if ready:
+        return head + (
+            "consider answering them in %s (wontfix / follow-up) instead of another round"
+            % response
+        )
+    return head + (
+        "consider answering them in %s (wontfix / follow-up) rather than changing those lines "
+        "again; the next round still runs" % response
     )
 
 
-def short(findings: List[dict]) -> str:
+def short(findings: List[dict], ready: bool) -> str:
     """The stage message's form: what `wait` and `status` print."""
-    return "hint: %d low finding(s) in lines the last fix changed, consider stopping" % len(
-        findings
-    )
+    head = "hint: %d low finding(s) in lines the last fix changed, " % len(findings)
+    return head + ("consider stopping" if ready else "consider answering, not changing them")

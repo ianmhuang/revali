@@ -726,11 +726,13 @@ def _after_preflight(args, ctx, state: State, rdir: str, log: RunLog, baseline) 
 
         reasons = "\n".join("  - " + r for r in outcome.reasons)
         state.fix_due = True  # owed since review.run_round saved the round; saved by _stage
-        lows = stophint.derived_lows(state, ctx.repo_root, log.detail)
+        lows = []
+        if review.reviewer_only(outcome.data, outcome.gaps):  # a wontfix cannot answer the rest
+            lows = stophint.derived_lows(state, ctx.repo_root, log.detail)
         message = "changes requested in round %d (%s)" % (outcome.round_no, counts)
         if lows:
-            message += "; " + stophint.short(lows)
-            others += "\n" + stophint.hint_line(lows, outcome.round_no, rdir)
+            message += "; " + stophint.short(lows, ready=False)
+            others += "\n" + stophint.hint_line(lows, outcome.round_no, rdir, ready=False)
         _stage(state, rdir, log, "needs_action", message, EXIT_ACTION)
         prstage.update_body(ctx, state, rdir, log)
         _record_history(state, EXIT_ACTION, log)
@@ -798,7 +800,7 @@ def _validate_and_finish(
     lows = stophint.derived_lows(state, ctx.repo_root, log.detail)
     message = "validation %d passed" % vout.number
     if lows:
-        message += "; " + stophint.short(lows)
+        message += "; " + stophint.short(lows, ready=True)
     state.validated_sha = state.head_sha  # saved by _stage
     _stage(state, rdir, log, "ready_to_merge", message, EXIT_OK)
     prstage.mark_ready(ctx, state, log)
@@ -815,7 +817,7 @@ def _validate_and_finish(
         tail += "\n  %d non-blocking finding(s) in %s:" % (len(listed), review_path)
         tail += "".join("\n    - " + review.format_finding(f) for f in listed)
     if lows:
-        tail += "\n  " + stophint.hint_line(lows, round_no, rdir)
+        tail += "\n  " + stophint.hint_line(lows, round_no, rdir, ready=True)
     print(
         "READY TO MERGE: %s (PR %s)\n  review rounds: %d, fix cycles: %d, validation: %s%s\n"
         "  %s: %s\n  cost: $%.2f, models: %s\n  %s\n  merge with: revali merge; "
@@ -966,7 +968,7 @@ def cmd_status(args) -> int:
         )
         if state.rounds:
             print(cost_per_round(state))
-        if state.rounds:  # the mode the first round fixed; a state from before the key: commit
+            # the mode the first round fixed; a state from before the key: commit
             print("tests: %s" % (state.tests_mode or "commit"))
         if state.pr_url:
             print("pr: %s" % state.pr_url)
