@@ -21,6 +21,10 @@ RELEASE_PRS = [119, 120]
 # sha256 of CHANGELOG.md from the 0.6.0 heading to the end, as released. A deliberate edit
 # of a released section updates this hash.
 RELEASED_SHA256 = "0310b88b8c9ebe2505e13ce31911d3fb3843a75627b09e62fef93f1dbfd26da8"
+# sha256 of the preamble, CHANGELOG.md up to its first section whichever release that is,
+# as v0.6.0 has it (review round 1 F1: not up to the 0.7.0 heading, which a later section
+# would move)
+PREAMBLE_SHA256 = "5bd589852800d0c0b8380e264e8c2ff86e7ec7eacd1d239100447f28ab786b0d"
 
 
 def raw(*parts):
@@ -57,9 +61,8 @@ class Changelog(unittest.TestCase):
         text = raw("CHANGELOG.md")
         released = text[text.index(PREVIOUS) :]
         self.assertEqual(hashlib.sha256(released.encode("utf-8")).hexdigest(), RELEASED_SHA256)
-        preamble = text[: text.index(NEW)]
-        self.assertTrue(preamble.startswith("# Changelog\n\nOne section per release"))
-        self.assertNotIn("\n## ", preamble)
+        preamble = text[: text.index("\n## ") + 1]
+        self.assertEqual(hashlib.sha256(preamble.encode("utf-8")).hexdigest(), PREAMBLE_SHA256)
 
     def test_every_pr_of_the_release_and_no_other(self):
         named = {int(n) for n in re.findall(r"#(\d+)\b", section_070())}

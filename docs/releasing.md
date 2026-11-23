@@ -130,12 +130,12 @@ there is used as written.
    saying why the version exists (the first sentence of its changelog section will do), and
    each section whose heading `[pr] collapse_headings` lists (by default `Internal
    Changes`) is folded into a `<details>` block: the Release shows it closed, with its
-   number of entries, and a click opens it. `--notes` may be left out: the tag message is
-   then `<repository name> <version>` and the Release carries the generated notes alone.
-   Then it makes the tag, its message `<repository name> <version>: <lead line>`, pushes
-   it, and publishes the Release with those notes
+   number of entries, and a click opens it. Then it makes the tag, its message
+   `<repository name> <version>: <lead line>`, pushes it, and publishes the Release with
+   those notes
    (`gh release create v<version> --verify-tag --title <title> --notes-file <file>`).
-   When a step fails (exit 1), run the same command again: a tag already on HEAD
+   `--notes` may be left out: the tag message is then `<repository name> <version>` and the
+   Release carries the generated notes alone. When a step fails (exit 1), run the same command again: a tag already on HEAD
    is kept, and only the steps still missing run; with the Release already there it prints
    its URL and exits 0. Once the tag is on origin on HEAD the rerun does not check CI again:
    when `revali release` pushed it, the check ran before the push, and a workflow that runs
