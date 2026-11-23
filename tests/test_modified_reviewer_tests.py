@@ -11,7 +11,7 @@ import re
 
 from revali import PROMPT_VERSION, gitops
 from revali.preflight import Stop, preflight
-from revali.review import OMITTED_TEST_MARK, build_prompt, modified_existing_tests
+from revali.review import OMITTED_TEST_MARK, build_prompt
 from revali.state import State
 from tests.helpers import RepoCase, git
 
@@ -112,8 +112,8 @@ class EarlierReviewerTest(RepoCase):
         self.write("tests/test_calc.py", self.read("tests/test_calc.py").replace("5)", "6)"))
         self.edit_old()
         self.commit_all("weaken both")
-        ctx, _ = self.build()
-        self.assertEqual(modified_existing_tests(ctx), ["tests/test_calc.py", OLD])
+        _, prompt = self.build()
+        self.assertEqual(modified_line(prompt), "tests/test_calc.py, %s" % OLD)
 
     def test_it_counts_toward_max_diff_lines(self):
         """AC-2: 20 deleted lines take the diff over a limit the rest stays under"""

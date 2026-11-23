@@ -133,29 +133,17 @@ def assemble_checklist(ctx: Context) -> str:
 OMITTED_TEST_MARK = "(omitted from the diff above; `git diff` shows its change)"
 
 
-def _modified_test_entries(ctx: Context) -> List[Tuple[str, ...]]:
-    test_dir = ctx.cfg.project.test_dir
-    return [
-        names
-        for status, names in gitops.name_status(ctx.base_ref, "HEAD", ctx.repo_root)
-        if status in ("M", "D", "R", "T") and under_test_dir(names[0], test_dir)
-    ]
-
-
-def modified_existing_tests(ctx: Context) -> List[str]:
-    """The files under test_dir on the base that the diff modifies, deletes or renames (a
-    rename under its old name), whatever their name: an earlier change's reviewer test is
-    listed like any other. A file the branch adds is not on the base and not listed."""
-    return [names[0] for names in _modified_test_entries(ctx)]
-
-
 def modified_tests_value(ctx: Context, exclude: List[str], drop: Collection[str]) -> str:
-    """The prompt's list of `modified_existing_tests`. A file the review's diff leaves out
-    (`gitops.left_out`) stays listed, so its change still gets a `test_changes` entry, and is
-    followed by OMITTED_TEST_MARK."""
+    """The prompt's list of the files under test_dir on the base that the diff modifies,
+    deletes or renames (a rename under its old name), whatever their name: an earlier
+    change's reviewer test is listed like any other. A file the branch adds is not on the
+    base and not listed. A file the review's diff leaves out (`gitops.left_out`) stays
+    listed, so its change still gets a `test_changes` entry, followed by OMITTED_TEST_MARK."""
+    test_dir = ctx.cfg.project.test_dir
     out = [
         names[0] + (" " + OMITTED_TEST_MARK if gitops.left_out(names, exclude, drop) else "")
-        for names in _modified_test_entries(ctx)
+        for status, names in gitops.name_status(ctx.base_ref, "HEAD", ctx.repo_root)
+        if status in ("M", "D", "R", "T") and under_test_dir(names[0], test_dir)
     ]
     return ", ".join(out) or "(none)"
 
