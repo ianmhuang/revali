@@ -97,8 +97,8 @@ sequenceDiagram
 ```
 
 The preflight baseline (the existing suite in the sandbox) runs on every `revali run`
-until the first review round is recorded, and not for `kind: docs`. A sandbox `setup` or
-`build` failure is exit 1 (environment), not a FAIL verdict.
+until the first review round is recorded, and not for `kind: docs` or `run --dry-run`.
+A sandbox `setup` or `build` failure is exit 1 (environment), not a FAIL verdict.
 
 | Role | Started by | Reads | Writes | Model |
 |---|---|---|---|---|
@@ -111,7 +111,7 @@ everything between them is automatic. Exit codes: `0` done / ready to merge,
 `1` pipeline error (not a verdict), `2` the Developer must act (fix, rebase,
 answer a question), `3` a human must decide, `4` (`wait` only) still running.
 
-Status: package version 0.6.0; [CHANGELOG.md](CHANGELOG.md) lists what each release
+Status: package version 0.7.0; [CHANGELOG.md](CHANGELOG.md) lists what each release
 contains. Verified end to end on a private GitHub repository with real Reviewer sessions
 and real WSL and ssh sandboxes ([docs/sandbox.md](docs/sandbox.md) has the record);
 revali reviews its own changes on this public one.

@@ -4,6 +4,52 @@ One section per release, newest first, dated by its tag. A section is written wh
 release is made ([docs/releasing.md](docs/releasing.md)); changes merged since the newest
 section are not listed until then.
 
+## 0.7.0 - 2026-11-23
+
+`revali release` for a project that reviews on one branch and releases from another, and a
+Reviewer that looks for existing tests a change makes wrong without touching them (PR #119
+and #120).
+
+Upgrading from 0.6.0:
+- PROMPT_VERSION goes from 17 to 18 (#120): step 5 of prompts/review.md asks the Reviewer
+  to search the test directory for existing tests the diff does not modify that exercise
+  what it changes, and to report one that now fails, or still passes for a reason that no
+  longer holds, as a `correctness` finding naming the test and the assertion. The manifest
+  line now says it lists the dependency manifests in the diff shown, so a file left out
+  by `[review] exclude` is not listed; this closes the 0.6.0 known issue.
+- New key `[project] release_branch` (#119), default `""`: the branch `revali release`
+  tags, empty for the base branch. `revali release --dry-run` prints a first line naming
+  the release branch and the base it checked against.
+- Unchanged: `defaults.toml` apart from that key, the exit codes, and the layout of
+  `state.json`.
+
+Releases:
+- With `release_branch` set to another branch than the base, `revali release` requires HEAD
+  to be a merge commit of two parents whose second parent is on `origin/<base>` and has
+  HEAD's tree, so the tag carries a commit reviewed on the base; a squashed or rebased
+  release pull request, a branch that never reached the base, or a tree that differs (the
+  message names the paths) is refused with exit 2 (#119). When git cannot read a commit's
+  tree during that check, the message carries git's own error (this release).
+
+Review:
+- Measured on the 18-case bench at effort high, the Reviewer with prompt 18 caught 16
+  cases strictly and 17 loosely, against 10 and 12 for prompt 17; only the case the new
+  instruction was written from (pr55) can be put down to it, the rest is the spread of one
+  sample per version (#120).
+
+Documentation (the 0.7.0 audit): README says `revali run --dry-run` does not start the
+preflight baseline; docs/releasing.md says `--notes` may be left out, what the tag and the
+Release then carry, gives the `gh release create` line with its tag, and says a checkout
+cloned with a single branch needs `git remote set-branches --add origin <base>` once before
+releasing from another branch; templates/revali.toml words `archive_dir` as defaults.toml
+does (this release).
+
+Known issues:
+- prompts/review.md lists "Existing test files this diff modifies" from the whole
+  `base...HEAD`, so a test file left out of the diff by `[review] exclude` is listed,
+  although the next line says a file omitted from the diff is not; the next change to the
+  prompt corrects one or the other.
+
 ## 0.6.0 - 2026-11-23
 
 A hint to stop when a round's only findings are lows in the last fix, the cost of each

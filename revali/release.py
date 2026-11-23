@@ -188,7 +188,8 @@ def check_ci(sha: str, root: str) -> str:
 
 def _tree(commit: str, root: str) -> str:
     """The tree object of a commit; Failed when git cannot read it."""
-    res = _git(["rev-parse", "--verify", "--quiet", "%s^{tree}" % commit], root)
+    # no --quiet: git's own error is what the Failed message carries (#119 round 3)
+    res = _git(["rev-parse", "--verify", "%s^{tree}" % commit], root)
     if not res.ok:
         raise Failed("git rev-parse %s^{tree} failed: %s" % (commit[:12], one_line(res.text)))
     return res.stdout.strip()
