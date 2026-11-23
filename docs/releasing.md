@@ -130,9 +130,12 @@ there is used as written.
    saying why the version exists (the first sentence of its changelog section will do), and
    each section whose heading `[pr] collapse_headings` lists (by default `Internal
    Changes`) is folded into a `<details>` block: the Release shows it closed, with its
-   number of entries, and a click opens it. Then it makes the tag, its message
-   `<repository name> <version>: <lead line>`, pushes it, and publishes the Release with
-   those notes (`gh release create --verify-tag --title <title> --notes-file <file>`). When a step fails (exit 1), run the same command again: a tag already on HEAD
+   number of entries, and a click opens it. `--notes` may be left out: the tag message is
+   then `<repository name> <version>` and the Release carries the generated notes alone.
+   Then it makes the tag, its message `<repository name> <version>: <lead line>`, pushes
+   it, and publishes the Release with those notes
+   (`gh release create v<version> --verify-tag --title <title> --notes-file <file>`).
+   When a step fails (exit 1), run the same command again: a tag already on HEAD
    is kept, and only the steps still missing run; with the Release already there it prints
    its URL and exits 0. Once the tag is on origin on HEAD the rerun does not check CI again:
    when `revali release` pushed it, the check ran before the push, and a workflow that runs
@@ -183,6 +186,12 @@ pull request. The tag, the
 generated notes and the GitHub Release all use that merge commit, and a rerun finishes a
 release that stopped half-way as it does on one branch. `--dry-run` prints the release branch
 and the base it checked against.
+
+A checkout cloned with a single branch (`git clone --single-branch`, or a CI checkout of
+`main` only) fetches only that branch, so `origin/develop` never appears and `revali
+release` refuses with a message saying so. Run
+`git remote set-branches --add origin develop` once in that checkout; from then on the
+fetch brings `develop` too.
 
 revali does not make the release itself: the version bump, the release pull request and its
 merge are the project's, and no branch is created or deleted. With `release_branch` empty

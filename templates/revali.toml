@@ -107,4 +107,5 @@ collapse_headings = ["Internal Changes"]   # release notes sections `revali rele
 # [paths]
 # archive_dir = "archive"         # where `revali merge` / `archive` move .revali/<branch>/ (as
 #                                 # <owner>__<repo>/<pr>-<branch>/): relative = under ~/.revali/,
-#                                 # absolute as written (a shared path, say); "" = delete it
+#                                 # ~ and absolute paths as written (a shared path, say);
+#                                 # "" = delete it

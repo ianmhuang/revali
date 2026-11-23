@@ -231,7 +231,8 @@ class ALaterSectionAbove(unittest.TestCase):
     def test_the_tests_pass_under_a_later_section(self):
         later = with_later_section(self.text)
         self.assertEqual(headings(later)[0], LATER_HEADING)
-        self.assertEqual(headings(later)[1], NEW)
+        # release/0.7.0: looked up, not taken at index 1, as 0.7.0 now sits between them
+        self.assertLess(headings(later).index(LATER_HEADING), headings(later).index(NEW))
         result = run_changelog_tests(self.MODULE, later)
         self.assertGreater(result.testsRun, 0)
         self.assertEqual(problems(result).strip(), "")
