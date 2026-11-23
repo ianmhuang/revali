@@ -11,7 +11,7 @@ import re
 
 from revali import PROMPT_VERSION, gitops
 from revali.preflight import Stop, preflight
-from revali.review import build_prompt, modified_existing_tests
+from revali.review import OMITTED_TEST_MARK, build_prompt, modified_existing_tests
 from revali.state import State
 from tests.helpers import RepoCase, git
 
@@ -139,7 +139,8 @@ class EarlierReviewerTest(RepoCase):
         ctx, prompt = self.build()
         self.assertNotIn("weakened_marker", diff_block(prompt))
         self.assertEqual(omitted_line(prompt), OLD)
-        self.assertEqual(modified_line(prompt), OLD)  # AC-1 lists it all the same
+        # AC-1 lists it all the same; since M4.7 it is marked as omitted from the diff
+        self.assertEqual(modified_line(prompt), "%s %s" % (OLD, OMITTED_TEST_MARK))
         self.assertEqual(ctx.excluded_files, [OLD])
 
     def test_the_related_documents_see_it(self):

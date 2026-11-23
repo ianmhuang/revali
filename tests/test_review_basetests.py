@@ -29,7 +29,7 @@ import re
 
 from revali import PROMPT_VERSION
 from revali.preflight import Stop, preflight
-from revali.review import build_prompt
+from revali.review import OMITTED_TEST_MARK, build_prompt
 from revali.state import State
 from tests.helpers import ROOT, RepoCase, git
 
@@ -213,7 +213,9 @@ class BaseCarriesReviewerTests(RepoCase):
         self.assertIn("+deep_row = 4", diff)  # the pattern file the exclude does not name
         self.assertEqual(names(omitted(prompt)), [EARLIER])
         self.assertEqual(ctx.excluded_files, [EARLIER])
-        self.assertEqual(sorted(names(modified(prompt))), sorted([EARLIER, NESTED]))
+        # since M4.7 the excluded one is marked as omitted from the diff
+        marked = "%s %s" % (EARLIER, OMITTED_TEST_MARK)
+        self.assertEqual(sorted(names(modified(prompt))), sorted([marked, NESTED]))
 
     def test_a_document_linking_to_it_is_listed_as_related(self):
         """AC-2: the file is part of the diff, so the README that links to it is among the

@@ -129,16 +129,35 @@ def assemble_checklist(ctx: Context) -> str:
     return "\n\n".join(parts) if parts else "(no checklist configured)"
 
 
+# after a listed test file the review's diff leaves out (`[review] exclude`)
+OMITTED_TEST_MARK = "(omitted from the diff above; `git diff` shows its change)"
+
+
+def _modified_test_entries(ctx: Context) -> List[Tuple[str, ...]]:
+    test_dir = ctx.cfg.project.test_dir
+    return [
+        names
+        for status, names in gitops.name_status(ctx.base_ref, "HEAD", ctx.repo_root)
+        if status in ("M", "D", "R", "T") and under_test_dir(names[0], test_dir)
+    ]
+
+
 def modified_existing_tests(ctx: Context) -> List[str]:
     """The files under test_dir on the base that the diff modifies, deletes or renames (a
     rename under its old name), whatever their name: an earlier change's reviewer test is
     listed like any other. A file the branch adds is not on the base and not listed."""
-    test_dir = ctx.cfg.project.test_dir
-    return [
-        names[0]
-        for status, names in gitops.name_status(ctx.base_ref, "HEAD", ctx.repo_root)
-        if status in ("M", "D", "R", "T") and under_test_dir(names[0], test_dir)
+    return [names[0] for names in _modified_test_entries(ctx)]
+
+
+def modified_tests_value(ctx: Context, exclude: List[str], drop: Collection[str]) -> str:
+    """The prompt's list of `modified_existing_tests`. A file the review's diff leaves out
+    (`gitops.left_out`) stays listed, so its change still gets a `test_changes` entry, and is
+    followed by OMITTED_TEST_MARK."""
+    out = [
+        names[0] + (" " + OMITTED_TEST_MARK if gitops.left_out(names, exclude, drop) else "")
+        for names in _modified_test_entries(ctx)
     ]
+    return ", ".join(out) or "(none)"
 
 
 def manifests_touched(ctx: Context) -> List[str]:
@@ -500,7 +519,7 @@ def build_prompt(
         "test_file_pattern": cfg.project.test_file_pattern,
         "exclude": ", ".join(cfg.review.exclude) or "(nothing)",
         "excluded_files": ", ".join(ctx.excluded_files) or "(none)",
-        "modified_tests": ", ".join(modified_existing_tests(ctx)) or "(none)",
+        "modified_tests": modified_tests_value(ctx, exclude, drop),
         "manifests": ", ".join(manifests_touched(ctx)) or "(none)",
         "related_docs_section": _related_docs_section(ctx, diff, exclude, drop),
         "prior_section": _prior_findings_section(rdir, round_no),
