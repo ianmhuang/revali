@@ -1,7 +1,7 @@
 """`revali release <version>`: tag the pushed tip of the base branch, or of `[project]
-release_branch` when it names another branch (a merge commit of the base, checked by
-`check_release_merge`), push the tag and publish the GitHub Release (docs/releasing.md,
-step 5 and "Releasing from another branch").
+release_branch` when it names another branch (a merge of a base commit with that commit's
+tree, checked by `check_release_merge`), push the tag and publish the GitHub Release
+(docs/releasing.md, step 5 and "Releasing from another branch").
 
 Every check runs before anything is created; a failed check exits 2 and changes nothing. A
 release that stopped half-way (the tag made or pushed, the Release not created) finishes on a
@@ -188,8 +188,8 @@ def check_ci(sha: str, root: str) -> str:
 
 def check_release_merge(head: str, target: str, base: str, root: str) -> None:
     """Refused unless HEAD on the release branch is a merge commit of two parents whose
-    second parent, the side the release pull request merged, is on `origin/<base>`: what
-    the tag carries was then reviewed there."""
+    second parent, the side the release pull request merged, is on `origin/<base>` and
+    has the same tree as HEAD: what the tag carries is then a commit reviewed there."""
     res = _git(["rev-list", "--parents", "-n", "1", head], root)
     if not res.ok:
         raise Failed("git rev-list %s failed: %s" % (head[:12], one_line(res.text)))
@@ -202,6 +202,14 @@ def check_release_merge(head: str, target: str, base: str, root: str) -> None:
         )
     merged = parents[1]
     ancestor = "refs/remotes/origin/%s" % base
+    if not gitops.rev_parse(ancestor, root):
+        # the fetch succeeded but filled FETCH_HEAD only: a refspec that leaves the base out
+        # (a `--single-branch` clone)
+        raise Refused(
+            "origin/%s is missing after `git fetch origin %s` (the remote's fetch refspec "
+            "leaves it out); run `git fetch origin %s:refs/remotes/origin/%s` and try again"
+            % (base, base, base, base)
+        )
     res = _git(["merge-base", "--is-ancestor", merged, ancestor], root)
     if res.returncode == 1:
         raise Refused(
@@ -211,6 +219,20 @@ def check_release_merge(head: str, target: str, base: str, root: str) -> None:
         )
     if not res.ok:
         raise Failed("git merge-base --is-ancestor failed: %s" % one_line(res.text))
+    # the merge's own tree, not only its history: a commit made straight on the release
+    # branch below the merge, or an edit in the merge itself, leaves the trees different
+    res = _git(["diff", "--name-only", "--no-renames", merged, head, "--"], root)
+    if not res.ok:
+        raise Failed("git diff %s %s failed: %s" % (merged[:12], head[:12], one_line(res.text)))
+    paths = [ln for ln in res.stdout.splitlines() if ln.strip()]
+    if paths:
+        shown = ", ".join(paths[:5]) + (" and %d more" % (len(paths) - 5) if len(paths) > 5 else "")
+        raise Refused(
+            "the tree of HEAD %s differs from the side it merged (%s, on origin/%s) in %s, "
+            "so the release would carry changes not reviewed there; bring them to %s "
+            "(a cherry-pick, or a merge of %s into %s) and release from a new merge"
+            % (head[:12], merged[:12], base, shown, base, target, base)
+        )
 
 
 def release_url(tag: str, root: str) -> str:

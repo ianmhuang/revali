@@ -101,6 +101,22 @@ class Releases(TwoBranches):
         self.assertEqual(code, EXIT_OK, out)
         self.assertEqual(self.origin_tag(), self.head())
 
+    def test_a_hotfix_that_reached_develop_first(self):
+        # review round 1 F1: a fix on main that also landed on develop (a cherry-pick)
+        # leaves the release merge's tree equal to develop's
+        self.write("hotfix.txt", "fixed\n")
+        self.commit_all("hotfix on main")
+        git(["push", "-q", "origin", "main"], self.repo)
+        fix = self.head()
+        git(["checkout", "-q", "develop"], self.repo)
+        git(["cherry-pick", fix], self.repo)
+        git(["push", "-q", "origin", "develop"], self.repo)
+        git(["checkout", "-q", "main"], self.repo)
+        self.merge_release()
+        code, out = run(["release", "7.8.9"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(self.origin_tag(), self.head())
+
     def test_a_rerun_after_a_failed_release_create(self):
         # the resume behaviour is the same on the release branch
         self.merge_release()
@@ -186,6 +202,28 @@ class Refuses(TwoBranches):
         self.merge_release()
         self.assert_refused(["release", "7.8.9"], "not on origin/develop")
 
+    def test_a_commit_on_main_below_the_release_merge(self):
+        # review round 1 F1: the merged side is on origin/develop, but the tag would also
+        # carry a commit made straight on main
+        self.write("hotfix.txt", "unreviewed\n")
+        self.commit_all("hotfix on main")
+        git(["push", "-q", "origin", "main"], self.repo)
+        self.merge_release()
+        self.assertEqual(len(self.parents()), 2)
+        out = self.assert_refused(["release", "7.8.9"], "tree")
+        self.assertIn("hotfix.txt", self.error_lines(out)[0])
+        self.assertNotIn("squashed", self.error_lines(out)[0])
+
+    def test_a_change_made_in_the_merge_commit(self):
+        # review round 1 F1: a conflict resolution, or any edit, inside the merge itself
+        git(["merge", "-q", "--no-ff", "--no-commit", "develop"], self.repo)
+        self.write("feature.txt", "edited in the merge\n")
+        git(["add", "feature.txt"], self.repo)
+        git(["commit", "-q", "-m", "Release (#9)"], self.repo)
+        git(["push", "-q", "origin", "main"], self.repo)
+        out = self.assert_refused(["release", "7.8.9"], "tree")
+        self.assertIn("feature.txt", self.error_lines(out)[0])
+
     def test_the_dry_run_refuses_the_same_way(self):
         git(["merge", "-q", "--ff-only", "develop"], self.repo)
         git(["push", "-q", "origin", "main"], self.repo)
@@ -207,6 +245,17 @@ class Failures(TwoBranches):
         self.assertEqual(self.local_tag(), "")
         self.assertEqual(self.origin_tag(), "")
         self.assertEqual(self.gh_release_calls("create"), [])
+
+    def test_no_tracking_ref_for_the_base(self):
+        # review round 1 F3: a single-branch clone fetches develop into FETCH_HEAD only
+        self.merge_release()
+        refspec = "+refs/heads/main:refs/remotes/origin/main"
+        git(["config", "remote.origin.fetch", refspec], self.repo)
+        git(["update-ref", "-d", "refs/remotes/origin/develop"], self.repo)
+        out = self.assert_refused(["release", "7.8.9"], "origin/develop")
+        self.assertIn(
+            "git fetch origin develop:refs/remotes/origin/develop", self.error_lines(out)[0]
+        )
 
 
 class DryRun(TwoBranches):

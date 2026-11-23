@@ -36,7 +36,7 @@ any layer sets the defaults for every `[validate.<name>]` table.
 `[project] release_branch` names the branch `revali release` tags; empty, the default, means
 the base branch. A project that reviews on one branch and releases from another through a
 merge-commit release pull request sets it, and `revali release` then checks that the tagged
-merge commit merged a side already on `origin/<base>`
+merge commit merged a side already on `origin/<base>` and has that side's tree
 ([releasing.md](releasing.md#releasing-from-another-branch)). Nothing but `revali release`
 reads it.
 `[project] platforms` lists `linux`, `windows` or both, each with its own

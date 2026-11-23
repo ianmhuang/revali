@@ -116,7 +116,7 @@ there is used as written.
    `X.Y.Z` (a leading `v` is accepted; the tag is `v<version>`); HEAD is on the base branch
    (`[project] base_branch`, else the repository's default branch; `[project]
    release_branch` when it is set, see Releasing from another branch below),
-   the working tree is clean, and HEAD is `origin/<base>` after a fetch;
+   the working tree is clean, and HEAD is `origin/<that branch>` after a fetch;
    `.github/release.yml` is in HEAD; the
    tag does not exist here or on origin on another commit; and every GitHub check run on
    HEAD has passed (one still running is a refusal, not a wait). Only check runs are read
@@ -169,11 +169,16 @@ merge commit. `revali release` runs on `main` with the checks above, with `main`
 the base branch: HEAD on `main`, the tree clean, HEAD equal to `origin/main` after a fetch,
 `.github/release.yml` in HEAD, every check run on HEAD passed. It also fetches `develop` and
 requires HEAD to be a merge commit of exactly two parents whose second parent, the side the
-release pull request merged, is in `origin/develop`. Everything the tag carries was then
-reviewed on `develop`. A squashed or rebased release pull request leaves one parent and is
-refused with a message saying to merge it with a merge commit; a merge of a branch that never
-reached `develop`, such as a hotfix merged straight into `main`, is refused too, and the fix
-goes to `develop` first and comes back in the next release pull request. The tag, the
+release pull request merged, is in `origin/develop`, and whose tree is that second parent's
+tree. What the tag carries is then exactly a commit already reviewed on `develop`, whatever
+else `main`'s history holds. A squashed or rebased release pull request leaves one parent and
+is refused with a message saying to merge it with a merge commit. A merge of a branch that
+never reached `develop`, such as a hotfix branch merged straight into `main`, is refused too;
+so is a release merge whose tree differs from `develop`'s, which happens when a commit was
+made straight on `main` below it or the merge commit itself changed something (a conflict
+resolution), and the message names the paths that differ. The fix goes to `develop` first,
+by a cherry-pick or a merge of `main` into `develop`, and comes back in the next release
+pull request. The tag, the
 generated notes and the GitHub Release all use that merge commit, and a rerun finishes a
 release that stopped half-way as it does on one branch. `--dry-run` prints the release branch
 and the base it checked against.
