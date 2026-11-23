@@ -221,7 +221,8 @@ class RefusesOnTheReleaseBranch(TwoBranchCase):
 
 class TheMergeCommitRule(TwoBranchCase):
     """AC-3: HEAD is a merge commit of exactly two parents whose second parent is on
-    origin/<base>; anything else is exit 2 with nothing created."""
+    origin/<base>; anything else is exit 2 with nothing created. The tree of the merge is
+    TheTreeOfTheReleaseMerge below."""
 
     def assert_says_merge_commit(self, line):
         self.assertIn("merge commit", line)
@@ -282,6 +283,113 @@ class TheMergeCommitRule(TwoBranchCase):
         git(["commit", "-q", "-m", "Release (squashed)"], self.repo)
         git(["push", "-q", "origin", "main"], self.repo)
         self.assert_says_merge_commit(self.refused(["release", VERSION, "--dry-run"]))
+
+
+class TheTreeOfTheReleaseMerge(TwoBranchCase):
+    """AC-3 (review round 1 F1): HEAD's tree is its second parent's tree, so what the tag
+    carries is a commit on origin/<base>; a difference is exit 2 with the paths named."""
+
+    def on_main(self, name="hotfix.txt"):
+        """A commit made straight on the release branch, pushed; returns its sha."""
+        self.change(name)
+        git(["push", "-q", "origin", "main"], self.repo)
+        return self.sha()
+
+    def to_develop(self, *args):
+        """Run one git command on develop and push it; back on main afterwards."""
+        git(["checkout", "-q", "develop"], self.repo)
+        git(list(args), self.repo)
+        git(["push", "-q", "origin", "develop"], self.repo)
+        git(["checkout", "-q", "main"], self.repo)
+
+    def assert_released(self):
+        head = self.sha()
+        code, out = run_cli(["release", VERSION])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(self.sha(TAG + "^{commit}"), head)
+        self.assertEqual(self.origin_tag(), head)
+        self.assertEqual(len(self.creates()), 1)
+
+    def test_a_commit_on_the_release_branch_below_the_merge(self):
+        self.on_main()
+        self.merge()
+        self.assertEqual(len(self.parents()), 2)
+        # the merged side is on origin/develop (the call raises otherwise): only the tree
+        # shows what main added
+        merged = self.parents()[1]
+        git(["merge-base", "--is-ancestor", merged, "refs/remotes/origin/develop"], self.repo)
+        line = self.refused()
+        self.assertIn("hotfix.txt", line)
+        self.assertNotIn("squash", line)  # not the merge-commit message
+
+    def test_a_file_deleted_on_the_release_branch_below_the_merge(self):
+        # an earlier release brought reviewed.txt to main; main then dropped it, so the next
+        # release merge lacks a file develop still has
+        self.merge()
+        git(["rm", "-q", "reviewed.txt"], self.repo)
+        git(["commit", "-q", "-m", "drop reviewed.txt on main"], self.repo)
+        git(["push", "-q", "origin", "main"], self.repo)
+        self.on_develop("second.txt")
+        self.merge()
+        self.assertEqual(len(self.parents()), 2)
+        self.assertIn("reviewed.txt", self.refused())
+
+    def test_a_change_made_in_the_merge_commit(self):
+        git(["merge", "-q", "--no-ff", "--no-commit", "develop"], self.repo)
+        self.write("reviewed.txt", "edited in the merge\n")
+        git(["add", "reviewed.txt"], self.repo)
+        git(["commit", "-q", "-m", "Release"], self.repo)
+        git(["push", "-q", "origin", "main"], self.repo)
+        self.assertEqual(len(self.parents()), 2)
+        self.assertIn("reviewed.txt", self.refused())
+
+    def test_the_dry_run_refuses_too(self):
+        self.on_main()
+        self.merge()
+        self.assertIn("hotfix.txt", self.refused(["release", VERSION, "--dry-run"]))
+
+    def test_an_earlier_release_merge_below_this_one(self):
+        # main's history holds an older release merge; the new one still has develop's tree
+        self.merge()
+        self.on_develop("second.txt")
+        self.merge()
+        self.assertEqual(len(self.parents()), 2)
+        self.assert_released()
+
+    def test_a_fix_cherry_picked_to_the_base_before_the_merge(self):
+        fix = self.on_main()
+        self.to_develop("cherry-pick", fix)
+        self.merge()
+        self.assert_released()
+
+    def test_the_release_branch_merged_into_the_base_before_the_merge(self):
+        self.on_main()
+        self.to_develop("merge", "-q", "--no-ff", "-m", "Merge main into develop", "main")
+        self.merge()
+        self.assert_released()
+
+    def test_a_refused_merge_is_released_once_the_fix_reached_the_base(self):
+        # the way out the refusal names: the fix goes to develop and a new merge is released
+        fix = self.on_main()
+        self.merge()
+        self.assertIn("hotfix.txt", self.refused())
+        self.to_develop("cherry-pick", fix)
+        self.merge()
+        self.assert_released()
+
+
+class NoTrackingRefForTheBase(TwoBranchCase):
+    """AC-3 (review round 1 F3): a checkout whose fetch refspec leaves the base out has no
+    origin/<base> to check against after the fetch; that is a refusal, not a git error."""
+
+    def test_a_checkout_that_tracks_the_release_branch_only(self):
+        self.merge()
+        refspec = "+refs/heads/main:refs/remotes/origin/main"
+        git(["config", "remote.origin.fetch", refspec], self.repo)
+        git(["update-ref", "-d", "refs/remotes/origin/develop"], self.repo)
+        line = self.refused()
+        self.assertIn("origin/develop", line)
+        self.assertIn("git fetch", line)
 
 
 class AFailedFetch(TwoBranchCase):
