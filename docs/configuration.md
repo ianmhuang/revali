@@ -211,7 +211,10 @@ files the branch adds; a file already on the base, an earlier change's
 reviewer test included, is reviewed and counted like any other change. So is
 a file git reports as renamed from a base file the branch deletes (renames are
 found at 50% similarity), even when the reviewer wrote it on this branch. The
-same files are left out of the reviewer's diff and of preflight's diff size. Documents
+same files are left out of the reviewer's diff and of preflight's diff size. A test
+file already on the base that `exclude` leaves out stays on the prompt's list of
+existing test files the change modifies, deletes or renames, marked as omitted from
+the diff, so the reviewer still judges its change. Documents
 outside the graph are not searched, and a document the diff changes itself
 is marked so. The list ends with a map of the graph's documents and their
 depth, at most `doc_map_max` of them (default 100; 0 leaves the map out).
