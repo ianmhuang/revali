@@ -118,7 +118,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_release = _command(
         sub,
         "release",
-        "tag the pushed tip of the base branch, push the tag and publish its GitHub Release",
+        "tag the pushed tip of the base branch (or of [project] release_branch), push the tag"
+        " and publish its GitHub Release",
         _cmd_release,
     )
     p_release.add_argument("version", help="X.Y.Z or vX.Y.Z; the tag is vX.Y.Z")

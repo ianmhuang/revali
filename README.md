@@ -144,7 +144,7 @@ python <revali dir>/revali.py stop                     # kill this working tree'
 python <revali dir>/revali.py reset                    # drop the branch's state.json, keep its files
 python <revali dir>/revali.py clean <branch>           # delete a branch's state directory
 python <revali dir>/revali.py archive [--branch <b>]   # record a PR merged or closed without revali merge, archive its files
-python <revali dir>/revali.py release <v> [--notes <line>] [--dry-run]   # on the pushed base tip, no check run failed or running (none: released with a note): tag v<v>, push it, publish the GitHub Release
+python <revali dir>/revali.py release <v> [--notes <line>] [--dry-run]   # on the pushed tip of the base branch (or of [project] release_branch), no check run failed or running (none: released with a note): tag v<v>, push it, publish the GitHub Release
 python <revali dir>/revali.py stats                    # the run history per repository: first-try pass rate, rounds, cost
 python <revali dir>/revali.py version                  # the version; --version prints the same line
 python <revali dir>/revali.py --verbose <command>      # echo every command revali runs to the terminal

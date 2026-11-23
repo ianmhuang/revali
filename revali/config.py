@@ -59,6 +59,7 @@ class EngineCfg:
 @dataclass
 class ProjectCfg:
     base_branch: str = ""
+    release_branch: str = ""  # the branch `revali release` tags; empty = the base branch
     platforms: List[str] = field(default_factory=list)
     lint: str = ""
     format: str = ""
