@@ -114,8 +114,10 @@ there is used as written.
 
    It first checks, and on a failed check exits 2 having created nothing: the version is
    `X.Y.Z` (a leading `v` is accepted; the tag is `v<version>`); HEAD is on the base branch
-   (`[project] base_branch`, else the repository's default branch), the working tree is
-   clean, and HEAD is `origin/<base>` after a fetch; `.github/release.yml` is in HEAD; the
+   (`[project] base_branch`, else the repository's default branch; `[project]
+   release_branch` when it is set, see Releasing from another branch below),
+   the working tree is clean, and HEAD is `origin/<base>` after a fetch;
+   `.github/release.yml` is in HEAD; the
    tag does not exist here or on origin on another commit; and every GitHub check run on
    HEAD has passed (one still running is a refusal, not a wait). Only check runs are read
    (GitHub Actions and other apps; the older commit statuses are not), every page of them;
@@ -150,6 +152,36 @@ there is used as written.
    new tag while no run from that checkout is in progress
    (`git -C <revali dir> fetch --tags`, then `git -C <revali dir> checkout v<version>`;
    see Installing revali in [workflow.md](workflow.md)).
+
+## Releasing from another branch
+
+A project that reviews its changes on one branch (`develop`) and releases from another
+(`main`) sets both in revali.toml:
+
+```toml
+[project]
+base_branch = "develop"     # every revali run reviews and merges here
+release_branch = "main"     # revali release tags here
+```
+
+A release then reaches `main` through a release pull request from `develop`, merged with a
+merge commit. `revali release` runs on `main` with the checks above, with `main` in place of
+the base branch: HEAD on `main`, the tree clean, HEAD equal to `origin/main` after a fetch,
+`.github/release.yml` in HEAD, every check run on HEAD passed. It also fetches `develop` and
+requires HEAD to be a merge commit of exactly two parents whose second parent, the side the
+release pull request merged, is in `origin/develop`. Everything the tag carries was then
+reviewed on `develop`. A squashed or rebased release pull request leaves one parent and is
+refused with a message saying to merge it with a merge commit; a merge of a branch that never
+reached `develop`, such as a hotfix merged straight into `main`, is refused too, and the fix
+goes to `develop` first and comes back in the next release pull request. The tag, the
+generated notes and the GitHub Release all use that merge commit, and a rerun finishes a
+release that stopped half-way as it does on one branch. `--dry-run` prints the release branch
+and the base it checked against.
+
+revali does not make the release itself: the version bump, the release pull request and its
+merge are the project's, and no branch is created or deleted. With `release_branch` empty
+(the default), or naming the base branch, `revali release` tags the base branch and checks no
+merge commit.
 
 ## Release notes for a project that uses revali
 

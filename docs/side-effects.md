@@ -239,8 +239,11 @@ stated.
   directory ignored the way the first item above describes, without the commit. No
   existing file is overwritten, nothing is committed or pushed, and gh is not called;
   the only git calls find the repository root and ask `git check-ignore`
-- on `revali release <version>` (human-started, on the base branch): `git fetch origin
-  <base>`, `git ls-remote origin` for the tag, and the reads `gh repo view`, `gh api` of
+- on `revali release <version>` (human-started, on the base branch, or on `[project]
+  release_branch` when it names another branch): `git fetch origin <base>` (with a
+  release branch, `git fetch origin <release branch>` and then `git fetch origin <base>`,
+  and the reads `git rev-list --parents` and `git merge-base --is-ancestor` for its merge
+  check), `git ls-remote origin` for the tag, and the reads `gh repo view`, `gh api` of
   HEAD's check runs and `gh release view`; when the Release does not exist yet, `gh api -X
   POST repos/{owner}/{repo}/releases/generate-notes` for the notes (GitHub stores nothing
   for it); when every check passes, an annotated tag `v<version>` on HEAD (`git tag -a`),

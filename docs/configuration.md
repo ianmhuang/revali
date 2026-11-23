@@ -33,6 +33,12 @@ Unknown keys are errors in every layer. `[review] engine` and
 (`prompt`, `schema`, `checklist_builtin`) are relative to the project
 root; empty means the file revali ships with. `[validate.platform]` in
 any layer sets the defaults for every `[validate.<name>]` table.
+`[project] release_branch` names the branch `revali release` tags; empty, the default, means
+the base branch. A project that reviews on one branch and releases from another through a
+merge-commit release pull request sets it, and `revali release` then checks that the tagged
+merge commit merged a side already on `origin/<base>`
+([releasing.md](releasing.md#releasing-from-another-branch)). Nothing but `revali release`
+reads it.
 `[project] platforms` lists `linux`, `windows` or both, each with its own
 `[validate.<name>]` table; any other name, or a name listed twice, is a
 configuration error. `[project] test_dir` is a directory inside the

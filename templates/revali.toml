@@ -16,6 +16,9 @@
 [project]
 config_version = 1
 base_branch = "main"              # empty = the repo's default branch (via gh)
+# release_branch = "main"         # set when releases are tagged on another branch than the
+                                  # base (review on develop, release from main); empty = the
+                                  # base branch. See docs/releasing.md
 platforms = ["linux"]             # linux and/or windows, each with a [validate.<name>] table
 lint = ""                         # e.g. "ruff check . && black --check ."; also run on the reviewer's
                                   # test files before they are committed; a failure blocks the run

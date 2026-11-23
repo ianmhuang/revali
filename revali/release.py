@@ -1,5 +1,7 @@
-"""`revali release <version>`: tag the pushed tip of the base branch, push the tag and
-publish the GitHub Release (docs/releasing.md, step 5).
+"""`revali release <version>`: tag the pushed tip of the base branch, or of `[project]
+release_branch` when it names another branch (a merge commit of the base, checked by
+`check_release_merge`), push the tag and publish the GitHub Release (docs/releasing.md,
+step 5 and "Releasing from another branch").
 
 Every check runs before anything is created; a failed check exits 2 and changes nothing. A
 release that stopped half-way (the tag made or pushed, the Release not created) finishes on a
@@ -43,6 +45,8 @@ class Plan:
     tag: str
     version: str
     head: str
+    branch: str  # the release branch HEAD is on
+    base: str  # the review base it was checked against; the same name on one branch
     repo_name: str
     make_tag: bool
     push_tag: bool
@@ -50,6 +54,11 @@ class Plan:
     notes: str = ""
     title: str = ""  # the Release's title and body, when it does not exist yet
     body: str = ""
+
+    def branches(self) -> str:
+        if self.branch == self.base:
+            return "release branch %s (the base branch)" % self.branch
+        return "release branch %s, checked against the base branch %s" % (self.branch, self.base)
 
     def tag_message(self) -> str:
         message = "%s %s" % (self.repo_name, self.version)
@@ -177,6 +186,33 @@ def check_ci(sha: str, root: str) -> str:
     return "CI checks green on HEAD (%d)" % len(checks)
 
 
+def check_release_merge(head: str, target: str, base: str, root: str) -> None:
+    """Refused unless HEAD on the release branch is a merge commit of two parents whose
+    second parent, the side the release pull request merged, is on `origin/<base>`: what
+    the tag carries was then reviewed there."""
+    res = _git(["rev-list", "--parents", "-n", "1", head], root)
+    if not res.ok:
+        raise Failed("git rev-list %s failed: %s" % (head[:12], one_line(res.text)))
+    parents = res.stdout.split()[1:]
+    if len(parents) != 2:
+        raise Refused(
+            "HEAD %s on %s is not a merge commit of two parents (it has %d); merge the release "
+            "pull request from %s with a merge commit, not squashed or rebased"
+            % (head[:12], target, len(parents), base)
+        )
+    merged = parents[1]
+    ancestor = "refs/remotes/origin/%s" % base
+    res = _git(["merge-base", "--is-ancestor", merged, ancestor], root)
+    if res.returncode == 1:
+        raise Refused(
+            "the side HEAD %s merged (%s) is not on origin/%s, so the release would carry "
+            "commits not reviewed there; bring them to %s and release from a merge of it"
+            % (head[:12], merged[:12], base, base)
+        )
+    if not res.ok:
+        raise Failed("git merge-base --is-ancestor failed: %s" % one_line(res.text))
+
+
 def release_url(tag: str, root: str) -> str:
     """The URL of the GitHub Release for the tag, "" when there is none."""
     res = _gh(["release", "view", tag, "--json", "url", "--jq", ".url"], root)
@@ -263,28 +299,34 @@ def plan_release(root: str, version: str, notes: str, report) -> Plan:
     base = cfg.project.base_branch or info.default_branch
     if not base:
         raise Failed("cannot determine the base branch; set project.base_branch")
+    target = cfg.project.release_branch or base
     branch = gitops.current_branch(root)
-    if branch != base:
-        raise Refused("on %s, not the base branch %s; check out %s first" % (branch, base, base))
+    if branch != target:
+        which = "release branch" if target != base else "base branch"
+        raise Refused("on %s, not the %s %s; check out %s first" % (branch, which, target, target))
     # revali's own state directory does not count, as for preflight and merge
     dirty = gitops.dirty_paths(root, (cfg.paths.state_dir.rstrip("/") + "/",))
     if dirty:
         raise Refused("the working tree is not clean: %s" % ", ".join(dirty[:5]))
-    res = gitops.fetch("origin", base, root)
-    if not res.ok:
-        raise Failed("git fetch origin %s failed: %s" % (base, one_line(res.text)))
+    # the base too when it is another branch: the merge check reads origin/<base>
+    for name in [target] + ([base] if target != base else []):
+        res = gitops.fetch("origin", name, root)
+        if not res.ok:
+            raise Failed("git fetch origin %s failed: %s" % (name, one_line(res.text)))
     head = gitops.rev_parse("HEAD", root) or ""
-    remote = gitops.rev_parse("refs/remotes/origin/%s" % base, root) or ""
+    remote = gitops.rev_parse("refs/remotes/origin/%s" % target, root) or ""
     if head != remote:
         raise Refused(
             "HEAD (%s) is not origin/%s (%s); pull or push first"
-            % (head[:12], base, remote[:12] or "missing")
+            % (head[:12], target, remote[:12] or "missing")
         )
     if not _git(["cat-file", "-e", "HEAD:%s" % RELEASE_YML], root).ok:
         raise Refused(
             "%s is not in HEAD; GitHub groups the generated notes by it (revali init writes it)"
             % RELEASE_YML
         )
+    if target != base:
+        check_release_merge(head, target, base, root)
     local = local_tag_commit(tag, root)
     if local and local != head:
         raise Refused("tag %s already exists on %s, not on HEAD %s" % (tag, local[:12], head[:12]))
@@ -306,6 +348,8 @@ def plan_release(root: str, version: str, notes: str, report) -> Plan:
         tag=tag,
         version=tag[1:],
         head=head,
+        branch=target,
+        base=base,
         repo_name=info.name or os.path.basename(root),
         make_tag=not local and not on_origin,
         push_tag=not on_origin,
@@ -403,6 +447,7 @@ def cmd_release(args) -> int:
     try:
         plan = plan_release(root, args.version, args.notes or "", report)
         if args.dry_run:
+            print("dry run: %s" % plan.branches())
             cmds = plan.commands()
             if not cmds:
                 print("dry run: %s is already released: %s" % (plan.tag, plan.release_url))

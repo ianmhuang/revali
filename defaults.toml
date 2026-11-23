@@ -23,6 +23,7 @@ helper_prefix = "claude-haiku"   # usage rows starting with this are helpers, no
 
 [project]
 base_branch = ""                 # empty = the repository's default branch (via gh)
+release_branch = ""              # the branch `revali release` tags; empty = the base branch
 platforms = ["linux"]
 lint = ""
 format = ""
