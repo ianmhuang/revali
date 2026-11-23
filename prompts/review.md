@@ -20,7 +20,7 @@ $diff
 
 Files changed but omitted from the diff above: $excluded_files
 Existing test files this diff modifies, deletes or renames (a rename under its old name): $modified_tests
-Dependency manifests this diff touches: $manifests
+Dependency manifests in the diff above (a file omitted from it is not listed): $manifests
 
 $related_docs_section
 $prior_section
@@ -40,6 +40,11 @@ $bounce_section
    `test_changes` entry saying whether the change is justified and why.
    A weakened or removed assertion without a reason in the description is
    not justified.
+   Then look for existing tests the diff does not modify that exercise what it
+   changes: search `$test_dir/` for the functions, fields, messages, defaults,
+   order or timing the diff alters. A test that now fails, or still passes for
+   a reason that no longer holds, is a `correctness` finding naming the test
+   and the assertion.
 6. For every dependency manifest touched, add a `dependencies_changed`
    entry; justified only when the description's `Dependencies` section
    explains it.
