@@ -6,6 +6,7 @@ and the Release calls. Black-box through the CLI: exit code, the ERROR line, the
 and on origin, and the calls gh received.
 """
 
+import os
 import re
 import unittest
 
@@ -343,6 +344,22 @@ class TheTreeOfTheReleaseMerge(TwoBranchCase):
         self.assertEqual(len(self.parents()), 2)
         self.assertIn("reviewed.txt", self.refused())
 
+    def test_a_submodule_pointer_the_checkouts_diff_settings_hide(self):
+        # a submodule pointer added straight on main, in a checkout whose
+        # `diff.ignoreSubmodules = all` keeps submodules out of `git diff`: the trees differ
+        # all the same, and the tag would carry a pointer develop never had
+        os.makedirs(os.path.join(self.repo, "vendor", "lib"))  # as a plain clone leaves it
+        pointer = "160000,%s,vendor/lib" % self.sha()
+        git(["update-index", "--add", "--cacheinfo", pointer], self.repo)
+        git(["commit", "-q", "-m", "submodule pointer on main"], self.repo)
+        git(["push", "-q", "origin", "main"], self.repo)
+        self.merge()
+        self.assertEqual(len(self.parents()), 2)
+        git(["config", "diff.ignoreSubmodules", "all"], self.repo)
+        line = self.refused()
+        self.assertIn("vendor/lib", line)
+        self.assertNotIn("not clean", line)  # the tree of the merge, not the working tree
+
     def test_the_dry_run_refuses_too(self):
         self.on_main()
         self.merge()
@@ -382,14 +399,46 @@ class NoTrackingRefForTheBase(TwoBranchCase):
     """AC-3 (review round 1 F3): a checkout whose fetch refspec leaves the base out has no
     origin/<base> to check against after the fetch; that is a refusal, not a git error."""
 
-    def test_a_checkout_that_tracks_the_release_branch_only(self):
-        self.merge()
+    def track_the_release_branch_only(self):
+        """What `git clone --single-branch` of main leaves: no refspec and no ref for develop."""
         refspec = "+refs/heads/main:refs/remotes/origin/main"
         git(["config", "remote.origin.fetch", refspec], self.repo)
         git(["update-ref", "-d", "refs/remotes/origin/develop"], self.repo)
+
+    def advised(self, line):
+        """The arguments of the git command the refusal says to run: the last one it quotes."""
+        commands = re.findall(r"`git ([^`]+)`", line)
+        self.assertTrue(commands, line)
+        return commands[-1].split()
+
+    def test_a_checkout_that_tracks_the_release_branch_only(self):
+        self.merge()
+        self.track_the_release_branch_only()
         line = self.refused()
         self.assertIn("origin/develop", line)
-        self.assertIn("git fetch", line)
+        self.assertNotIn("squash", line)  # not the merge-commit message
+
+    def test_the_advised_command_serves_this_release_and_the_next(self):
+        # review round 2 F4: after the command the refusal names, this release passes, and so
+        # does the next one, whose merged side is newer than the origin/develop of today
+        self.merge()
+        self.track_the_release_branch_only()
+        git(self.advised(self.refused()), self.repo)
+        code, out = run_cli(["release", VERSION])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(self.origin_tag(), self.sha())
+        today = self.sha("refs/remotes/origin/develop")
+        self.on_develop("next.txt")
+        # as when the commit reached origin from another clone: this checkout has not seen it
+        git(["update-ref", "refs/remotes/origin/develop", today], self.repo)
+        self.merge()
+        head = self.sha()
+        self.assertEqual(len(self.parents()), 2)
+        self.assertNotEqual(self.parents()[1], today)
+        code, out = run_cli(["release", "4.5.7"])
+        self.assertEqual(code, EXIT_OK, out)
+        self.assertEqual(self.sha("v4.5.7^{commit}"), head)
+        self.assertEqual(len(self.creates()), 2)
 
 
 class AFailedFetch(TwoBranchCase):
