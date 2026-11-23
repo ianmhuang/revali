@@ -137,8 +137,9 @@ there is used as written.
    its URL and exits 0. Once the tag is on origin on HEAD the rerun does not check CI again:
    when `revali release` pushed it, the check ran before the push, and a workflow that runs
    on every push runs for the tag too, on the same commit; a tag pushed by hand is taken as
-   it is, with no CI check. `--dry-run` runs the checks and prints the commands it would
-   run and the notes it would publish. By hand, the same three steps are below; GitHub's
+   it is, with no CI check. `--dry-run` runs the checks and prints a line naming the
+   release branch and the base it checked against, then the commands it would run and the
+   notes it would publish. By hand, the same three steps are below; GitHub's
    `--generate-notes` lists the Internal Changes section open, as release.yml has no way to
    fold a section:
 

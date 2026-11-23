@@ -242,10 +242,10 @@ stated.
 - on `revali release <version>` (human-started, on the base branch, or on `[project]
   release_branch` when it names another branch): `git fetch origin <base>` (with a
   release branch, `git fetch origin <release branch>` and then `git fetch origin <base>`,
-  and the reads `git rev-list --parents`, `git merge-base --is-ancestor` and
-  `git diff --name-only` for its merge check), `git ls-remote origin` for the tag, and
-  the reads `gh repo view`, `gh api` of
-  HEAD's check runs and `gh release view`; when the Release does not exist yet, `gh api -X
+  and the reads `git rev-list --parents`, `git merge-base --is-ancestor`,
+  `git rev-parse <commit>^{tree}` and `git diff --name-only` for its merge check),
+  `git ls-remote origin` for the tag, and the reads `gh repo view`, `gh api` of HEAD's
+  check runs and `gh release view`; when the Release does not exist yet, `gh api -X
   POST repos/{owner}/{repo}/releases/generate-notes` for the notes (GitHub stores nothing
   for it); when every check passes, an annotated tag `v<version>` on HEAD (`git tag -a`),
   `git push origin refs/tags/v<version>`, and a GitHub Release for it (`gh release create

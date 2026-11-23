@@ -224,6 +224,18 @@ class Refuses(TwoBranches):
         out = self.assert_refused(["release", "7.8.9"], "tree")
         self.assertIn("feature.txt", self.error_lines(out)[0])
 
+    def test_a_submodule_pointer_on_main_with_diff_ignoring_submodules(self):
+        # review round 2 follow-up: the user's `diff.ignoreSubmodules = all` hides a
+        # gitlink from `git diff`; the trees still differ
+        pointer = "%s,%s,vendor/lib" % ("160000", self.head())
+        git(["update-index", "--add", "--cacheinfo", pointer], self.repo)
+        git(["commit", "-q", "-m", "submodule pointer on main"], self.repo)
+        git(["push", "-q", "origin", "main"], self.repo)
+        self.merge_release()
+        git(["config", "diff.ignoreSubmodules", "all"], self.repo)
+        out = self.assert_refused(["release", "7.8.9"], "tree")
+        self.assertIn("vendor/lib", self.error_lines(out)[0])
+
     def test_the_dry_run_refuses_the_same_way(self):
         git(["merge", "-q", "--ff-only", "develop"], self.repo)
         git(["push", "-q", "origin", "main"], self.repo)
@@ -253,9 +265,23 @@ class Failures(TwoBranches):
         git(["config", "remote.origin.fetch", refspec], self.repo)
         git(["update-ref", "-d", "refs/remotes/origin/develop"], self.repo)
         out = self.assert_refused(["release", "7.8.9"], "origin/develop")
-        self.assertIn(
-            "git fetch origin develop:refs/remotes/origin/develop", self.error_lines(out)[0]
-        )
+        advice = "git remote set-branches --add origin develop"
+        self.assertIn(advice, self.error_lines(out)[0])
+        # review round 2 F4: the advice fixes the checkout for later releases too, so a
+        # develop that moved on since is fetched into origin/develop
+        git(["remote", "set-branches", "--add", "origin", "develop"], self.repo)
+        code, out = run(["release", "7.8.9"])
+        self.assertEqual(code, EXIT_OK, out)
+        git(["checkout", "-q", "develop"], self.repo)
+        git(["merge", "-q", "--ff-only", "origin/main"], self.repo)
+        self.write("next.txt", "the next release\n")
+        self.commit_all("next change")
+        git(["push", "-q", "origin", "develop"], self.repo)
+        git(["update-ref", "-d", "refs/remotes/origin/develop"], self.repo)  # as if stale
+        git(["checkout", "-q", "main"], self.repo)
+        self.merge_release()
+        code, out = run(["release", "7.9.0"])
+        self.assertEqual(code, EXIT_OK, out)
 
 
 class DryRun(TwoBranches):

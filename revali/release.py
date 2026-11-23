@@ -186,6 +186,14 @@ def check_ci(sha: str, root: str) -> str:
     return "CI checks green on HEAD (%d)" % len(checks)
 
 
+def _tree(commit: str, root: str) -> str:
+    """The tree object of a commit; Failed when git cannot read it."""
+    res = _git(["rev-parse", "--verify", "--quiet", "%s^{tree}" % commit], root)
+    if not res.ok:
+        raise Failed("git rev-parse %s^{tree} failed: %s" % (commit[:12], one_line(res.text)))
+    return res.stdout.strip()
+
+
 def check_release_merge(head: str, target: str, base: str, root: str) -> None:
     """Refused unless HEAD on the release branch is a merge commit of two parents whose
     second parent, the side the release pull request merged, is on `origin/<base>` and
@@ -205,10 +213,12 @@ def check_release_merge(head: str, target: str, base: str, root: str) -> None:
     if not gitops.rev_parse(ancestor, root):
         # the fetch succeeded but filled FETCH_HEAD only: a refspec that leaves the base out
         # (a `--single-branch` clone)
+        # (review round 2 F4) the advice adds the base to the refspec, so every later
+        # `git fetch origin <base>` moves origin/<base> too, not only this one
         raise Refused(
             "origin/%s is missing after `git fetch origin %s` (the remote's fetch refspec "
-            "leaves it out); run `git fetch origin %s:refs/remotes/origin/%s` and try again"
-            % (base, base, base, base)
+            "leaves it out); run `git remote set-branches --add origin %s` and try again"
+            % (base, base, base)
         )
     res = _git(["merge-base", "--is-ancestor", merged, ancestor], root)
     if res.returncode == 1:
@@ -220,13 +230,18 @@ def check_release_merge(head: str, target: str, base: str, root: str) -> None:
     if not res.ok:
         raise Failed("git merge-base --is-ancestor failed: %s" % one_line(res.text))
     # the merge's own tree, not only its history: a commit made straight on the release
-    # branch below the merge, or an edit in the merge itself, leaves the trees different
-    res = _git(["diff", "--name-only", "--no-renames", merged, head, "--"], root)
-    if not res.ok:
-        raise Failed("git diff %s %s failed: %s" % (merged[:12], head[:12], one_line(res.text)))
-    paths = [ln for ln in res.stdout.splitlines() if ln.strip()]
-    if paths:
-        shown = ", ".join(paths[:5]) + (" and %d more" % (len(paths) - 5) if len(paths) > 5 else "")
+    # branch below the merge, or an edit in the merge itself, leaves the trees different.
+    # The trees are compared as objects; `git diff` only names the paths, as the user's
+    # `diff.ignoreSubmodules` can hide a submodule pointer from it (review round 2)
+    if _tree(merged, root) != _tree(head, root):
+        args = ["diff", "--name-only", "--no-renames", "--ignore-submodules=none"]
+        res = _git(args + [merged, head, "--"], root)
+        if not res.ok:
+            raise Failed("git diff %s %s failed: %s" % (merged[:12], head[:12], one_line(res.text)))
+        paths = [ln for ln in res.stdout.splitlines() if ln.strip()]
+        more = len(paths) - 5
+        shown = ", ".join(paths[:5]) + (" and %d more" % more if more > 0 else "")
+        shown = shown or "paths git diff does not list"
         raise Refused(
             "the tree of HEAD %s differs from the side it merged (%s, on origin/%s) in %s, "
             "so the release would carry changes not reviewed there; bring them to %s "
