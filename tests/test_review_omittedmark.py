@@ -105,7 +105,7 @@ class OmittedTestFilesAreMarked(RepoCase):
 
     def test_a_test_renamed_to_an_excluded_name_is_marked_under_its_old_name(self):
         """AC-1: the new name matches the exclude, so the rename is not in the diff; the line
-        lists the old name, marked, and not the new one"""
+        lists the old name, marked. Since M4.8 the new name appears only inside that mark."""
         new = "tests/calc.golden"
         self.exclude("*.golden")
         git(["mv", CALC, new], self.repo)
@@ -114,8 +114,12 @@ class OmittedTestFilesAreMarked(RepoCase):
         self.assertNotIn(new, shown(prompt))
         line = listed(prompt)
         self.assertTrue(line.startswith(CALC + " "), line)
-        self.assertNotIn(new, line)
-        self.assert_marked(notes(line, [CALC])[CALC])
+        note = notes(line, [CALC])[CALC]
+        self.assert_marked(note)
+        # M4.8: the new name is in the mark (git diff on the old name alone shows a deletion),
+        # and nowhere else on the line
+        self.assertIn(new, note)
+        self.assertEqual(line.count(new), 1, line)
 
     def test_a_test_renamed_out_of_an_excluded_name_is_unmarked_next_to_a_marked_one(self):
         """AC-1, AC-2: both old names match the exclude. The one renamed to a name off the
