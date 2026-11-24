@@ -32,7 +32,7 @@ prompt or schema;
 bench/README.md says a $15 budget is only sure to reach a third case with a lower
 `--session-budget-usd`, and that the expected description is cut to 200 characters; the
 `connect_timeout_s` comment in templates/revali.toml and defaults.toml says that for wsl it
-sets how long the preflight probe waits (it + 60 s) (this release).
+bounds each preflight probe call (at it + 60 s) (this release).
 
 Known issues:
 - prompts/diagnose.md heads the failed step's output "(last $log_lines lines)", but on the
@@ -40,6 +40,12 @@ Known issues:
   standard error of 200 lines or more pushes out what the test runner printed on standard
   output; the wsl and ssh runners write one interleaved log, where the heading holds.
   Fixing it changes the prompt or the local runner, which a release change does not do.
+- Two sentences of released sections are inexact, and released sections are not
+  rewritten: 0.7.0's "`revali release --dry-run` prints a first line" names a line that
+  comes after the `repo:` line and the check lines (docs/releasing.md has it right), and
+  0.6.0's hint sentence says both hints suggest an answer "instead of another round",
+  which only the READY TO MERGE hint does; after CHANGES_REQUESTED the next round still
+  runs (docs/workflow.md has it right).
 
 ## 0.7.0 - 2026-11-23
 

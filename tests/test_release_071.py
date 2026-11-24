@@ -111,6 +111,23 @@ class Changelog(unittest.TestCase):
         # the 0.7.0 known issue is closed, not carried forward
         self.assertNotIn("Existing test files", text)
 
+    def test_known_issue_names_the_inexact_released_sentences(self):
+        # review round 1 F2: the audit's two lows on released sections get a pointer here,
+        # as the sections themselves are not rewritten
+        text = part("Known issues")
+        for needle in (
+            '0.7.0\'s "`revali release --dry-run` prints a first line"',
+            "docs/releasing.md has it right",
+            "0.6.0's hint sentence",
+            '"instead of another round"',
+            "docs/workflow.md has it right",
+        ):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
+        changelog = raw("CHANGELOG.md")
+        self.assertIn("`revali release --dry-run` prints a first line", changelog)
+        self.assertIn("instead of another round (#116)", " ".join(changelog.split()))
+
     def test_the_heading_the_known_issue_quotes_is_still_there(self):
         self.assertIn(
             "## Output of the failed step (last $log_lines lines)", raw("prompts", "diagnose.md")
@@ -166,7 +183,8 @@ class AuditLows(unittest.TestCase):
                 self.assertNotIn("ssh only", line[0])
                 # the comment goes on over the next line, which starts with its own `#`
                 comment = " ".join(raw(*parts).replace("#", " ").split())
-                self.assertIn("wsl: the preflight probe waits this + 60 s", comment)
+                # review round 1 F1: an upper bound of each call, not a wait
+                self.assertIn("wsl: each preflight probe call is bounded at this + 60 s", comment)
 
 
 class PromptVersionReason(unittest.TestCase):
