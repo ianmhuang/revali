@@ -7,8 +7,9 @@ what the three runners need.
 filesystem (`sandbox_dir`, default
 `~/.revali/sandbox/<repo>/<branch>-<key>/<label>/`, where `<repo>` is the
 checkout's directory name, `<branch>` is the run's branch with `/` written
-as `__`, and `<key>` is 8 hex characters derived from the checkout's real
-path and the exact branch name, so worktrees of one repository, repositories
+as `__` and any other character outside `[A-Za-z0-9._-]` as `_`, and `<key>`
+is 8 hex characters derived from the checkout's real path and the exact
+branch name, so worktrees of one repository, repositories
 whose directories share a name, and branches such as `feature/x` and
 `feature__x` validate side by side, while one checkout and branch keep the
 same directory from run to run; `<label>` names the session, such as

@@ -15,6 +15,7 @@ ROOT = os.path.dirname(HERE)
 
 HEADING = re.compile(r"^## (\d+)\.(\d+)\.(\d+) - (\d{4})-(\d{2})-(\d{2})$")
 RELEASED = (
+    ("0.7.1", "2026-11-24"),
     ("0.7.0", "2026-11-23"),
     ("0.6.0", "2026-11-23"),
     ("0.5.0", "2026-11-21"),
@@ -183,6 +184,7 @@ class Changelog(unittest.TestCase):
                 "Known issues",
             ),
             "0.7.0": ("PR #119 and #120", "#119", "#120", "Upgrading", "Known issues"),
+            "0.7.1": ("PR #122 and #123", "#122", "#123", "Upgrading", "Known issues"),
         }
         for version, needles in expected.items():
             body = section(self.text, version)

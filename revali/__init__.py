@@ -1,7 +1,7 @@
 """revali - headless review / validate / merge pipeline for feature branches."""
 
 NAME = "revali"
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 CONFIG_VERSION = 1
 STATE_VERSION = 11  # 11: `validated_sha`; 10: stage `closed`, `merged_outside`
 # bumped when the reviewer's prompt as revali renders it, its schema or a checklist changes: a

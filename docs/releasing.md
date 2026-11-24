@@ -17,8 +17,9 @@ are not audited.
 Each session goes through revali's engine for the review role, read-only: it reads the
 repository with its file tools, cannot edit and cannot run commands. It answers in
 [tools/doc_audit.schema.json](../tools/doc_audit.schema.json); the prompt is
-[tools/doc_audit_prompt.txt](../tools/doc_audit_prompt.txt). Neither is under `prompts/` or
-`schemas/`, so changing them does not change `PROMPT_VERSION`. A finding has a severity:
+[tools/doc_audit_prompt.txt](../tools/doc_audit_prompt.txt). They are not the Reviewer's
+prompt or schema, so changing them does not change `PROMPT_VERSION`. A finding has a
+severity:
 
 - high: following the document fails or misleads about a public interface (a flag, a key,
   an exit code, a file or a side effect that does not exist or behaves otherwise)
@@ -180,7 +181,8 @@ is refused with a message saying to merge it with a merge commit. A merge of a b
 never reached `develop`, such as a hotfix branch merged straight into `main`, is refused too;
 so is a release merge whose tree differs from `develop`'s, which happens when a commit was
 made straight on `main` below it or the merge commit itself changed something (a conflict
-resolution), and the message names the paths that differ. The fix goes to `develop` first,
+resolution), and the message names the paths that differ (the first five, then a count of
+the rest). The fix goes to `develop` first,
 by a cherry-pick or a merge of `main` into `develop`, and comes back in the next release
 pull request. The tag, the
 generated notes and the GitHub Release all use that merge commit, and a rerun finishes a

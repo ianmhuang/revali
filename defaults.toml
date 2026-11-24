@@ -91,7 +91,8 @@ distro = "Ubuntu"                    # wsl only
 host = ""                            # ssh only: an ssh destination or ~/.ssh/config alias
 network = false
 command_timeout_min = 15
-connect_timeout_s = 15               # ssh only: ConnectTimeout, and the budget for short remote commands
+connect_timeout_s = 15               # ssh: ConnectTimeout, and the budget for short remote commands;
+                                     # wsl: each preflight probe call is bounded at this + 60 s
 transfer_timeout_min = 10            # ssh only: one scp transfer (inputs up, logs down)
 wsl_retries = 2                      # wsl only: retries of a wsl.exe call that failed with a
                                      # wsl_transient_errors pattern; 0 = no retry
