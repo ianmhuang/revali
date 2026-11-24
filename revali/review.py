@@ -129,8 +129,16 @@ def assemble_checklist(ctx: Context) -> str:
     return "\n\n".join(parts) if parts else "(no checklist configured)"
 
 
-# after a listed test file the review's diff leaves out (`[review] exclude`)
+# after a listed test file the review's diff leaves out (`[review] exclude`); a rename names
+# its new path (`%s`), since `git diff` on the old name alone shows a deletion
 OMITTED_TEST_MARK = "(omitted from the diff above; `git diff` shows its change)"
+RENAMED_TEST_MARK = (
+    "(renamed to %s; omitted from the diff above; `git diff` on both names shows its change)"
+)
+
+
+def _omitted_mark(names: Tuple[str, ...]) -> str:
+    return RENAMED_TEST_MARK % names[-1] if len(names) > 1 else OMITTED_TEST_MARK
 
 
 def modified_tests_value(ctx: Context, exclude: List[str], drop: Collection[str]) -> str:
@@ -138,10 +146,11 @@ def modified_tests_value(ctx: Context, exclude: List[str], drop: Collection[str]
     deletes or renames (a rename under its old name), whatever their name: an earlier
     change's reviewer test is listed like any other. A file the branch adds is not on the
     base and not listed. A file the review's diff leaves out (`gitops.left_out`) stays
-    listed, so its change still gets a `test_changes` entry, followed by OMITTED_TEST_MARK."""
+    listed, so its change still gets a `test_changes` entry, followed by OMITTED_TEST_MARK, or
+    by RENAMED_TEST_MARK with its new path when it is a rename."""
     test_dir = ctx.cfg.project.test_dir
     out = [
-        names[0] + (" " + OMITTED_TEST_MARK if gitops.left_out(names, exclude, drop) else "")
+        names[0] + (" " + _omitted_mark(names) if gitops.left_out(names, exclude, drop) else "")
         for status, names in gitops.name_status(ctx.base_ref, "HEAD", ctx.repo_root)
         if status in ("M", "D", "R", "T") and under_test_dir(names[0], test_dir)
     ]

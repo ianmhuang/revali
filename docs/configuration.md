@@ -194,6 +194,20 @@ A commit-mode run that finds that directory non-empty (rounds in archive
 mode, then a `reset` and the key switched) logs the files it will never
 use, on `run --dry-run` too; delete the directory yourself, or they move
 to `archive_dir` with the rest at merge.
+
+`[review] exclude` (default `[]`) lists the changed files the review leaves out. A
+pattern matches a file's whole path, its file name, or a `dir/**` prefix; a renamed
+file is judged by its new name. The reviewer's test pattern (`test_file_pattern`)
+leaves files out the same way, but only the files the branch adds; a file already on
+the base, an earlier change's reviewer test included, is reviewed and counted like any
+other change. So is a file git reports as renamed from a base file the branch deletes
+(renames are found at 50% similarity), even when the reviewer wrote it on this branch.
+The files left out are missing from the reviewer's diff (the prompt names them), from
+preflight's diff size and from the related documents below. A test file already on the
+base that `exclude` leaves out stays on the prompt's list of existing test files the
+change modifies, deletes or renames, marked as omitted from the diff (with its new path
+when it was renamed), so the reviewer still judges its change.
+
 `[review] doc_roots` (default `["README.md", "CONVENTIONS.md",
 "CLAUDE.md"]`) are the roots of the project's documentation graph: every
 file reachable from them through relative Markdown links, at any depth. The
@@ -203,18 +217,8 @@ or removes: a word with a `_`, `-`, `.`, `/` or camelCase hump (`max_procs`,
 `--branch`; not `run`) found as a whole word on a changed line of another
 file, or a changed file's whole path. The changed lines of files under `test_dir` do not
 count (a test's identifiers would list documents the change does not concern); a link to a
-test file, or its whole path, does. Files the diff
-leaves out do not count: `[review] exclude` and the reviewer's test pattern,
-each matching a changed file's whole path, its file name, or a `dir/**`
-prefix (a renamed file by its new name). The test pattern leaves out only the
-files the branch adds; a file already on the base, an earlier change's
-reviewer test included, is reviewed and counted like any other change. So is
-a file git reports as renamed from a base file the branch deletes (renames are
-found at 50% similarity), even when the reviewer wrote it on this branch. The
-same files are left out of the reviewer's diff and of preflight's diff size. A test
-file already on the base that `exclude` leaves out stays on the prompt's list of
-existing test files the change modifies, deletes or renames, marked as omitted from
-the diff, so the reviewer still judges its change. Documents
+test file, or its whole path, does. Files the review leaves out (`[review] exclude` and
+the test pattern, above) do not count. Documents
 outside the graph are not searched, and a document the diff changes itself
 is marked so. The list ends with a map of the graph's documents and their
 depth, at most `doc_map_max` of them (default 100; 0 leaves the map out).

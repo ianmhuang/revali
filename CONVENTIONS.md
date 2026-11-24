@@ -33,8 +33,10 @@ Things a linter cannot check; formatting is not listed.
 ## Behaviour changes
 - Every behaviour change ships with a test in `tests/` built on
   `tests/helpers.RepoCase` (fake `gh` / `claude` / runner, real `git`).
-- Changing `prompts/`, `schemas/`, or `checklists/` bumps `PROMPT_VERSION` in
-  [revali/__init__.py](revali/__init__.py); changing the state file layout bumps `STATE_VERSION`.
+- A change to the reviewer's prompt as revali renders it, its schema or a checklist (a file
+  under `prompts/`, `schemas/` or `checklists/`, or the code that fills the prompt) bumps
+  `PROMPT_VERSION` in [revali/__init__.py](revali/__init__.py); changing the state file layout
+  bumps `STATE_VERSION`.
 - Existing tests are not weakened to make a change pass; if an assertion
   must change, the change description says why.
 

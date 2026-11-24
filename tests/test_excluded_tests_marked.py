@@ -1,16 +1,18 @@
 """fix/excluded-tests-marked (M4.7): an existing test file that `[review] exclude` cuts from the
 reviewer's diff stays on the prompt's "Existing test files ..." line, marked as omitted from the
 diff above with a pointer to `git diff`; a listed file the diff shows is not marked.
+fix/rename-mark-path (M4.8): for a rename into an excluded name the mark names the new path.
 
 The fixture's main carries tests/test_calc.py; feature/mul adds a `mul` function. Each test
 commits its own `[review] exclude` on the branch.
 """
 
+import os
 import re
 
 from revali import PROMPT_VERSION
 from revali.preflight import preflight
-from revali.review import OMITTED_TEST_MARK, build_prompt
+from revali.review import OMITTED_TEST_MARK, RENAMED_TEST_MARK, build_prompt
 from revali.state import State
 from tests.helpers import RepoCase, git
 
@@ -68,14 +70,36 @@ class ExcludedTestFiles(RepoCase):
         self.assertEqual(modified_line(self.build()), marked(CALC))
 
     def test_a_test_renamed_into_an_excluded_name_is_marked_under_its_old_name(self):
-        """AC-1"""
+        """AC-1 (M4.7), AC-1 (M4.8): the mark names the new path, since `git diff` on the old
+        name alone shows a deletion"""
+        new = "tests/golden/test_calc.py"
         self.exclude("tests/golden/**")
-        self.write("tests/golden/test_calc.py", self.read(CALC))
+        self.write(new, self.read(CALC))
         git(["rm", "-q", CALC], self.repo)
         self.commit_all("move test_calc under golden")
         prompt = self.build()
-        self.assertNotIn("tests/golden/test_calc.py", diff_block(prompt))
-        self.assertEqual(modified_line(prompt), marked(CALC))
+        self.assertNotIn(new, diff_block(prompt))
+        self.assertEqual(modified_line(prompt), "%s %s" % (CALC, RENAMED_TEST_MARK % new))
+        note = RENAMED_TEST_MARK % new
+        self.assertIn("renamed to %s" % new, note)
+        self.assertIn("omitted from the diff above", note)
+        self.assertIn("`git diff` on both names", note)
+
+    def test_the_other_mark_is_word_for_word_the_m47_one(self):
+        """AC-2 (M4.8)"""
+        self.assertEqual(
+            OMITTED_TEST_MARK, "(omitted from the diff above; `git diff` shows its change)"
+        )
+
+    def test_a_type_change_of_an_excluded_test_keeps_the_plain_mark(self):
+        """AC-2 (M4.8): a file that becomes a symlink keeps one name and the M4.7 mark"""
+        if os.name == "nt":  # git there may store a link as a plain file (core.symlinks)
+            self.skipTest("symlinks are not reliable in a Windows checkout")
+        self.exclude("test_calc.py")
+        git(["rm", "-q", CALC], self.repo)
+        os.symlink("test_other_target.py", os.path.join(self.repo, CALC))
+        self.commit_all("test_calc becomes a link")
+        self.assertEqual(modified_line(self.build()), marked(CALC))
 
     def test_a_test_renamed_out_of_an_excluded_name_is_not_marked(self):
         """AC-2: the diff shows it under its new name"""
@@ -122,3 +146,7 @@ class Version(RepoCase):
     def test_prompt_version(self):
         """AC-3"""
         self.assertGreaterEqual(int(PROMPT_VERSION), 19)
+
+    def test_prompt_version_after_the_rename_mark(self):
+        """AC-3 (M4.8)"""
+        self.assertGreaterEqual(int(PROMPT_VERSION), 20)
