@@ -111,7 +111,7 @@ everything between them is automatic. Exit codes: `0` done / ready to merge,
 `1` pipeline error (not a verdict), `2` the Developer must act (fix, rebase,
 answer a question), `3` a human must decide, `4` (`wait` only) still running.
 
-Status: package version 0.7.0; [CHANGELOG.md](CHANGELOG.md) lists what each release
+Status: package version 0.7.1; [CHANGELOG.md](CHANGELOG.md) lists what each release
 contains. Verified end to end on a private GitHub repository with real Reviewer sessions
 and real WSL and ssh sandboxes ([docs/sandbox.md](docs/sandbox.md) has the record);
 revali reviews its own changes on this public one.
@@ -187,9 +187,9 @@ python tests/run_parallel.py tests.test_pipeline    # a module, a class or a tes
 python -m unittest discover -s tests -t .           # the same tests, serially
 python tests/fixtures/make_sample_repo.py "<dir>"   # throwaway sample project
 python tools/backfill_archive.py owner/name         # rebuild the archive of PRs merged before archive_dir existed
-python tools/review_bench.py --dry-run              # the reviewer benchmark over bench/cases/; without --dry-run it spends
+python tools/review_bench.py --dry-run              # the reviewer benchmark over bench/cases/; without --dry-run it spends and needs --budget-usd
 python tools/bench_case.py --list <repo archive>    # the rounds a benchmark case can be built from (bench/README.md)
-python tools/doc_audit.py --dry-run                 # the documentation audit; without --dry-run it spends (docs/releasing.md)
+python tools/doc_audit.py --dry-run                 # the documentation audit; without --dry-run it spends and needs --budget-usd (docs/releasing.md)
 ```
 
 Tests use a fake `gh` (via `REVALI_GH_CMD`) and real `git` in temp repos; every

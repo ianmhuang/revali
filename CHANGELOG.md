@@ -4,6 +4,43 @@ One section per release, newest first, dated by its tag. A section is written wh
 release is made ([docs/releasing.md](docs/releasing.md)); changes merged since the newest
 section are not listed until then.
 
+## 0.7.1 - 2026-11-24
+
+An existing test file that `[review] exclude` leaves out of the Reviewer's diff stays on
+the prompt's list of existing test files, marked as omitted and, when renamed, with its new
+path (PR #122 and #123).
+
+Upgrading from 0.7.0:
+- PROMPT_VERSION goes from 18 to 20. #122 (19): the prompt line "Existing test files this
+  diff modifies" keeps a test file the diff leaves out by `[review] exclude` and marks it
+  "(omitted from the diff above; `git diff` shows its change)", so the list and the line
+  after it no longer disagree; this closes the 0.7.0 known issue. #123 (20): for a renamed
+  test file the mark names the new path and says to give `git diff` both names, as
+  `git diff` on the old name alone shows a deletion.
+- Unchanged: the `revali.toml` keys, the `defaults.toml` values, the exit codes, and the
+  layout of `state.json`.
+
+Documentation: docs/configuration.md gives `[review] exclude` a paragraph of its own, and
+CONVENTIONS.md says a change to the reviewer's prompt as revali renders it, including the
+code that fills it, bumps `PROMPT_VERSION` (#123). From the 0.7.1 audit: README says
+`tools/review_bench.py` and `tools/doc_audit.py` need `--budget-usd` without `--dry-run`;
+docs/sandbox.md says the branch part of the sandbox directory's name has `/` written as
+`__` and any other character outside `[A-Za-z0-9._-]` as `_`; docs/releasing.md says the
+tree-differs refusal names the first five paths and a count of the rest, and that the
+audit's prompt and schema leave `PROMPT_VERSION` alone because they are not the Reviewer's
+prompt or schema;
+bench/README.md says a $15 budget is only sure to reach a third case with a lower
+`--session-budget-usd`, and that the expected description is cut to 200 characters; the
+`connect_timeout_s` comment in templates/revali.toml and defaults.toml says that for wsl it
+sets how long the preflight probe waits (it + 60 s) (this release).
+
+Known issues:
+- prompts/diagnose.md heads the failed step's output "(last $log_lines lines)", but on the
+  `local` runner that text is the end of standard output followed by standard error, so a
+  standard error of 200 lines or more pushes out what the test runner printed on standard
+  output; the wsl and ssh runners write one interleaved log, where the heading holds.
+  Fixing it changes the prompt or the local runner, which a release change does not do.
+
 ## 0.7.0 - 2026-11-23
 
 `revali release` for a project that reviews on one branch and releases from another, and a

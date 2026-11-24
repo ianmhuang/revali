@@ -32,7 +32,8 @@ and a case name found in two directories stops the run before anything starts.
 `--budget-usd` is required for a real run. Before each case the tool adds that session's own cap (`[review]
 budget_usd` of the case's repository, or `--session-budget-usd`) to what it has spent; when
 that would pass the budget the case and every later one are reported as `not-run`. revali's
-own cap is $8, so a $15 budget runs three cases only with a lower `--session-budget-usd`. A
+own cap is $8, so a $15 budget is only sure to reach a third case with a lower
+`--session-budget-usd`: at the $8 cap the third runs only if the first two spent $7 or less. A
 session that fails still costs what it spent, and that counts; one that fails without saying
 what it spent (a timeout, output that is not JSON) counts as its whole cap against the
 budget, and its line says the cost is unknown. `--model` sets the reviewer model for every
@@ -188,7 +189,8 @@ What the builder takes from the archive:
   leaves it out). The replayed description then differs from the original round in that
   section only; a test fails when a committed Request has a non-ASCII character.
 - `[expected]`: `file` and `line` of the finding, and its first sentence as the
-  description.
+  description, without its full stop and cut to 200 characters ending in `...` when it is
+  longer.
 - `[source]`: the PR, the round and the finding id. A case from a later round is replayed
   as a first round: the reviewer sees the whole diff at that head, without the earlier
   rounds' findings.

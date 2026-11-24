@@ -73,7 +73,8 @@ distro = "Ubuntu"                 # wsl only
 # wsl_transient_errors = ["Wsl/Service/WSAETIMEDOUT"]   # wsl only: what counts as transient
 # host = "user@box"               # ssh only, and required there; port and key come
 #                                 # from ~/.ssh/config
-# connect_timeout_s = 15          # ssh only; default from defaults.toml
+# connect_timeout_s = 15          # ssh: ConnectTimeout and short remote commands; wsl: the
+#                                 # preflight probe waits this + 60 s; default from defaults.toml
 # transfer_timeout_min = 10       # ssh only; one scp transfer
 command_timeout_min = 15
 # max_procs = 4096                # wsl and ssh: ulimit -u, shared by all of the user's processes
