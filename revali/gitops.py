@@ -233,7 +233,19 @@ def left_out(
     (the new one, for a rename) matches a pattern by `matches_any`, or is one of the paths in
     `drop`. A rename left out is left out under both names, so its old name is not shown as a
     deletion; a file renamed out of an excluded name is reviewed like any other."""
-    return (bool(exclude) and matches_any(names[-1], exclude)) or names[-1] in drop
+    return left_out_by(names, exclude, drop) is not None
+
+
+def left_out_by(
+    names: Tuple[str, ...], exclude: Optional[List[str]], drop: Collection[str] = ()
+) -> Optional[str]:
+    """Why `left_out` leaves the file out: "exclude" when a pattern matches (checked first),
+    "drop" when it is one of the paths in `drop`, None when the file is kept."""
+    if exclude and matches_any(names[-1], exclude):
+        return "exclude"
+    if names[-1] in drop:
+        return "drop"
+    return None
 
 
 def _plain_name(name: str) -> bool:
