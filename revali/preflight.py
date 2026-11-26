@@ -319,28 +319,68 @@ def review_left_out(ctx: Context) -> Tuple[List[str], FrozenSet[str]]:
     return list(ctx.cfg.review.exclude), drop
 
 
+SIZE_LIST_MAX = 5  # files a refusal over max_diff_lines names in each of its two lists
+LEFT_OUT_REASON = {"exclude": "[review] exclude", "drop": "reviewer test"}
+
+
 def check_diff_size(ctx: Context) -> None:
     cfg = ctx.cfg
     exclude, drop = review_left_out(ctx)
     total = 0
     files = []
+    counted: List[Tuple[int, str, str]] = []
+    left: List[Tuple[int, str, str]] = []
     for added, deleted, names in gitops.diff_numstat(ctx.base_ref, "HEAD", ctx.repo_root):
         path = names[-1]  # a rename is listed under its new name
-        if gitops.left_out(names, exclude, drop):
+        why = gitops.left_out_by(names, exclude, drop)
+        if why is not None:
             ctx.excluded_files.append(path)
+            left.append((added + deleted, path, LEFT_OUT_REASON[why]))
             continue
         total += added + deleted
         files.append(path)
+        counted.append((added + deleted, path, ""))
     ctx.diff_lines = total
     ctx.changed_files = files
     if not files and not ctx.excluded_files:
         raise Stop(EXIT_ERROR, "the diff against %s is empty" % ctx.base_ref)
     if total > cfg.review.max_diff_lines:
-        raise Stop(
-            EXIT_ACTION,
-            "diff is %d lines (limit %d); split the change into smaller PRs"
-            % (total, cfg.review.max_diff_lines),
+        head = "diff is %d lines (limit %d); split the change into smaller PRs" % (
+            total,
+            cfg.review.max_diff_lines,
         )
+        raise Stop(EXIT_ACTION, "\n".join([head] + size_breakdown(counted, left)))
+
+
+def size_breakdown(
+    counted: List[Tuple[int, str, str]], left: List[Tuple[int, str, str]]
+) -> List[str]:
+    """The lines under a refusal over max_diff_lines: the counted files, then the files the
+    count left out (only when there are any). Each entry is (lines, path, reason)."""
+    out = ["counted, largest first:"] + _largest(counted)
+    if left:
+        out += ["left out of the count:"] + _largest(left)
+    return out
+
+
+def _largest(entries: List[Tuple[int, str, str]]) -> List[str]:
+    """At most SIZE_LIST_MAX entries, most lines first and equal counts by path, then one
+    line for the rest."""
+    order = sorted(entries, key=lambda e: (-e[0], e[1]))
+    shown, rest = order[:SIZE_LIST_MAX], order[SIZE_LIST_MAX:]
+    out = ["  %d  %s%s" % (n, path, " (%s)" % why if why else "") for n, path, why in shown]
+    if rest:
+        lines = sum(e[0] for e in rest)
+        out.append(
+            "  ... and %d more %s, %d %s"
+            % (
+                len(rest),
+                "file" if len(rest) == 1 else "files",
+                lines,
+                "line" if lines == 1 else "lines",
+            )
+        )
+    return out
 
 
 def check_secrets(ctx: Context) -> None:

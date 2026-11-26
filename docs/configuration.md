@@ -206,7 +206,10 @@ The files left out are missing from the reviewer's diff (the prompt names them),
 preflight's diff size and from the related documents below. A test file already on the
 base that `exclude` leaves out stays on the prompt's list of existing test files the
 change modifies, deletes or renames, marked as omitted from the diff (with its new path
-when it was renamed), so the reviewer still judges its change.
+when it was renamed), so the reviewer still judges its change. When the diff size is over
+`[review] max_diff_lines`, preflight's refusal lists below its first line the counted files
+with the most lines and then the files left out, each with its line count, a file left out
+with its reason (`reviewer test` or `[review] exclude`).
 
 `[review] doc_roots` (default `["README.md", "CONVENTIONS.md",
 "CLAUDE.md"]`) are the roots of the project's documentation graph: every
